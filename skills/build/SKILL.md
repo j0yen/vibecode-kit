@@ -32,10 +32,12 @@ Read the PRD's frontmatter `build_target`:
   requirement Python can't meet).
 - **`product`** → not auto-buildable (vision/process/GTM work). Say so and
   stop; don't force it through a builder.
-- **Missing or ambiguous `build_target`** → default to Python. Treat it as
-  `python-cli`/`python-lib`/`python-agent` (whichever the PRD's shape
-  suggests) and invoke `/pybuilder`. Only fall back to `/rustbuilder` if the
-  PRD body or the user explicitly asks for Rust.
+- **Missing or ambiguous `build_target`** → check `echo $DREAM_DEFAULT_TARGET`.
+  If it's set to `rust`, treat the PRD as `rust-cli`/`rust-lib`/`rust-extend`
+  and invoke `/rustbuilder`. Otherwise (unset or any other value) default to
+  Python: treat it as `python-cli`/`python-lib`/`python-agent` (whichever the
+  PRD's shape suggests) and invoke `/pybuilder`. Either way, an explicit Rust
+  ask in the PRD body or the user's request wins over the env var.
 
 ## Handoff
 

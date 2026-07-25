@@ -22,6 +22,9 @@ Skills install namespaced to this plugin — `/vibecode-kit:dream`,
 `/vibecode-kit:build`, etc. — so they never collide with skills you already
 have under your own name.
 
+The default build target is Python; power users who want Rust by default can
+set `DREAM_DEFAULT_TARGET=rust` in their own environment.
+
 ### Team auto-install
 
 Drop this into a shared repo's `.claude/settings.json` so anyone who opens the

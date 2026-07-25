@@ -161,7 +161,9 @@ process/GTM work). Every PRD gets a `build_target`; a missing one strands the PR
 **Default to `python-*`** (`python-cli` / `python-lib` / `python-agent`) unless the
 seed or topic explicitly calls for Rust — systems-level work, a `cargo`/crate
 target, or an explicitly performance-critical path. When it's ambiguous, pick
-`python-*`; `/pybuilder`'s eval-gated pipeline is the default build path.
+`python-*`; `/pybuilder`'s eval-gated pipeline is the default build path. Check
+`echo $DREAM_DEFAULT_TARGET` first: if it's set to `rust`, default to `rust-*`
+instead for this run; any other value or unset falls back to the `python-*` default.
 
 **PRD body (inverted pyramid):** TL;DR → Problem statement (with Phase 1 citations) →
 Goals / Non-Goals (measurable; non-goals are things a reasonable reader would assume
