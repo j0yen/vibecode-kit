@@ -1,0 +1,9 @@
+{
+  "name": "vibecode-kit",
+  "description": "idea -> /dream -> PRDs -> builders: dream up PRDs, then implement them (Python by default via /pybuilder, Rust via /rustbuilder on request).",
+  "version": "0.1.0",
+  "author": {
+    "name": "Joe Yen"
+  },
+  "skills": ["./skills", "./pybuilder/skill"]
+}

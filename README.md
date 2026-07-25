@@ -7,14 +7,46 @@ Everything referenced by these skills ships in this repo. No private repos, no
 company infrastructure, no cloud build servers. If you have Claude Code and git,
 the kit works; a few optional tools light up extra capability (see below).
 
+## Install as a plugin
+
+This repo is a self-hosted Claude Code plugin marketplace. From Claude Code:
+
+```
+/plugin marketplace add j0yen/vibecode-kit
+/plugin install vibecode-kit@vibecode
+```
+
+Updates arrive with `/plugin marketplace update vibecode`.
+
+Skills install namespaced to this plugin — `/vibecode-kit:dream`,
+`/vibecode-kit:build`, etc. — so they never collide with skills you already
+have under your own name.
+
+### Team auto-install
+
+Drop this into a shared repo's `.claude/settings.json` so anyone who opens the
+project in Claude Code gets the plugin automatically:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "vibecode": { "source": { "source": "github", "repo": "j0yen/vibecode-kit" } }
+  },
+  "enabledPlugins": { "vibecode-kit@vibecode": true }
+}
+```
+
 ## The loop
 
 ```
 idea ──► /dream ───────► PRDs (+ vision doc, in your PRD folder)
               │
-              ├─ build_target: rust-*    ──► /rustbuilder  (local cargo)
-              └─ build_target: python-*  ──► /pybuilder    (eval-gated Python)
+              ├─ build_target: python-*  ──► /pybuilder    (eval-gated Python, DEFAULT)
+              └─ build_target: rust-*    ──► /rustbuilder  (local cargo, on request)
 ```
+
+Handing a PRD to `/build` does this routing for you: Python by default, Rust
+only when the PRD or you explicitly ask for it.
 
 1. **`/dream <topic>`** — listens, gathers evidence, writes a vision, then drafts
    three to seven PRDs to the enterprise PRD standard. Each PRD says what to build,

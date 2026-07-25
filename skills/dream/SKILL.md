@@ -158,6 +158,11 @@ Ship-Independently test.
 `/rustbuilder`, `python-*` → `/pybuilder`, `product` → not auto-buildable (vision/
 process/GTM work). Every PRD gets a `build_target`; a missing one strands the PRD.
 
+**Default to `python-*`** (`python-cli` / `python-lib` / `python-agent`) unless the
+seed or topic explicitly calls for Rust — systems-level work, a `cargo`/crate
+target, or an explicitly performance-critical path. When it's ambiguous, pick
+`python-*`; `/pybuilder`'s eval-gated pipeline is the default build path.
+
 **PRD body (inverted pyramid):** TL;DR → Problem statement (with Phase 1 citations) →
 Goals / Non-Goals (measurable; non-goals are things a reasonable reader would assume
 in scope) → User stories (3–7, persona-tagged; privilege the operator over the

@@ -1,0 +1,16 @@
+{
+  "name": "vibecode",
+  "description": "Self-hosted marketplace for vibecode-kit: idea -> /dream -> PRDs -> builders.",
+  "owner": {
+    "name": "Joe Yen"
+  },
+  "plugins": [
+    {
+      "name": "vibecode-kit",
+      "source": "./",
+      "description": "idea -> /dream -> PRDs -> builders: dream up PRDs, then implement them (Python by default via /pybuilder, Rust via /rustbuilder on request).",
+      "category": "productivity",
+      "keywords": ["prd", "dream", "pybuilder", "rustbuilder", "codegen"]
+    }
+  ]
+}
