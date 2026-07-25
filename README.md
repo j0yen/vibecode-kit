@@ -110,6 +110,7 @@ vibecode-kit/
 ├── install.sh                      # installs all five skills
 ├── skills/
 │   ├── dream/                      # /dream
+│   ├── build/                      # /build — routes a PRD to its builder
 │   ├── rustbuilder/                # /rustbuilder
 │   ├── prd-writer/                 # /prd-writer
 │   └── atscale-prd-writer/         # /atscale-prd-writer
