@@ -9,7 +9,7 @@
 #
 # Skills installed:
 #   /dream               — turn a direction into a fleet of AtScale product PRDs
-#   /rustbuilder         — implement rust-* PRDs with local cargo
+#   /build               — route a PRD to /pybuilder
 #   /pybuilder           — implement python-* PRDs (skill + CLI)
 #   /prd-writer          — shape a personal-project idea into a buildable PRD
 #   /atscale-prd-writer  — the enterprise B2B PRD-writing standard /dream follows
@@ -61,7 +61,7 @@ link_skill() {
 }
 
 link_skill dream               "$REPO_DIR/skills/dream"
-link_skill rustbuilder         "$REPO_DIR/skills/rustbuilder"
+link_skill build               "$REPO_DIR/skills/build"
 link_skill prd-writer          "$REPO_DIR/skills/prd-writer"
 link_skill atscale-prd-writer  "$REPO_DIR/skills/atscale-prd-writer"
 link_skill pybuilder           "$REPO_DIR/pybuilder/skill"
@@ -80,8 +80,7 @@ fi
 # --- doctor ------------------------------------------------------------------
 echo
 echo "Dependency check:"
-command -v git   >/dev/null 2>&1 && echo "  ✓ git"   || echo "  ✗ git   — required by /dream, /rustbuilder"
-command -v cargo >/dev/null 2>&1 && echo "  ✓ cargo" || echo "  – cargo — needed only for /rustbuilder (install via https://rustup.rs)"
-command -v uv    >/dev/null 2>&1 && echo "  ✓ uv"    || echo "  – uv    — needed only for /pybuilder's CLI"
+command -v git >/dev/null 2>&1 && echo "  ✓ git" || echo "  ✗ git — required by /dream"
+command -v uv  >/dev/null 2>&1 && echo "  ✓ uv"  || echo "  – uv  — needed only for /pybuilder's CLI"
 echo
 echo "✓ vibecode-kit installed. Start in Claude Code with: /dream <what you wish existed>"

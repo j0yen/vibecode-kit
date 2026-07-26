@@ -8,8 +8,8 @@ description: >
   platform features. Fully standalone: it discovers its PRD home and optional integrations at
   runtime and works with nothing but Claude Code and git installed. Use when the user says
   /dream, /dream <topic>, or asks to "draft product PRDs for X", "vision out the next feature
-  area", or "turn these notes/spikes into product docs." Hand finished PRDs to /rustbuilder
-  (Rust) or /pybuilder (Python) to implement.
+  area", or "turn these notes/spikes into product docs." Hand finished PRDs to /pybuilder
+  to implement.
 ---
 
 # /dream — vision into AtScale product PRDs
@@ -21,8 +21,8 @@ skill: Customer Pain Test on every problem statement, Goldilocks + MUST/SHOULD/M
 every requirement, Given/When/Then acceptance criteria, explicit non-goals, success
 metrics with baselines, and the 7-anti-pattern audit before committing.
 
-Dream doesn't implement. `/rustbuilder` and `/pybuilder` do that. Dream's job is to
-make what they build worth building.
+Dream doesn't implement. `/pybuilder` does that. Dream's job is to make what it
+builds worth building.
 
 ## Phase −1 — Discover the environment (always run first)
 
@@ -62,7 +62,7 @@ match wins:
 1. `~/.claude/skills/build/state/manifest.json` exists → an established `/build`
    autobuild loop runs on this machine. Upsert buildable PRDs there (see Phase 4).
 2. Otherwise → no queue. Finish by telling the user which PRD to hand to
-   `/rustbuilder` or `/pybuilder` first, and why that order.
+   `/pybuilder` first, and why that order.
 
 **Run log** — if `~/wintermute/autobuilder/notes/gossip.md` exists (an established
 dream/build gossip channel), append the Phase 4 run note there *in addition to*
@@ -146,24 +146,20 @@ Ship-Independently test.
 **PRD frontmatter:**
 ```
 - Status: Draft v0.1
-- build_target: rust-cli | rust-lib | rust-extend | python-cli | python-lib | python-agent | product
-- build_into: <absolute path to target repo/crate>   # required for *-extend targets
+- build_target: python-cli | python-lib | python-agent | product
 - Vision: visions/<slug>.md
 - Owner: <the user>
 - Date: YYYY-MM-DD
 - Jira: <epic/spike key, if seeded from one>
 ```
 
-`build_target` tells the builders which pipeline implements the PRD: `rust-*` →
-`/rustbuilder`, `python-*` → `/pybuilder`, `product` → not auto-buildable (vision/
-process/GTM work). Every PRD gets a `build_target`; a missing one strands the PRD.
+`build_target` tells `/pybuilder` which of its targets implements the PRD:
+`python-*` → `/pybuilder`, `product` → not auto-buildable (vision/process/GTM
+work). Every PRD gets a `build_target`; a missing one strands the PRD.
 
-**Default to `python-*`** (`python-cli` / `python-lib` / `python-agent`) unless the
-seed or topic explicitly calls for Rust — systems-level work, a `cargo`/crate
-target, or an explicitly performance-critical path. When it's ambiguous, pick
-`python-*`; `/pybuilder`'s eval-gated pipeline is the default build path. Check
-`echo $DREAM_DEFAULT_TARGET` first: if it's set to `rust`, default to `rust-*`
-instead for this run; any other value or unset falls back to the `python-*` default.
+**Default to `python-*`** (`python-cli` / `python-lib` / `python-agent`).
+Python is the only build family; when it's ambiguous which of the three,
+`/pybuilder`'s eval-gated pipeline picks the shape from the PRD's content.
 
 **PRD body (inverted pyramid):** TL;DR → Problem statement (with Phase 1 citations) →
 Goals / Non-Goals (measurable; non-goals are things a reasonable reader would assume
@@ -212,7 +208,7 @@ mechanical legs (evidence collation, file edits, manifest updates).
    using an atomic write (write temp file in the same directory, then rename over;
    a concurrent build tick must never read a partial manifest). If there is no
    queue, end by telling the user the build order and the exact next command
-   (`/rustbuilder $PRD_DIR/PRD-<first>.md` or `/pybuilder ...`).
+   (`/pybuilder $PRD_DIR/PRD-<first>.md`).
 
 ## Invocations
 

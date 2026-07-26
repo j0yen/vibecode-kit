@@ -8,9 +8,9 @@
     {
       "name": "vibecode-kit",
       "source": "./",
-      "description": "idea -> /dream -> PRDs -> builders: dream up PRDs, then implement them (Python by default via /pybuilder, Rust via /rustbuilder on request).",
+      "description": "idea -> /dream -> PRDs -> /build: dream up PRDs, then implement them via /pybuilder.",
       "category": "productivity",
-      "keywords": ["prd", "dream", "pybuilder", "rustbuilder", "codegen"]
+      "keywords": ["prd", "dream", "pybuilder", "codegen"]
     }
   ]
 }
