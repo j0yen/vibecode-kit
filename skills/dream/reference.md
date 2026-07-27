@@ -4,7 +4,7 @@ What `/dream` needs to know about the product domain, the positioning, and the
 product-management craft before drafting. Read the section that matches the seed;
 skim the rest. This file carries concept-level knowledge only — evidence for any
 specific PRD claim still comes from Phase 1 research. It deliberately contains no
-pricing, no customer names, and no competitive battlecard material.
+pricing, no customer names, and no competitive sales tactics.
 
 ## Technical reference — the AtScale semantic layer
 
