@@ -147,13 +147,21 @@ Ship-Independently test.
 
 **PRD frontmatter:**
 ```
-- Status: queued
+- Status: queued                  # lifecycle field (unchanged semantics)
 - build_target: python-cli | python-lib | python-agent | product
+- PM: <the user>
+- Drafted: YYYY-MM-DD
 - Vision: visions/<slug>.md
-- Owner: <the user>
-- Date: YYYY-MM-DD
-- Jira: <epic/spike key, if seeded from one>
+- Jira: <issue key, or "to be filed">
+- Epic: <epic key, if part of one>
+- Engineering target: <repo/codebase the feature lands in>
+- Relates: <other issue/PRD keys, if any>
 ```
+
+When a PRD folds in prior or dissolved work (an abandoned spike, a superseded
+PRD), add one optional line directly under the frontmatter: `Absorbed scope:
+<what it replaces/folds in>` — a convention real AtScale PRDs use to keep that
+provenance visible.
 
 `Status` is a lifecycle field, not a draft marker: `queued` (new, not yet built)
 → `building` (a `/build` run is in progress) → `built` (shipped; the PRD moves to
@@ -169,17 +177,33 @@ work). Every PRD gets a `build_target`; a missing one strands the PRD.
 Python is the only build family; when it's ambiguous which of the three,
 `/pybuilder`'s eval-gated pipeline picks the shape from the PRD's content.
 
-**PRD body (inverted pyramid):** TL;DR → Problem statement (with Phase 1 citations) →
-Goals / Non-Goals (measurable; non-goals are things a reasonable reader would assume
-in scope) → User stories (3–7, persona-tagged; privilege the operator over the
-consumer — enterprise features come in capability + control-plane pairs) →
-Requirements (MUST/SHOULD/MAY; banned without numbers: "fast", "seamless",
-"scalable", "robust") → Success metrics (primary + secondary + guardrail, each with
-baseline, target, method, timeframe) → Technical considerations (constraints and
-interfaces, not implementation) → Migration / compatibility (deprecation runway,
-tooling, rollback) → Open questions (owner + due date each) → Acceptance criteria
-(numbered, testable, Given/When/Then; edge-case ritual: empty input? no permission?
-concurrent users? under load? upstream down?).
+**PRD body — core (every PRD, inverted pyramid, this order):** TL;DR → Problem
+statement (with Phase 1 citations) → Goals / Non-Goals (measurable; non-goals
+are things a reasonable reader would assume in scope) → User stories (3–7,
+persona-tagged; privilege the operator over the consumer — enterprise features
+come in capability + control-plane pairs) → Requirements (MUST/SHOULD/MAY,
+functional and non-functional; banned without numbers: "fast", "seamless",
+"scalable", "robust") → Success metrics (primary + secondary + guardrail, each
+with baseline, target, method, timeframe — as a table) → Technical
+considerations (constraints and interfaces, not implementation) → Migration /
+compatibility (deprecation runway, tooling, rollback) → Open questions (as a
+table: question, owner, due) → Acceptance criteria (numbered, testable,
+Given/When/Then; edge-case ritual: empty input? no permission? concurrent
+users? under load? upstream down?).
+
+**PRD body — optional (add only when the feature warrants it; real AtScale
+PRDs adopt these selectively):**
+- **UX & interaction model** — earns its place when the feature has a
+  user-facing surface (UI, CLI, config) worth walking through.
+- **API specification** — earns its place when the feature exposes or changes
+  a programmatic contract (REST, SQL, MCP, etc.).
+- **Security & compliance** — earns its place when the feature touches auth,
+  data-access boundaries, or a named compliance requirement.
+- **GTM considerations** — earns its place when the feature changes packaging,
+  pricing, or needs a customer-facing launch motion.
+- **Appendix / Companion documents** — earns its place when supporting
+  research, diagrams, or a linked RFC/tech spec is substantial enough not to
+  belong inline.
 
 **Anti-pattern audit before committing** (from `/atscale-prd-writer`): solution-first,
 vague requirements, missing edge cases, scope-creep hedging, too big, cargo-cult
@@ -197,7 +221,7 @@ mechanical legs (evidence collation, file edits, manifest updates).
 
 1. **Write MANIFEST.md** — regenerate the one-line-per-PRD registry by scanning
    frontmatter across `$PRD_DIR/*.md` AND `$PRD_DIR/archive/*.md`: one line per
-   PRD — filename, Status, build_target, date. Atomic write (temp file in the
+   PRD — filename, Status, build_target, Drafted. Atomic write (temp file in the
    same directory, then rename over); a concurrent `/build` run must never read
    a partial manifest.
 2. **Commit** (if in a git repo): stage the specific PRD/vision/manifest/log files
@@ -217,6 +241,15 @@ mechanical legs (evidence collation, file edits, manifest updates).
    `Status: queued` in its frontmatter — that field is the whole queue. End by
    telling the user the build order and that `/build` will drain it (or
    `/build $PRD_DIR/PRD-<first>.md` to build one specific PRD first).
+5. **Offer Confluence publication (ask, never assume).** If Confluence write
+   tools are available in this session (Atlassian MCP), ask the user whether
+   they want the PRD(s) just drafted published to Confluence as drafts. Never
+   create or edit Confluence content without an explicit yes in that session —
+   the local `$PRD_DIR` files remain the source of truth either way. If they
+   say yes, match the house style: the metadata block (Jira, Epic, Vision,
+   Engineering target, PM, Drafted) as an info panel at the top, `Status` as a
+   yellow "DRAFT v0.1" status macro, then the core/optional section order
+   above. If no Atlassian tools are connected, skip this step silently.
 
 ## Invocations
 
@@ -245,3 +278,5 @@ mechanical legs (evidence collation, file edits, manifest updates).
    required.
 10. **Discovery over assumption.** Re-run Phase −1 every invocation; environments
     change between runs.
+11. **Confluence is opt-in per run.** Dream may offer to publish; it never writes
+    to Confluence unasked.
