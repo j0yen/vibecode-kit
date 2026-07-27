@@ -97,6 +97,8 @@ pybuilder CLI when `uv` is available. Skills you already have are left untouched
 
 A PRD's frontmatter `Status` field is the single source of truth; `MANIFEST.md`
 is just a derived index regenerated from it — never hand-edit the manifest.
+`MANIFEST.md` is rebuilt by scanning frontmatter across both `$PRD_DIR/*.md`
+and `$PRD_DIR/archive/*.md`, written atomically (temp file, then rename).
 
 ```
 queued ──► building ──► built ──► (file moves to archive/)
@@ -111,6 +113,9 @@ queued ──► building ──► built ──► (file moves to archive/)
   (+ a one-line `Blocked:` reason, file left in place). No daemon or timer is
   involved — the transitions happen inside the `/dream` and `/build` skill
   runs themselves.
+- Exception: PRDs with `build_target: product` are product docs, not
+  auto-buildable — `/build` skips them and they stay `queued`, outside the
+  built/blocked flow.
 
 ## Repo layout
 
