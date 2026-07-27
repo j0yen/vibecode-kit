@@ -93,6 +93,25 @@ pybuilder CLI when `uv` is available. Skills you already have are left untouched
   in your current project. A git repo there is used if present, never required.
 - **Build state** — `/pybuilder` writes receipts inside each project.
 
+## PRD lifecycle
+
+A PRD's frontmatter `Status` field is the single source of truth; `MANIFEST.md`
+is just a derived index regenerated from it — never hand-edit the manifest.
+
+```
+queued ──► building ──► built ──► (file moves to archive/)
+              │
+              └──► blocked  (stays in place, with a Blocked: reason)
+```
+
+- `/dream` writes every new PRD as `Status: queued`, in `$PRD_DIR/`.
+- `/build` picks up `queued` PRDs (oldest first, draining the whole queue),
+  marks each `building` while it works, then resolves it: `built` (+ `Built:`
+  date and `Receipts:` pointer, file moved to `$PRD_DIR/archive/`) or `blocked`
+  (+ a one-line `Blocked:` reason, file left in place). No daemon or timer is
+  involved — the transitions happen inside the `/dream` and `/build` skill
+  runs themselves.
+
 ## Repo layout
 
 ```

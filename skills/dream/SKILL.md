@@ -38,11 +38,15 @@ assume a path exists — check.
 Inside `$PRD_DIR`, dream maintains:
 ```
 $PRD_DIR/
-├── PRD-<slug>.md        # the fleet
+├── PRD-<slug>.md        # active PRDs (queued / building / blocked)
+├── archive/             # finished PRDs (Status: built); dream never writes here
 ├── visions/<slug>.md    # vision docs
 ├── notes/dream-log.md   # append-only run log
 └── MANIFEST.md          # one-line-per-PRD registry (create/refresh on each run)
 ```
+A PRD's directory is derived from its `Status`: active statuses stay at
+`$PRD_DIR/`, `built` moves to `$PRD_DIR/archive/`. `/build` is what performs that
+move; dream only ever writes to `$PRD_DIR/` and only ever reads `archive/`.
 
 **Git** — if `$PRD_DIR` is inside a git repository, commit what you write (stage the
 specific files you created, never `git add -A`) using the machine's existing git
@@ -57,12 +61,10 @@ resource-discovery call (e.g. `getAccessibleAtlassianResources`) — never hardc
 cloud IDs or page IDs. If no Atlassian tools are connected, say so and fall back to
 what the user gives you: pasted tickets, links, meeting notes, customer quotes.
 
-**Build queue (optional)** — where drafted PRDs get queued for implementation, first
-match wins:
-1. `~/.claude/skills/build/state/manifest.json` exists → an established `/build`
-   autobuild loop runs on this machine. Upsert buildable PRDs there (see Phase 4).
-2. Otherwise → no queue. Finish by telling the user which PRD to hand to
-   `/pybuilder` first, and why that order.
+**Build queue** — there is no separate queue file to discover. A PRD's own
+frontmatter `Status` field is the queue: dream writes new PRDs as `Status: queued`,
+and `/build` scans `$PRD_DIR` for `queued` PRDs and drains them. Nothing to check
+here beyond `$PRD_DIR` itself.
 
 **Run log** — if `~/wintermute/autobuilder/notes/gossip.md` exists (an established
 dream/build gossip channel), append the Phase 4 run note there *in addition to*
@@ -145,13 +147,19 @@ Ship-Independently test.
 
 **PRD frontmatter:**
 ```
-- Status: Draft v0.1
+- Status: queued
 - build_target: python-cli | python-lib | python-agent | product
 - Vision: visions/<slug>.md
 - Owner: <the user>
 - Date: YYYY-MM-DD
 - Jira: <epic/spike key, if seeded from one>
 ```
+
+`Status` is a lifecycle field, not a draft marker: `queued` (new, not yet built)
+→ `building` (a `/build` run is in progress) → `built` (shipped; the PRD moves to
+`archive/`) → `blocked` (a `/build` run failed; the PRD stays in place with a
+`Blocked:` reason). Dream always writes new PRDs as `Status: queued` — advancing
+the field from there is `/build`'s job, never dream's.
 
 `build_target` tells `/pybuilder` which of its targets implements the PRD:
 `python-*` → `/pybuilder`, `product` → not auto-buildable (vision/process/GTM
@@ -187,8 +195,11 @@ mechanical legs (evidence collation, file edits, manifest updates).
 
 ## Phase 4 — Persist
 
-1. **Write MANIFEST.md** — regenerate the one-line-per-PRD registry: name, Status,
-   build_target, vision, one-line problem.
+1. **Write MANIFEST.md** — regenerate the one-line-per-PRD registry by scanning
+   frontmatter across `$PRD_DIR/*.md` AND `$PRD_DIR/archive/*.md`: one line per
+   PRD — filename, Status, build_target, date. Atomic write (temp file in the
+   same directory, then rename over); a concurrent `/build` run must never read
+   a partial manifest.
 2. **Commit** (if in a git repo): stage the specific PRD/vision/manifest/log files
    this run produced. Message: `dream: <N> PRDs + vision from <seed>`, body listing
    slugs. Push only if origin exists.
@@ -202,13 +213,10 @@ mechanical legs (evidence collation, file edits, manifest updates).
    Build order: foo → bar (bar consumes foo's API)
    Open questions: <key unresolved items>
    ```
-4. **Queue for building.** If Phase −1 found a `/build` manifest, upsert each
-   buildable PRD (`build_target` ≠ `product`) with `status: "queued"` — or
-   `"blocked"` with a `blockers` list when it hard-depends on an unbuilt sibling —
-   using an atomic write (write temp file in the same directory, then rename over;
-   a concurrent build tick must never read a partial manifest). If there is no
-   queue, end by telling the user the build order and the exact next command
-   (`/pybuilder $PRD_DIR/PRD-<first>.md`).
+4. **Nothing separate to queue.** Every PRD dream drafts already carries
+   `Status: queued` in its frontmatter — that field is the whole queue. End by
+   telling the user the build order and that `/build` will drain it (or
+   `/build $PRD_DIR/PRD-<first>.md` to build one specific PRD first).
 
 ## Invocations
 
@@ -220,7 +228,8 @@ mechanical legs (evidence collation, file edits, manifest updates).
 ## Hard rules
 
 1. **Every PRD follows the `/atscale-prd-writer` standard.** No exceptions.
-2. **Never delete or modify existing PRDs.** Draft successors; the user archives.
+2. **Never delete or modify existing PRDs.** Draft successors; `/build` archives
+   finished ones — dream never moves or edits a PRD it didn't just write.
 3. **Cite the research.** Every "Why" references specific Phase 1 evidence.
    Assertions without evidence are fiction.
 4. **Visions are durable.** Update them; don't replace them silently.
@@ -231,8 +240,8 @@ mechanical legs (evidence collation, file edits, manifest updates).
    plane; if you draft one without the other, say so in Non-Goals.
 8. **No credentials or internal identifiers in PRDs or in this skill's output.**
    No passwords, tokens, connection strings, cloud IDs. Reference env-var names only.
-9. **Queue what you draft.** When a build queue exists, every buildable PRD is queued
-   before the run ends; when none exists, the user leaves knowing exactly what to run
-   next.
+9. **Queue what you draft.** Every buildable PRD is written with `Status: queued`
+   — that frontmatter field is the entire queuing step, no separate registration
+   required.
 10. **Discovery over assumption.** Re-run Phase −1 every invocation; environments
     change between runs.
