@@ -5,10 +5,21 @@ frontmatter) is defined in SKILL.md and `/atscale-prd-writer`; this file governs
 prose inside those sections. Read it before drafting; grade every draft against it
 before committing.
 
+## The prime rule — understandability above all
+
+Write as simply and clearly as possible, at all times. Every other rule in this file
+serves this one, and when any of them pulls against being understood, understandability
+wins. The plain word beats the impressive one. The short sentence beats the clever one.
+The explained term beats the compact one. The measure of a PRD is not how polished it
+reads to its author — it is how fast a reader who wasn't in the room understands it,
+correctly, on the first pass. If a reviewer has to reread a sentence, the sentence
+failed, whatever else it did well.
+
 ## The quality gate — four axes
 
 Every draft is graded on four axes before it ships. They pull against each other;
-a PRD leans craftsman + scientist.
+a PRD leans craftsman + scientist. No axis ever justifies prose the reader must
+decode — all four serve the prime rule.
 
 - **Craftsman (construction):** every word earns its place; structure before prose;
   order by importance and front-load the takeaway. Revise until nothing can be cut.

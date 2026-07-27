@@ -282,3 +282,5 @@ mechanical legs (evidence collation, file edits, manifest updates).
     to Confluence unasked.
 12. **The writing standard governs all prose.** Every PRD and vision passes
     `writing-standard.md`'s quality gate — no draft ships on its first pass.
+    Understandability outranks everything else in the standard — when in doubt,
+    ship the version a first-time reader understands fastest.
