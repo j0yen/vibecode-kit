@@ -66,9 +66,7 @@ frontmatter `Status` field is the queue: dream writes new PRDs as `Status: queue
 and `/build` scans `$PRD_DIR` for `queued` PRDs and drains them. Nothing to check
 here beyond `$PRD_DIR` itself.
 
-**Run log** — if `~/wintermute/autobuilder/notes/gossip.md` exists (an established
-dream/build gossip channel), append the Phase 4 run note there *in addition to*
-`$PRD_DIR/notes/dream-log.md`. Otherwise the dream-log alone is the record.
+**Run log** — the run log is `$PRD_DIR/notes/dream-log.md`.
 
 ## Domain context
 
@@ -227,8 +225,7 @@ mechanical legs (evidence collation, file edits, manifest updates).
 2. **Commit** (if in a git repo): stage the specific PRD/vision/manifest/log files
    this run produced. Message: `dream: <N> PRDs + vision from <seed>`, body listing
    slugs. Push only if origin exists.
-3. **Append the run note** to `$PRD_DIR/notes/dream-log.md` (and to the gossip file
-   if Phase −1 found one):
+3. **Append the run note** to `$PRD_DIR/notes/dream-log.md`:
    ```
    ## <ISO-ts>  /dream  vision-<slug>
    Drafted: PRD-foo.md, PRD-bar.md
@@ -266,7 +263,7 @@ mechanical legs (evidence collation, file edits, manifest updates).
 3. **Cite the research.** Every "Why" references specific Phase 1 evidence.
    Assertions without evidence are fiction.
 4. **Visions are durable.** Update them; don't replace them silently.
-5. **Logs are append-only.** Never rewrite history in dream-log or gossip files.
+5. **Logs are append-only.** Never rewrite history in the dream-log.
 6. **Don't dream past the research.** Ungrounded components stay in the vision doc
    as open questions.
 7. **Enterprise features come in pairs.** Consumer capability + operator control

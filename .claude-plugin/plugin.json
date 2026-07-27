@@ -1,7 +1,7 @@
 {
   "name": "vibecode-kit",
   "description": "idea -> /dream -> PRDs -> /build: dream up PRDs, then implement them via /pybuilder.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "author": {
     "name": "Joe Yen"
   },
