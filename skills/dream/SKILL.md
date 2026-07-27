@@ -70,18 +70,10 @@ here beyond `$PRD_DIR` itself.
 
 ## Domain context
 
-AtScale product areas this skill understands:
-
-- **Universal Semantic Layer** — SML model definitions, dimensions, hierarchies,
-  measures, calculated members, date/time intelligence, subject areas, governance
-- **Query protocols** — one model served over DAX, MDX, SQL, PGWire, Python, and MCP;
-  dialect conversion; backend routing to cloud data warehouses
-- **BI integrations** — Power BI (live connection / XMLA), Excel, Tableau, Looker;
-  migration tooling from BI-tool-native models into the semantic layer
-- **AI / MCP capabilities** — the AtScale MCP server, LLM-grounded query generation,
-  context-window management, parameter validation, agent-facing tool design
-- **Performance & operations** — aggregate awareness/tuning, query planning,
-  observability, sizing, deployment topologies
+Dream's domain grounding lives in `reference.md` (sibling file in this skill):
+technical reference on the AtScale semantic layer, the public positioning
+narrative, and product-management frameworks (including AI-product patterns).
+Read the section that matches the seed before Phase 1.
 
 If the seed is outside these areas but still an enterprise data-platform feature, the
 process is identical — only the domain vocabulary changes.

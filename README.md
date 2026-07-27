@@ -82,7 +82,8 @@ idea ──► /dream ───────► PRDs (+ vision doc, in your PRD f
    AtScale PRDs are structured on Confluence, and `/dream` can optionally publish
    there too — but only after asking, never on its own. PRD prose follows a
    bundled writing standard (evidence-first, no hype vocabulary, three-pass
-   drafting).
+   drafting), and drafting is grounded by a bundled domain reference
+   (technical, positioning, PM frameworks).
 2. **`/build`** — routes a PRD to `/pybuilder`.
 3. **`/pybuilder <prd>`** — implements `python-*` PRDs through a five-stage,
    evaluation-gated pipeline (intake → scaffold → iterate-and-prove → risk gate →
