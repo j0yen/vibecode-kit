@@ -138,7 +138,10 @@ Visions accumulate; they don't get replaced.
 
 Write the PRDs, one per component, in dependency order, each at
 `$PRD_DIR/PRD-<slug>.md`, each following the full **`/atscale-prd-writer`** standard
-(read that skill before drafting if it isn't already in context).
+(read that skill before drafting if it isn't already in context). The prose
+inside every section follows `writing-standard.md` (sibling file in this
+skill) — read it before drafting, and run its three-step method (outline →
+draft → proofread/workshop) on every PRD and vision doc.
 
 **Before each PRD:** artifact check (PRD vs RFC vs One-Pager), Customer Pain Test,
 Ship-Independently test.
@@ -277,3 +280,5 @@ mechanical legs (evidence collation, file edits, manifest updates).
     change between runs.
 11. **Confluence is opt-in per run.** Dream may offer to publish; it never writes
     to Confluence unasked.
+12. **The writing standard governs all prose.** Every PRD and vision passes
+    `writing-standard.md`'s quality gate — no draft ships on its first pass.

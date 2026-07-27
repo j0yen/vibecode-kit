@@ -80,7 +80,9 @@ idea ──► /dream ───────► PRDs (+ vision doc, in your PRD f
    three to seven PRDs to the enterprise PRD standard. Each PRD says what to build,
    for whom, why, and how you'll know it worked. The PRD format mirrors how real
    AtScale PRDs are structured on Confluence, and `/dream` can optionally publish
-   there too — but only after asking, never on its own.
+   there too — but only after asking, never on its own. PRD prose follows a
+   bundled writing standard (evidence-first, no hype vocabulary, three-pass
+   drafting).
 2. **`/build`** — routes a PRD to `/pybuilder`.
 3. **`/pybuilder <prd>`** — implements `python-*` PRDs through a five-stage,
    evaluation-gated pipeline (intake → scaffold → iterate-and-prove → risk gate →
