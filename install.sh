@@ -82,7 +82,6 @@ echo
 echo "Dependency check:"
 MISSING=0
 command -v git     >/dev/null 2>&1 && echo "  ✓ git     " || { echo "  ✗ git     — required by /dream"; MISSING=1; }
-command -v gh      >/dev/null 2>&1 && echo "  ✓ gh      " || { echo "  – gh      — recommended for pushing PRD repos (optional)"; MISSING=1; }
 command -v python3 >/dev/null 2>&1 && echo "  ✓ python3 " || { echo "  ✗ python3 — required by /pybuilder (needs 3.11+)"; MISSING=1; }
 command -v uv      >/dev/null 2>&1 && echo "  ✓ uv      " || { echo "  – uv      — needed only for /pybuilder's CLI"; MISSING=1; }
 echo

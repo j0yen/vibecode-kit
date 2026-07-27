@@ -32,24 +32,6 @@ git config --global user.name "Your Name"
 git config --global user.email "you@example.com"
 ```
 
-**GitHub CLI (`gh`)** (recommended — for pushing PRD repos and any other
-GitHub work the skills do on your behalf)
-
-```bash
-# macOS
-brew install gh
-
-# Ubuntu / Debian
-(type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
-  && sudo mkdir -p -m 755 /etc/apt/keyrings \
-  && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
-  && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-  && sudo apt update && sudo apt install gh -y
-```
-
-Then authenticate once: `gh auth login`
-
 **Python toolchain for `/pybuilder`** (required to actually build — pybuilder
 needs Python 3.11+ and `uv`; the core pipeline has zero other third-party
 runtime dependencies)
@@ -58,18 +40,6 @@ runtime dependencies)
 python3 --version   # need 3.11+ — install via your OS package manager or python.org if older
 curl -LsSf https://astral.sh/uv/install.sh | sh   # or: brew install uv
 ```
-
-**Atlassian MCP** (optional but recommended — `/dream` pulls Jira/Confluence
-evidence when it's connected)
-
-```bash
-claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp/authv2
-```
-
-Teammates on a claude.ai plan without Claude Code can connect the same
-Atlassian integration through **Settings → Connectors → Atlassian (Rovo) →
-Connect** on claude.ai. This is optional either way: without it, `/dream`
-falls back to whatever tickets, links, or notes you paste in.
 
 This repo is a self-hosted Claude Code plugin marketplace. From Claude Code:
 
