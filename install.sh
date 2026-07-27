@@ -80,7 +80,15 @@ fi
 # --- doctor ------------------------------------------------------------------
 echo
 echo "Dependency check:"
-command -v git >/dev/null 2>&1 && echo "  ✓ git" || echo "  ✗ git — required by /dream"
-command -v uv  >/dev/null 2>&1 && echo "  ✓ uv"  || echo "  – uv  — needed only for /pybuilder's CLI"
+MISSING=0
+command -v git     >/dev/null 2>&1 && echo "  ✓ git     " || { echo "  ✗ git     — required by /dream"; MISSING=1; }
+command -v gh      >/dev/null 2>&1 && echo "  ✓ gh      " || { echo "  – gh      — recommended for pushing PRD repos (optional)"; MISSING=1; }
+command -v python3 >/dev/null 2>&1 && echo "  ✓ python3 " || { echo "  ✗ python3 — required by /pybuilder (needs 3.11+)"; MISSING=1; }
+command -v uv      >/dev/null 2>&1 && echo "  ✓ uv      " || { echo "  – uv      — needed only for /pybuilder's CLI"; MISSING=1; }
 echo
+if [ "$MISSING" -eq 1 ]; then
+  echo "→ see the README's Prerequisites section for setup commands:"
+  echo "  https://github.com/j0yen/vibecode-kit#prerequisites"
+  echo
+fi
 echo "✓ vibecode-kit installed. Start in Claude Code with: /dream <what you wish existed>"
