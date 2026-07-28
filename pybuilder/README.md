@@ -81,12 +81,14 @@ with lower API rate limits while still using the strongest model where it matter
 | Generating project structure (scaffold) | Haiku |
 | Writing code, evaluating quality | Sonnet |
 | Checking receipts and gate results | Haiku |
-| Independent reviewer (final approval) | Opus |
+| Independent reviewer (final approval) | Sonnet |
 | Postmortem summary | Haiku |
 
-**The reviewer always uses Opus.** That's the independent second opinion that ensures
-pybuilder can't approve its own work. Everything else defaults to Sonnet for the reasoning
-steps and Haiku for the mechanical ones.
+**The reviewer is always a fresh, independent agent** — that's the second opinion that
+ensures pybuilder can't approve its own work. Its independence comes from the separate
+agent and clean context, not from model size, so it runs on Sonnet like the other
+reasoning steps (escalate to Opus only when the user explicitly asks). Haiku covers the
+mechanical steps. Cheapest capable model, always.
 
 These defaults are set in `src/pybuilder/models.py` and can be overridden with environment
 variables (`PYBUILDER_BUILD_MODEL`, `PYBUILDER_REVIEW_MODEL`, `PYBUILDER_FAST_MODEL`) if

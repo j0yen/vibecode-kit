@@ -72,3 +72,18 @@ Pass the resolved PRD path straight through to `/pybuilder` and let it run its
 own pipeline (intake, scaffold, gates, whatever it does). `/build` adds no
 success/failure judgment of its own beyond reading the risk gate to drive the
 status transition above — it reports whichever result `/pybuilder` reports.
+
+## Model routing
+
+Always the cheapest capable model. The ladder: Haiku < Sonnet < Opus/Fable.
+
+- **This skill's own work** — scanning `$PRD_DIR`, frontmatter status flips,
+  MANIFEST.md regeneration, git bookkeeping — is mechanical. Run it inline; if
+  any of it is delegated to a subagent, spawn that subagent on **Haiku**.
+- **Python implementation** happens inside `/pybuilder`, which pins **Sonnet**
+  for its coding stages and Haiku for its mechanical stages (see its model
+  table). Never escalate code work to Opus or Fable — pybuilder's risk gate,
+  not a bigger model, is the quality control.
+- **PRD writing is not this skill's job.** That's `/dream`, which drafts on
+  **Fable (Opus fallback)**. If a build run reveals a PRD gap, hand it back to
+  `/dream` rather than redrafting here on a cheaper model.

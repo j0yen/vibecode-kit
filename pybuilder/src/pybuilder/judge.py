@@ -1,8 +1,8 @@
 """LLM-as-judge dimension — calibrated, always-Opus, stability-guarded.
 
 The fifth dimension: grade an artifact against a declarative rubric using the
-strongest model (Opus), independent of whatever produced the artifact (autobuilder's
-"independent verification is where you spend the strongest model").
+review model (Sonnet by default, REVIEW_MODEL), independent of whatever produced the
+artifact — independence comes from the fresh agent, not from model size.
 
 Safeguards, so the judge is not itself a source of confident-wrong scores:
 - Rubrics forbid length/style-as-quality criteria (:func:`validate_rubric`).

@@ -1,8 +1,9 @@
 """Centralized model assignments for all pybuilder pipeline stages.
 
-Colleagues with lower API rate limits benefit from Haiku on mechanical
-stages and Sonnet on the build loop — only the independent reviewer needs
-Opus. All three can be overridden via environment variables.
+Cheapest capable model always: Haiku on mechanical stages, Sonnet on the
+build loop and the independent reviewer. Escalate the reviewer to Opus only
+on explicit user request. All three can be overridden via environment
+variables.
 """
 
 from __future__ import annotations
@@ -21,4 +22,4 @@ BUILD_MODEL: str = os.environ.get("PYBUILDER_BUILD_MODEL", "claude-sonnet-4-6")
 # Independent reviewer (Stage 4 reviewer receipt). Always the strongest
 # available model — this is the adversarial second opinion that prevents
 # self-approval. Never downgrade this below Opus without explicit intent.
-REVIEW_MODEL: str = os.environ.get("PYBUILDER_REVIEW_MODEL", "claude-opus-4-8")
+REVIEW_MODEL: str = os.environ.get("PYBUILDER_REVIEW_MODEL", "claude-sonnet-4-6")

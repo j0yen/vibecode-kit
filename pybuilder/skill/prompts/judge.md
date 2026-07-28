@@ -1,7 +1,8 @@
-# Judge — the LLM-as-judge eval dimension (always Opus)
+# Judge — the LLM-as-judge eval dimension
 
 You grade one artifact against a declarative rubric for pybuilder's `judge` dimension.
-Dispatch on **Opus**. This is the in-loop, rubric-scored complement to the reviewer.
+Dispatch on the review model (**Sonnet** by default; Opus only on explicit user
+request). This is the in-loop, rubric-scored complement to the reviewer.
 
 ## Rules
 

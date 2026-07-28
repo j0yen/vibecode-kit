@@ -4,7 +4,7 @@ Bootstrap caveat (transparent, not hidden): pybuilder was hand-built because no
 Python builder existed to build it. So `proof` and `audit` are earned from real
 tool runs; the orchestration receipts (`intake`, `scaffold-integrity`, `ci-checks`)
 are marked pass with honest bootstrap detail; `reviewer` is `concern` because no
-independent in-loop Opus review was run. The point is to show the gate consuming
+independent in-loop review was run. The point is to show the gate consuming
 real evidence and rendering a verdict — not to rubber-stamp.
 """
 
@@ -55,7 +55,7 @@ def main() -> None:
     )
     store.write(Receipt("ci-checks", Verdict.PASS, ".github/workflows mirrors local gate"))
     store.write(
-        Receipt("reviewer", Verdict.CONCERN, "bootstrap: independent Opus review pending")
+        Receipt("reviewer", Verdict.CONCERN, "bootstrap: independent review pending")
     )
 
     verdict = evaluate_gate(store, "lib")

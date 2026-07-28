@@ -205,10 +205,13 @@ competitive features, engineering spec masquerading as a PRD.
 **Range:** three to seven PRDs per vision. Don't draft past what the research
 supports — leave ungrounded components as bullets in the vision doc.
 
-**Drafting model:** PRD synthesis is deep-reasoning work. Draft on the most capable
-model available in the session (Fable/Opus tier); if parallelizing drafting across
-subagents, spawn the drafting subagents on that tier and reserve cheaper models for
-mechanical legs (evidence collation, file edits, manifest updates).
+**Drafting model:** PRD synthesis is deep-reasoning work — draft on **Fable**, with
+**Opus as the fallback** when Fable isn't available in the session. Never draft a PRD
+on Sonnet or Haiku: a PRD drafted below that tier is a defect — redraft it. If
+parallelizing drafting across subagents, spawn the drafting subagents on that same
+tier. Everything else this skill does is mechanical — evidence collation, file reads,
+manifest updates, git bookkeeping — and follows the cheapest-capable rule: **Haiku**
+when delegated, unless the step demonstrably needs more.
 
 ## Phase 4 — Persist
 

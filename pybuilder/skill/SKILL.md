@@ -1,7 +1,7 @@
 ---
 name: pybuilder
 description: PRD-driven, evaluation-gated Python code generation. Use when the user wants to build a Python CLI, library, or LLM agent from a Product Requirements Document under an autonomous iterate-and-prove loop. Applying test-driven development for LLM applications — multi-dimensional log-don't-assert evaluation, N-run stability classification, git-commit-pinned eval datasets, and a receipt-based risk gate. Targets cli|lib|agent; agent (state-machine) is first-class.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # pybuilder
@@ -52,13 +52,13 @@ do not override unless the user explicitly asks.
 | Stage 2 — Scaffold | **Haiku** | Generating boilerplate project structure from a filled intent card is templating, not reasoning |
 | Stage 3 — Iterate-and-Prove | **Sonnet** | Writing `src/`, evaluating quality vectors, deciding to advance or revert |
 | Stage 4 — Gate receipt checks | **Haiku** | Reading structured JSON receipts and evaluating pass/fail conditions is mechanical |
-| Stage 4 — Reviewer receipt | **Opus** | Independent adversarial second opinion; never self-approval; never downgrade |
+| Stage 4 — Reviewer receipt | **Sonnet** | Independent adversarial second opinion; never self-approval; never a downgraded verdict. Independence comes from a fresh agent, not a bigger model — escalate to Opus only when the user explicitly asks |
 | Stage 5 — Postmortem summary | **Haiku** | Summarizing a completed run from structured data |
 
 Model IDs (set in `src/pybuilder/models.py`; override via env vars if needed):
 - `PYBUILDER_FAST_MODEL` — default `claude-haiku-4-5-20251001`
 - `PYBUILDER_BUILD_MODEL` — default `claude-sonnet-4-6`
-- `PYBUILDER_REVIEW_MODEL` — default `claude-opus-4-8`
+- `PYBUILDER_REVIEW_MODEL` — default `claude-sonnet-4-6` (set an Opus ID only on explicit user request)
 
 ## Pipeline
 
@@ -68,7 +68,7 @@ PRD ──► Stage 1: Intake (5-Whys)           [Sonnet]  ──► intent-card
         Stage 3: Iterate-and-Prove loop    [Sonnet]  ──► quality vector + stability
         Stage 4: Risk Gate                           ──► ready / blocked
                  ├─ receipt checks         [Haiku]
-                 └─ reviewer              [Opus]
+                 └─ reviewer              [Sonnet]
         Stage 5: Postmortem + Self-Evolve  [Haiku]   ──► evolution-proposal.json
 ```
 
@@ -98,9 +98,11 @@ case via `pybuilder.flowgraph.trace_to_testcase`.
 (BAD_PYTHON), `ci-checks`; and for agents `eval-vector`, `stability`,
 `dataset-provenance`. Use **Haiku** to read and evaluate these structured receipts.
 
-The `reviewer` receipt is separate and always uses **Opus** — an independent agent
-reads the acceptance criteria in plain English and assesses whether the artifact
-genuinely satisfies them. No self-approval. Missing / stale / blocked → block with a
+The `reviewer` receipt is separate and uses **Sonnet** by default — an independent
+agent reads the acceptance criteria in plain English and assesses whether the artifact
+genuinely satisfies them. No self-approval. The rigor comes from the independent agent
+and fresh context, not from model size; escalate the reviewer to Opus only when the
+user explicitly asks for a stronger review. Missing / stale / blocked → block with a
 machine-readable diagnostic.
 
 ### Stage 5 — Postmortem & Self-Evolve · Haiku
@@ -136,6 +138,6 @@ pybuilder/
 - `/loop` — built into Claude Code; long-running iterate-and-prove cadence.
 - Final end-to-end app-run check (Stage 4) — run the built app directly (Claude
   Code's built-in `/run` skill helps here when present); no extra skill required.
-- The `reviewer` receipt — an independent reviewer subagent on the strongest
-  available model (Claude Code's built-in `/review` also works). Never
-  self-approval.
+- The `reviewer` receipt — an independent reviewer subagent on the cheapest
+  capable model (Sonnet by default; Opus only on explicit user request —
+  Claude Code's built-in `/review` also works). Never self-approval.
