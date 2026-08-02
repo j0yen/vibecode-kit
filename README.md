@@ -7,6 +7,11 @@ Everything referenced by these skills ships in this repo. No private repos, no
 company infrastructure, no cloud build servers. If you have Claude Code and git,
 the kit works; a few optional tools light up extra capability (see below).
 
+Once installed, open **[SETUP.md](SETUP.md)** — five copy-paste prompts that
+Claude Code runs for you: GitHub versioning + a private PRD workspace repo
+(required), and Jira/Confluence/GitHub connections that ground `/dream` in
+real tickets, pages, and code (recommended). No terminal skills needed.
+
 ## Install as a plugin
 
 ### Prerequisites
@@ -121,7 +126,9 @@ pybuilder CLI when `uv` is available. Skills you already have are left untouched
 | Claude Code | everything | |
 | git | /dream | commits use your existing git identity |
 | [`uv`](https://docs.astral.sh/uv/) | /pybuilder CLI only | |
-| Atlassian MCP connection | optional | `/dream` uses Jira/Confluence for evidence when connected; otherwise it works from what you give it |
+| GitHub CLI (`gh`) + private workspace repo | versioning + offsite backup | [SETUP.md](SETUP.md) §1–2 — paste-prompt setup; `/dream` and `/build` push automatically once origin exists |
+| Atlassian MCP connection | optional | `/dream` uses Jira/Confluence for evidence when connected; otherwise it works from what you give it — [SETUP.md](SETUP.md) §3 |
+| Atlassian CLI (`acli`), GitHub MCP | optional | bulk Jira ops and richer code grounding — [SETUP.md](SETUP.md) §4–5 |
 
 ## Where things go
 
