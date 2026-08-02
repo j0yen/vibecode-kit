@@ -132,10 +132,13 @@ grounding and this server is optional.
 ## 6. Unattended loop cadence (optional)
 
 `/vibeloop` runs one dream-build-digest cycle per invocation; it never schedules
-itself. This section sets up a Claude Code scheduled routine that calls it on a
-recurring cadence, so your PRD queue keeps draining while you are away from the
-keyboard. Skip this section if you would rather run `/vibeloop` yourself, or
-supervise it nonstop in a live session with `/loop /vibeloop`.
+itself. Its primary form is goal-driven — `/vibeloop <goal>` points every cycle
+at a target outcome (past loops of this shape drove natural-language-query
+accuracy and DAX translation), and the goal persists across cycles until you
+replace it. This section sets up a Claude Code scheduled routine that runs the
+loop under your goal on a recurring cadence, so it keeps working while you are
+away from the keyboard. Skip this section if you would rather run `/vibeloop`
+yourself, or supervise it nonstop in a live session with `/loop /vibeloop`.
 
 ```text
 Set me up with an unattended vibeloop cadence.
@@ -143,18 +146,27 @@ Set me up with an unattended vibeloop cadence.
 1. Confirm /vibeloop is installed: check that ~/.claude/skills/vibeloop exists
    (a symlink into a vibecode-kit checkout). If it is missing, tell me to run
    the kit's install.sh (or re-run it with --force) and stop here.
-2. Run one manual cycle first: invoke /vibeloop now and wait for it to finish.
-3. Show me the ledger line it just wrote (the last line of
+2. Ask me for my standing goal — the outcome this loop should chase (one or
+   two sentences; examples: "raise NLQ accuracy on our eval set", "translate
+   every workbook in the migration folder"). A goal that names a measurable
+   target is best. If I want plain queue-draining with no goal, that is
+   allowed — skip the goal in the steps below.
+3. Run one manual cycle first: invoke /vibeloop <my goal> now (or bare
+   /vibeloop if I skipped the goal) and wait for it to finish.
+4. Show me the ledger line it just wrote (the last line of
    $PRD_DIR/vibeloop/ledger.md — resolve $PRD_DIR the same way /dream does) so
-   I can see the cycle actually ran and what it did.
-4. Ask me to pick a cadence for the scheduled routine — do not create the
+   I can see the cycle actually ran, my goal recorded in it, and what it did.
+5. Ask me to pick a cadence for the scheduled routine — do not create the
    routine until I answer:
    - Daily (recommended for most colleagues — quota-conservative, still
      drains the queue steadily).
    - Hourly (for power users who want the queue drained aggressively and are
      comfortable with the higher usage this costs).
-5. Once I have picked one, use the /schedule command to create a routine that
-   runs /vibeloop on that cadence.
+6. Once I have picked one, use the /schedule command to create a routine that
+   runs /vibeloop on that cadence. The routine's prompt should be bare
+   /vibeloop — the standing goal already lives in intent.md, so scheduled
+   cycles inherit it automatically; I change goals later by running
+   /vibeloop <new goal> once.
 6. Remind me: the loop halts itself the moment
    $PRD_DIR/vibeloop/STOP exists (it also writes STOP itself if the queue
    plateaus — no progress for several cycles in a row), and resuming it is my

@@ -103,9 +103,13 @@ Two supporting skills round out the set:
 - **`/prd-writer`** — the same idea for personal projects: turn a loose idea into
   a spec `/pybuilder` can build, no PM background required.
 
-`/vibeloop` closes this cycle end to end: one invocation runs a full
-dream-build-digest pass over your PRD queue and leaves a ledger record, and it
-can run on a schedule so the queue keeps draining while you are away — see
+`/vibeloop` closes this cycle end to end, and its primary form is goal-driven:
+`/vibeloop <goal>` points every cycle at a target outcome — the loops that
+earn their keep chase a named result (drive NLQ accuracy on an eval set,
+translate a DAX workbook backlog), not just an empty queue. The goal persists
+across cycles as the standing intent that `/dream` serves; each invocation
+runs one dream-build-digest pass, leaves a ledger record, and can run on a
+schedule so the work continues while you are away — see
 [SETUP.md §6](SETUP.md#6-unattended-loop-cadence-optional).
 
 ## Install

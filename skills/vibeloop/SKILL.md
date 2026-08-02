@@ -5,9 +5,12 @@ description: >
   and leave a durable ledger record. Markdown-only: no shipped scripts or binaries, state
   manipulation via git, plain file writes, and python3 -c one-liners. Re-arms through Claude
   Code's own scheduling (a routine, or /loop in a live session) rather than any OS service.
-  Use when the user says /vibeloop, /vibeloop status, "run the loop", "keep dreaming and
-  building", or "drain the queue continuously". One invocation is exactly one cycle — it
-  never loops internally and never schedules itself.
+  The primary invocation is goal-driven: /vibeloop <goal> points every cycle at a target
+  outcome (e.g. "drive NLQ accuracy on the eval corpus", "translate the DAX workbook
+  backlog") — the goal becomes the standing intent that dreaming serves. Also use for
+  /vibeloop (bare — continue the standing goal or just drain the queue), /vibeloop status,
+  "run the loop", "keep dreaming and building", "drain the queue continuously". One
+  invocation is exactly one cycle — it never loops internally and never schedules itself.
 ---
 
 # /vibeloop — the portable dream-build-evaluate loop
@@ -18,6 +21,27 @@ is empty and the operator asked for that, builds up to a capped number of queued
 writes one ledger line recording what happened. It never overrides `/pybuilder`'s risk gate —
 `/build` reports the verdict, vibeloop just records it. It never schedules itself — the operator
 opts in to a cadence, documented below.
+
+## Goal-driven invocation — the primary use case
+
+The loops that have paid for themselves were never "drain whatever is queued" — they chased
+a named outcome: driving natural-language-query accuracy against an eval corpus cycle after
+cycle, or working through a DAX-translation backlog until it was empty. `/vibeloop <goal>` is
+that pattern:
+
+- The goal text is written to `$PRD_DIR/vibeloop/intent.md`, overwriting what was there (git
+  history preserves prior goals). From then on it is the **standing goal**: every cycle —
+  this one and every scheduled one after it — carries it until the operator replaces it.
+- The goal steers the Dream phase (it is the seed `/dream` receives when the queue empties)
+  and frames the ledger: cycles record `goal="<short form>"` so the trail reads as progress
+  toward the outcome, not just queue mechanics.
+- A good goal names an outcome and, when one exists, the measure: "raise NLQ accuracy on the
+  tpcds eval set", "every workbook in the migration folder translated and verified". A goal
+  with a measurable target is what turns the plateau pause from "queue empty" into "target
+  reached or progress stalled — human, look."
+- Bare `/vibeloop` continues under the standing goal if `intent.md` exists, and is plain
+  queue-draining if it does not. Both are supported; the goal-driven form is the reason the
+  skill exists.
 
 This skill carries no code. Every phase below is prose instructions to the model, in the same
 style as `/dream` and `/build` — runtime discovery, no hardcoded paths, the same `$PRD_DIR`
@@ -100,7 +124,8 @@ build.
 - If `queue_before == 0` and `$PRD_DIR/vibeloop/intent.md` does not exist: skip dreaming, record
   no PRDs dreamed, this cycle's verdict leans `IDLE` (final verdict decided in Digest).
 - If `queue_before == 0` and `intent.md` exists: invoke `/dream` seeded with the full contents of
-  `intent.md` as the topic/seed. Let `/dream` run its own phases untouched — Atlassian evidence,
+  `intent.md` as the topic/seed. (`intent.md` IS the standing goal — usually written by a
+  `/vibeloop <goal>` invocation; a hand-authored file works identically.) Let `/dream` run its own phases untouched — Atlassian evidence,
   user-provided evidence, whatever it finds. If grounding tools are not connected in this
   session, `/dream` degrades to its own ungrounded mode by its own rules; vibeloop does not
   paper over that gap or invent evidence on `/dream`'s behalf (Law 3, both skills). Record the
@@ -135,9 +160,10 @@ build.
 3. Append exactly one line to `$PRD_DIR/vibeloop/ledger.md` (never rewrite or reorder existing
    lines — append-only):
    ```
-   <ISO-ts> cycle=<n> queue=<before>-><after> built=[...] blocked=[...] dreamed=[...] verdict=<PROGRESS|IDLE|PLATEAU|ABORTED|HALTED>
+   <ISO-ts> cycle=<n> goal="<first ~8 words of intent.md>" queue=<before>-><after> built=[...] blocked=[...] dreamed=[...] verdict=<PROGRESS|IDLE|PLATEAU|ABORTED|HALTED>
    ```
-   Use empty `[]` for any of `built`/`blocked`/`dreamed` that had nothing to report.
+   Use empty `[]` for any of `built`/`blocked`/`dreamed` that had nothing to report; omit the
+   `goal=` field entirely when no `intent.md` exists.
 4. Update `state.json`: increment `cycle`; if this cycle built or dreamed anything, reset
    `no_progress_streak` to `0`, otherwise increment it by `1`. Example:
    ```bash
@@ -216,7 +242,12 @@ Cheapest capable model always — the ladder is Haiku < Sonnet < Opus/Fable.
 
 ## Invocations
 
-- `/vibeloop` — run one cycle end to end, per the phases above.
+- `/vibeloop <goal>` — **the primary form.** Write the goal to
+  `$PRD_DIR/vibeloop/intent.md` (overwrite; git history keeps prior goals), then run one
+  cycle end to end under it. Examples: `/vibeloop drive NLQ accuracy on the tpcds eval set`,
+  `/vibeloop translate the DAX workbook backlog to SML`.
+- `/vibeloop` — run one cycle under the standing goal if `intent.md` exists, else plain
+  queue-draining.
 - `/vibeloop status` — read-only readout, no mutation.
 
 ## Hard rules
