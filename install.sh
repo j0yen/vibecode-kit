@@ -10,6 +10,7 @@
 # Skills installed:
 #   /dream               — turn a direction into a fleet of AtScale product PRDs
 #   /build               — route a PRD to /pybuilder
+#   /vibeloop            — one orient/preflight/dream/build/digest cycle over the PRD queue
 #   /pybuilder           — implement python-* PRDs (skill + CLI)
 #   /prd-writer          — shape a personal-project idea into a buildable PRD
 #   /atscale-prd-writer  — the enterprise B2B PRD-writing standard /dream follows
@@ -62,6 +63,7 @@ link_skill() {
 
 link_skill dream               "$REPO_DIR/skills/dream"
 link_skill build               "$REPO_DIR/skills/build"
+link_skill vibeloop            "$REPO_DIR/skills/vibeloop"
 link_skill prd-writer          "$REPO_DIR/skills/prd-writer"
 link_skill atscale-prd-writer  "$REPO_DIR/skills/atscale-prd-writer"
 link_skill pybuilder           "$REPO_DIR/pybuilder/skill"

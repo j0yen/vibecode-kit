@@ -13,7 +13,7 @@ yourself; when a step needs an interactive login, Claude will ask you to
 type it with a `!` prefix (for example `! gh auth login`), which runs it
 inside your session so Claude can see the outcome.
 
-Do them in order. 1 and 2 are required; 3 grounds `/dream`; 4 and 5 are
+Do them in order. 1 and 2 are required; 3 grounds `/dream`; 4, 5, and 6 are
 optional extras.
 
 ---
@@ -128,6 +128,42 @@ grounding and this server is optional.
 ```
 
 ---
+
+## 6. Unattended loop cadence (optional)
+
+`/vibeloop` runs one dream-build-digest cycle per invocation; it never schedules
+itself. This section sets up a Claude Code scheduled routine that calls it on a
+recurring cadence, so your PRD queue keeps draining while you are away from the
+keyboard. Skip this section if you would rather run `/vibeloop` yourself, or
+supervise it nonstop in a live session with `/loop /vibeloop`.
+
+```text
+Set me up with an unattended vibeloop cadence.
+
+1. Confirm /vibeloop is installed: check that ~/.claude/skills/vibeloop exists
+   (a symlink into a vibecode-kit checkout). If it is missing, tell me to run
+   the kit's install.sh (or re-run it with --force) and stop here.
+2. Run one manual cycle first: invoke /vibeloop now and wait for it to finish.
+3. Show me the ledger line it just wrote (the last line of
+   $PRD_DIR/vibeloop/ledger.md — resolve $PRD_DIR the same way /dream does) so
+   I can see the cycle actually ran and what it did.
+4. Ask me to pick a cadence for the scheduled routine — do not create the
+   routine until I answer:
+   - Daily (recommended for most colleagues — quota-conservative, still
+     drains the queue steadily).
+   - Hourly (for power users who want the queue drained aggressively and are
+     comfortable with the higher usage this costs).
+5. Once I have picked one, use the /schedule command to create a routine that
+   runs /vibeloop on that cadence.
+6. Remind me: the loop halts itself the moment
+   $PRD_DIR/vibeloop/STOP exists (it also writes STOP itself if the queue
+   plateaus — no progress for several cycles in a row), and resuming it is my
+   job — delete that file when I am ready to let it run again. Tell me the
+   exact path.
+
+Do not create the scheduled routine until I have explicitly told you which
+cadence I want.
+```
 
 ## Security notes
 

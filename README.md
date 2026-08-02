@@ -7,10 +7,11 @@ Everything referenced by these skills ships in this repo. No private repos, no
 company infrastructure, no cloud build servers. If you have Claude Code and git,
 the kit works; a few optional tools light up extra capability (see below).
 
-Once installed, open **[SETUP.md](SETUP.md)** — five copy-paste prompts that
+Once installed, open **[SETUP.md](SETUP.md)** — six copy-paste prompts that
 Claude Code runs for you: GitHub versioning + a private PRD workspace repo
-(required), and Jira/Confluence/GitHub connections that ground `/dream` in
-real tickets, pages, and code (recommended). No terminal skills needed.
+(required), Jira/Confluence/GitHub connections that ground `/dream` in real
+tickets, pages, and code (recommended), and an optional unattended cadence for
+`/vibeloop`. No terminal skills needed.
 
 ## Install as a plugin
 
@@ -102,6 +103,11 @@ Two supporting skills round out the set:
 - **`/prd-writer`** — the same idea for personal projects: turn a loose idea into
   a spec `/pybuilder` can build, no PM background required.
 
+`/vibeloop` closes this cycle end to end: one invocation runs a full
+dream-build-digest pass over your PRD queue and leaves a ledger record, and it
+can run on a schedule so the queue keeps draining while you are away — see
+[SETUP.md §6](SETUP.md#6-unattended-loop-cadence-optional).
+
 ## Install
 
 ```bash
@@ -115,7 +121,7 @@ git clone https://github.com/j0yen/vibecode-kit.git
 cd vibecode-kit && ./install.sh
 ```
 
-The installer symlinks the five skills into `~/.claude/skills/` and installs the
+The installer symlinks the six skills into `~/.claude/skills/` and installs the
 pybuilder CLI when `uv` is available. Skills you already have are left untouched
 (re-run with `--force` to replace them).
 
@@ -165,10 +171,11 @@ queued ──► building ──► built ──► (file moves to archive/)
 
 ```
 vibecode-kit/
-├── install.sh                      # installs all five skills
+├── install.sh                      # installs all six skills
 ├── skills/
 │   ├── dream/                      # /dream
 │   ├── build/                      # /build — routes a PRD to /pybuilder
+│   ├── vibeloop/                   # /vibeloop — the dream-build-digest loop
 │   ├── prd-writer/                 # /prd-writer
 │   └── atscale-prd-writer/         # /atscale-prd-writer
 └── pybuilder/                      # /pybuilder — skill + CLI source (Python ≥3.11)
