@@ -61,6 +61,11 @@ resource-discovery call (e.g. `getAccessibleAtlassianResources`) — never hardc
 cloud IDs or page IDs. If no Atlassian tools are connected, say so and fall back to
 what the user gives you: pasted tickets, links, meeting notes, customer quotes.
 
+**GitHub evidence (optional)** — check whether the `gh` CLI is authenticated
+(`gh auth status`) or GitHub MCP tools are connected. Either one lets Phase 1
+ground PRDs in real code (searches, file reads, PR/issue history), read-only.
+Neither present: say so once and rely on what the user provides.
+
 **Build queue** — there is no separate queue file to discover. A PRD's own
 frontmatter `Status` field is the queue: dream writes new PRDs as `Status: queued`,
 and `/build` scans `$PRD_DIR` for `queued` PRDs and drains them. Nothing to check
@@ -104,7 +109,14 @@ Probe for evidence. Every PRD claim must be grounded in something real.
    customers, which accounts, what they couldn't do, what they did instead.
 3. **Engineering ground truth.** If the feature touches code the user has locally,
    skim the actual repos for API surfaces, types, and error paths the PRD will
-   reference. A PRD that describes an API differently from the code is wrong.
+   reference. For code that lives on GitHub rather than locally, use whatever
+   GitHub access this session has — the `gh` CLI (`gh search code`, `gh repo
+   view`, `gh api`) or GitHub MCP tools if connected — and cite what you find
+   the same way you cite Jira keys: repo, file path, and PR/issue number.
+   Read-only, always: grounding never writes to any repo. No GitHub access
+   connected → say so and fall back to what the user provides, exactly as
+   with Atlassian. A PRD that describes an API differently from the code is
+   wrong.
 4. **Existing PRDs / visions.** Never duplicate intent. If a vision already covers
    this area, read it and extend it.
 
