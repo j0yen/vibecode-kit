@@ -1,293 +1,313 @@
 ---
 name: dream
 description: >
-  AtScale product-PRD dreaming. Listens to the user's seed, gathers evidence (Jira/Confluence
-  when Atlassian MCP tools are connected, otherwise whatever the user provides), synthesizes a
-  vision, then writes a fleet of product PRDs following the /atscale-prd-writer standard —
-  semantic layer, query protocols (DAX/MDX/SQL), BI integrations, MCP/AI capabilities, and
-  platform features. Fully standalone: it discovers its PRD home and optional integrations at
-  runtime and works with nothing but Claude Code and git installed. Use when the user says
-  /dream, /dream <topic>, or asks to "draft product PRDs for X", "vision out the next feature
-  area", or "turn these notes/spikes into product docs." Hand finished PRDs to /pybuilder
-  to implement.
+  Product-PRD dreaming that feeds a build loop. Listens to a seed (a topic, a note, a
+  project profile, a ticket), gathers evidence, synthesizes a vision, then writes a fleet
+  of buildable PRDs to whatever /build is installed — it reads that build's contract at
+  run start, so the same skill drives a Python-only kit /build and a Rust+Python private
+  /build without edits. Loop-ready mode drafts the measurement harness first so a
+  closed-loop scaffolder can drive the fleet. Use when the user says /dream,
+  /dream <topic>, /dream project <name>, /dream loop <name>, or asks to "draft PRDs for
+  X", "vision out the next area", or "turn these notes into product docs."
 ---
 
-# /dream — vision into AtScale product PRDs
+# /dream — a seed into a fleet of buildable PRDs
 
-`/dream` turns a direction into a fleet of buildable Product Requirements Documents.
-It listens, researches, synthesizes a vision, decomposes the vision into PRD-sized
-pieces, and writes each PRD to the standard in the bundled **`/atscale-prd-writer`**
-skill: Customer Pain Test on every problem statement, Goldilocks + MUST/SHOULD/MAY on
-every requirement, Given/When/Then acceptance criteria, explicit non-goals, success
-metrics with baselines, and the 7-anti-pattern audit before committing.
+`/dream` turns a direction into Product Requirements Documents that a build skill can
+implement without a human in the loop. It listens, researches, synthesizes a vision,
+decomposes the vision into PRD-sized pieces, and writes each PRD to the bundled
+PRD standard (`/atscale-prd-writer`: Customer Pain Test on every problem statement,
+Goldilocks requirements with P0/P1/P2, Given/When/Then acceptance criteria, explicit
+non-goals, success metrics with baselines, the anti-pattern audit before committing).
 
-Dream doesn't implement. `/pybuilder` does that. Dream's job is to make what it
-builds worth building.
+Dream doesn't implement. `/build` routes each PRD to its builder. Dream's job is to
+make what gets built worth building — and to make it buildable as written.
 
 ## Phase −1 — Discover the environment (always run first)
 
-This skill adapts to whatever machine it is on. Resolve each of the following **at the
-start of every invocation** and state what you found in one short line each. Never
-assume a path exists — check.
+Resolve every item below at the start of every invocation and state what you found
+in one short line each. Never assume a path exists — check.
 
-**PRD home** (`$PRD_DIR` below) — first match wins:
+**PRD home** (`$PRD_DIR`) — first match wins:
 1. `$DREAM_PRD_DIR` if the env var is set.
-2. `~/Documents/PRDs/` if it exists (an already-established PRD workspace).
+2. `~/Documents/PRDs/` if it exists.
 3. `./PRDs/` under the current working directory — create it if absent.
 
-Inside `$PRD_DIR`, dream maintains:
+Inside `$PRD_DIR`:
 ```
 $PRD_DIR/
-├── PRD-<slug>.md        # active PRDs (queued / building / blocked)
-├── archive/             # finished PRDs (Status: built); dream never writes here
-├── visions/<slug>.md    # vision docs
-├── notes/dream-log.md   # append-only run log
-└── MANIFEST.md          # one-line-per-PRD registry (create/refresh on each run)
+├── build-queue/PRD-<slug>.md   # what dream writes; the only dir /build scans
+├── built-prds/PRD-<slug>.md    # shipped; /build moves files here; dream only reads
+├── parked/PRD-<slug>.md        # set aside by a human; evidence, never scanned
+├── visions/<slug>.md           # one vision per area; durable
+├── projects/<name>.md          # project profiles (see below)
+├── notes/dream-log.md          # append-only run log
+└── MANIFEST.md                 # derived index; regenerate, never hand-edit
 ```
-A PRD's directory is derived from its `Status`: active statuses stay at
-`$PRD_DIR/`, `built` moves to `$PRD_DIR/archive/`. `/build` is what performs that
-move; dream only ever writes to `$PRD_DIR/` and only ever reads `archive/`.
+Create `build-queue/`, `built-prds/`, `parked/`, `visions/`, `notes/` if missing. Dream
+writes only to `build-queue/`, `visions/`, `notes/`, and `MANIFEST.md`.
 
-**Git** — if `$PRD_DIR` is inside a git repository, commit what you write (stage the
-specific files you created, never `git add -A`) using the machine's existing git
-identity. Do not set or hardcode any name/email. Push only if an `origin` remote
-already exists; a push failure is a warning, not an error. If `$PRD_DIR` is not in a
-git repo, offer `git init` once; if declined, plain files are fine.
+**Build contract** — find the installed `/build` skill (the `build` entry in the
+session's skill list; on disk usually `~/.claude/skills/build/`, possibly a symlink).
+If it has a `build-contract.md`, read it: it defines the accepted `build_target`
+values, required companion keys (`build_into`, `publish`, …), the archive directory
+name, the acceptance-criteria line format, and how it publishes. **Write PRDs to that
+contract.** If no contract file exists, use this kit's default: `build_target` ∈
+`python-cli | python-lib | python-agent | product`, ACs as numbered lines. Say which
+contract is in force. A PRD that doesn't match the contract is stranded, not built.
 
-**Atlassian evidence (optional)** — check whether Jira/Confluence MCP tools are
-available in this session (e.g. Atlassian/Rovo MCP: `searchJiraIssuesUsingJql`,
-`getJiraIssue`, Confluence search). If they are, discover the cloud ID via the MCP's
-resource-discovery call (e.g. `getAccessibleAtlassianResources`) — never hardcode
-cloud IDs or page IDs. If no Atlassian tools are connected, say so and fall back to
-what the user gives you: pasted tickets, links, meeting notes, customer quotes.
+**Project profile** (optional) — `$PRD_DIR/projects/<name>.md`. Selected by
+`/dream project <name>`, `/dream loop <name>`, or when the seed names the project.
+A profile carries: the seed source(s) to re-read every run (a note, a doc), the slug
+prefix, the vision file, the lineage decision, build defaults (`build_target`,
+`build_into`, `publish`), and — for loop-ready fleets — the loop name and the loop
+contract seed. Profiles are data a human maintains; dream reads them, cites them, and
+may append a dated "Dream notes" section but never rewrites a human's lines.
 
-**GitHub evidence (optional)** — check whether the `gh` CLI is authenticated
-(`gh auth status`) or GitHub MCP tools are connected. Either one lets Phase 1
-ground PRDs in real code (searches, file reads, PR/issue history), read-only.
-Neither present: say so once and rely on what the user provides.
+**Git** — if `$PRD_DIR` is a git repo, commit what you write (stage the specific
+files, never `git add -A`) with the machine's existing identity; never set or
+hardcode a name/email. `git pull --rebase` first when an `origin` exists — another
+machine may have advanced the queue. Push only if `origin` exists; a push failure is
+a warning. Not a repo: offer `git init` once; plain files are fine if declined.
 
-**Build queue** — there is no separate queue file to discover. A PRD's own
-frontmatter `Status` field is the queue: dream writes new PRDs as `Status: queued`,
-and `/build` scans `$PRD_DIR` for `queued` PRDs and drains them. Nothing to check
-here beyond `$PRD_DIR` itself.
+**Evidence sources (all optional; detect, never assume)**
+- *Issue/wiki tracker*: Atlassian MCP tools (`searchJiraIssuesUsingJql`,
+  `getJiraIssue`, Confluence search) — discover the cloud ID via the MCP's
+  resource-discovery call, never hardcode it. Absent → say so.
+- *Code*: `gh auth status` succeeds, or GitHub MCP tools are present → read-only
+  grounding in real repos (`gh search code`, `gh repo view`, `gh api`). Absent → say so.
+- *Web*: a web search/fetch tool in the session → open-source intelligence for
+  Phase 1. Absent → rely on what the user provides and say so.
+- *Local repos*: whatever the profile or seed names under the home directory.
 
-**Run log** — the run log is `$PRD_DIR/notes/dream-log.md`.
+**Run log** — `$PRD_DIR/notes/dream-log.md`.
 
 ## Domain context
 
-Dream's domain grounding lives in `reference.md` (sibling file in this skill):
-technical reference on the AtScale semantic layer, the public positioning
-narrative, and product-management frameworks (including AI-product patterns).
-Read the section that matches the seed before Phase 1.
-
-If the seed is outside these areas but still an enterprise data-platform feature, the
-process is identical — only the domain vocabulary changes.
+`reference.md` (sibling file) holds grounding for one domain family — semantic
+layers, query protocols, governed AI data access — plus general product-management
+frameworks. Read the PM-frameworks section for every seed; read the domain section
+only when the seed is in that family. For any other domain, Phase 1 research is the
+grounding; do not import the semantic-layer vocabulary into unrelated PRDs.
 
 ## Phase 0 — Listen
 
-Enter with full context. Read:
+Read, in this order:
+- The seed: the user's prompt, or the profile's seed source(s) re-read fresh (a note
+  that changed since the last dream changes the fleet).
+- `$PRD_DIR/visions/` — extend, don't duplicate.
+- `$PRD_DIR/MANIFEST.md`, `build-queue/`, `built-prds/`, `parked/` — what exists,
+  what shipped, what a human set aside (parked PRDs are evidence of intent, not work
+  to redo).
+- The tail of the run log.
 
-- The user's prompt (the seed). If there is no seed, ask one question: "What area
-  should this dream explore, and what prompted it?"
-- `$PRD_DIR/visions/` — what visions already exist; extend rather than duplicate
-- `$PRD_DIR/MANIFEST.md` and existing `PRD-*.md` — what has already been drafted
-- The tail of the run log(s) — what previous dreams and builds have been doing
+**Lineage check (before any greenfield decision).** Search for prior work that
+already realizes part of the seed: visions and built PRDs here, repos the code
+evidence source can see, and anything the profile names. Decide one of:
+- **extend** — a live repo implements the substrate; PRDs carry `build_into` and
+  the contract's extend target;
+- **fork** — prior work exists but the seed changes a load-bearing model (storage,
+  auth, editing surface); say precisely what changes and what is reused;
+- **greenfield** — nothing usable exists; cite what was checked.
+Record the decision and its evidence in the vision's **Lineage** section. Never
+start greenfield on a seed whose predecessor sits one search away.
 
-Sit with this. The point is to notice what problem actually needs solving, not to
-confirm the topic the user named.
+Sit with all of it. The point is to notice what problem actually needs solving, not
+to confirm the topic the user named.
 
 ## Phase 1 — Research
 
-Probe for evidence. Every PRD claim must be grounded in something real.
+Every PRD claim is grounded in something real. Probe, in whatever order the
+sources allow:
 
-1. **Jira / Confluence (if connected).** Pull the full body of relevant spikes and
-   epics; search recent tickets in the area (`project = <their project>, updatedDate
-   >= -30d`, relevant keywords). Read ACs carefully — spikes often contain half-formed
-   product requirements that need a proper PRD to operationalize.
-2. **User-provided evidence (always).** Ask for or use whatever the user has: customer
-   calls, support threads, sales notes, competitor observations. Quantify: how many
-   customers, which accounts, what they couldn't do, what they did instead.
-3. **Engineering ground truth.** If the feature touches code the user has locally,
-   skim the actual repos for API surfaces, types, and error paths the PRD will
-   reference. For code that lives on GitHub rather than locally, use whatever
-   GitHub access this session has — the `gh` CLI (`gh search code`, `gh repo
-   view`, `gh api`) or GitHub MCP tools if connected — and cite what you find
-   the same way you cite Jira keys: repo, file path, and PR/issue number.
-   Read-only, always: grounding never writes to any repo. No GitHub access
-   connected → say so and fall back to what the user provides, exactly as
-   with Atlassian. A PRD that describes an API differently from the code is
-   wrong.
-4. **Existing PRDs / visions.** Never duplicate intent. If a vision already covers
-   this area, read it and extend it.
+1. **Tracker (if connected).** Full bodies of relevant spikes/epics; recent tickets
+   in the area. Spikes carry half-formed requirements that need a proper PRD.
+2. **User-provided evidence (always).** Calls, threads, notes, quotes; quantify.
+3. **Engineering ground truth.** Skim the actual code the PRD will touch — local
+   repos, or GitHub read-only — for API surfaces, types, error paths. Cite repo,
+   file, PR/issue. A PRD that describes an API differently from the code is wrong.
+4. **Open-source intelligence (when the seed asks for it or the domain is new).**
+   What people adopt, what they ask for (issues, roadmaps, launches), what the
+   incumbents do. Cite URLs. Do the research the seed names explicitly — a seed
+   that says "research how X renders Y" is an instruction, not a suggestion.
+5. **Existing PRDs, visions, parked work.** Never duplicate intent.
 
-Cite specific findings. "JIRA-1234 AC2 asks for a server-side validator prototype" is
-honest. A PRD that asserts a customer problem without citing evidence is fiction.
+Cite specific findings. An assertion without evidence is fiction.
 
 ## Phase 2 — Vision
 
-Synthesize. Write or update `$PRD_DIR/visions/<slug>.md`:
+Write or update `$PRD_DIR/visions/<slug>.md`:
 
-- **TL;DR** — one paragraph: what is true when this vision is fully realized?
+- **TL;DR** — what is true when the vision is realized
 - **Problem statement** — Customer Pain Test: WHO + WHAT + WHY they can't today +
-  quantified consequence. No solution references.
+  quantified consequence; no solution references
+- **Lineage** — the Phase 0 decision with its evidence
 - **End-state** — the concrete capability that exists when done
-- **Components** — PRD-sized pieces; one bullet per future PRD, each with a one-line
-  problem statement
-- **Order** — what depends on what; which can ship in parallel
+- **Components** — one bullet per future PRD, each with a one-line problem statement
+- **Order** — dependencies; what ships in parallel
+- **Loop contract** (loop-ready fleets only; see below)
 - **Open questions** — each with a named owner
 
 Visions accumulate; they don't get replaced.
 
+## Loop-ready fleets
+
+A loop-ready fleet is one a closed-loop scaffolder (a "buildloop": orient → preflight
+→ harness gate → dream → build → deploy → measure → digest) will drive after the
+first build. Enter this mode via `/dream loop <name>` or a profile with a `Loop:`
+line. It changes two things.
+
+**1. The vision carries a Loop contract** — everything the scaffolder needs, decided
+now with evidence, not later by guesswork:
+
+| field | meaning |
+|---|---|
+| loop name | `<name>-buildloop` |
+| metric | one number per run, what it measures, how it's scored; validated by hand on 3–5 known-good/known-bad cases before it becomes a PRD |
+| population | what the corpus represents (users × actions × conditions) and its real size |
+| corpus + gold | where entries and their ground-truth expectations live; gold is truth, never the baseline being beaten |
+| proxy tier / truth tier | the cheap fast check and the expensive faithful one, labelled |
+| measure command | the executable that emits the score and a run record |
+| preflight probes | substrate (data/infra up) and artifact (deployed binary answers) |
+| deploy target | where the shipped artifact runs and how it's redeployed |
+| write scope | the only repos/orgs the loop may push to |
+| failure families | how failures cluster; one fix per family |
+
+**2. The fleet is harness-first.** Build order is: (a) the **harness PRD** — corpus,
+gold, scorer, measure command, preflight probes, ledger; (b) the **deploy PRD** —
+unit files, env contract, redeploy script; (c) feature PRDs, each carrying a
+frontmatter `Loop: <name>: <metric it moves>` line so the loop's digest can cluster
+results by family. A feature PRD before the harness is a fleet the loop cannot
+measure; do not draft it that way. When the seed itself names the reflection
+component (a synthetic user population, a conformance suite), that component IS the
+harness PRD.
+
+Language follows the build contract: the harness may be Python (`python-agent`) while
+the substrate is Rust, or the reverse — pick per component, state why.
+
 ## Phase 3 — Decompose & draft
 
-Write the PRDs, one per component, in dependency order, each at
-`$PRD_DIR/PRD-<slug>.md`, each following the full **`/atscale-prd-writer`** standard
-(read that skill before drafting if it isn't already in context). The prose
-inside every section follows `writing-standard.md` (sibling file in this
-skill) — read it before drafting, and run its three-step method (outline →
-draft → proofread/workshop) on every PRD and vision doc.
+One PRD per component, in dependency order, at `$PRD_DIR/build-queue/PRD-<slug>.md`
+(slug `^[a-z0-9]+(-[a-z0-9]+)*$`, prefixed per profile), each to the full PRD
+standard, prose to `writing-standard.md` (three-step method: outline → draft →
+proofread on every document).
 
-**Before each PRD:** artifact check (PRD vs RFC vs One-Pager), Customer Pain Test,
+**Before each PRD:** artifact check (PRD vs RFC vs one-pager), Customer Pain Test,
 Ship-Independently test.
 
-**PRD frontmatter:**
+**Frontmatter** — bullet form, within the first 80 lines, keys from the build
+contract. Kit default shown; a private `/build` contract may add keys such as
+`build_into`, `build_priority`, `publish`, `deferred_acs`:
 ```
-- Status: queued                  # lifecycle field (unchanged semantics)
-- build_target: python-cli | python-lib | python-agent | product
+- Status: queued
+- build_target: <from the contract>
+- build_into: <abs path>           # only when extending an existing repo
+- publish: <from the contract>     # e.g. j0yen/private; omit if the contract has no publish key
+- Vision: visions/<slug>.md
+- Depends-on: PRD-<slug>.md        # when order matters
+- Loop: <name>: <metric>           # loop-ready fleets only
 - PM: <the user>
 - Drafted: YYYY-MM-DD
-- Vision: visions/<slug>.md
-- Jira: <issue key, or "to be filed">
-- Epic: <epic key, if part of one>
 - Engineering target: <repo/codebase the feature lands in>
-- Relates: <other issue/PRD keys, if any>
+- Tracker: <issue key, or omit when no tracker is connected>
 ```
+`Absorbed scope: <what it folds in>` directly under the frontmatter when a PRD
+supersedes prior work (a parked draft, an abandoned spike).
 
-When a PRD folds in prior or dissolved work (an abandoned spike, a superseded
-PRD), add one optional line directly under the frontmatter: `Absorbed scope:
-<what it replaces/folds in>` — a convention real AtScale PRDs use to keep that
-provenance visible.
+`Status` is a lifecycle field: `queued` → `building` → `built` (file moves to
+`built-prds/`) or `blocked`. Dream writes `queued`; `/build` advances it.
 
-`Status` is a lifecycle field, not a draft marker: `queued` (new, not yet built)
-→ `building` (a `/build` run is in progress) → `built` (shipped; the PRD moves to
-`archive/`) → `blocked` (a `/build` run failed; the PRD stays in place with a
-`Blocked:` reason). Dream always writes new PRDs as `Status: queued` — advancing
-the field from there is `/build`'s job, never dream's.
+**Body — core, inverted pyramid, this order:** TL;DR → Problem statement (with
+Phase 1 citations) → Goals / Non-Goals → User stories (3–7, persona-tagged;
+capability + control-plane pairs for enterprise features) → Requirements (P0/P1/P2,
+functional and non-functional; "fast", "seamless", "scalable", "robust" are banned
+without numbers) → Success metrics (primary, secondary, guardrail; baseline, target,
+method, timeframe — a table) → Technical considerations (constraints and interfaces,
+not implementation; name reused crates/modules from the lineage) → Migration /
+compatibility → Open questions (table: question, owner, due) → Acceptance criteria.
 
-`build_target` tells `/pybuilder` which of its targets implements the PRD:
-`python-*` → `/pybuilder`, `product` → not auto-buildable (vision/process/GTM
-work). Every PRD gets a `build_target`; a missing one strands the PRD.
+**Acceptance criteria — the countable form.** Under the heading
+`## Acceptance criteria`, one AC per line, numbered, level inline, Given/When/Then
+on the same line:
+```
+1. P0 — Given an empty document, When a viewer requests it, Then 200 with an empty body.
+2. P1 — Given 50 concurrent readers, When they read the same document, Then p95 < 150 ms.
+```
+Builders count `N. ` lines; `AC-1:` prefixes, tables, and prose blocks are invisible
+to them. Edge-case ritual on every PRD: empty input? no permission? concurrent
+actors? under load? upstream down?
 
-**Default to `python-*`** (`python-cli` / `python-lib` / `python-agent`).
-Python is the only build family; when it's ambiguous which of the three,
-`/pybuilder`'s eval-gated pipeline picks the shape from the PRD's content.
+**Body — optional, when warranted:** UX & interaction model · API specification ·
+Security & compliance · GTM considerations · Appendix / companion documents.
 
-**PRD body — core (every PRD, inverted pyramid, this order):** TL;DR → Problem
-statement (with Phase 1 citations) → Goals / Non-Goals (measurable; non-goals
-are things a reasonable reader would assume in scope) → User stories (3–7,
-persona-tagged; privilege the operator over the consumer — enterprise features
-come in capability + control-plane pairs) → Requirements (MUST/SHOULD/MAY,
-functional and non-functional; banned without numbers: "fast", "seamless",
-"scalable", "robust") → Success metrics (primary + secondary + guardrail, each
-with baseline, target, method, timeframe — as a table) → Technical
-considerations (constraints and interfaces, not implementation) → Migration /
-compatibility (deprecation runway, tooling, rollback) → Open questions (as a
-table: question, owner, due) → Acceptance criteria (numbered, testable,
-Given/When/Then; edge-case ritual: empty input? no permission? concurrent
-users? under load? upstream down?).
+**Anti-pattern audit before committing:** solution-first, vague requirements,
+missing edge cases, scope-creep hedging, too big, cargo-cult competitive features,
+engineering spec masquerading as a PRD.
 
-**PRD body — optional (add only when the feature warrants it; real AtScale
-PRDs adopt these selectively):**
-- **UX & interaction model** — earns its place when the feature has a
-  user-facing surface (UI, CLI, config) worth walking through.
-- **API specification** — earns its place when the feature exposes or changes
-  a programmatic contract (REST, SQL, MCP, etc.).
-- **Security & compliance** — earns its place when the feature touches auth,
-  data-access boundaries, or a named compliance requirement.
-- **GTM considerations** — earns its place when the feature changes packaging,
-  pricing, or needs a customer-facing launch motion.
-- **Appendix / Companion documents** — earns its place when supporting
-  research, diagrams, or a linked RFC/tech spec is substantial enough not to
-  belong inline.
+**Range:** three to seven PRDs per vision; don't draft past the research. Ungrounded
+components stay in the vision as open questions.
 
-**Anti-pattern audit before committing** (from `/atscale-prd-writer`): solution-first,
-vague requirements, missing edge cases, scope-creep hedging, too big, cargo-cult
-competitive features, engineering spec masquerading as a PRD.
-
-**Range:** three to seven PRDs per vision. Don't draft past what the research
-supports — leave ungrounded components as bullets in the vision doc.
-
-**Drafting model:** PRD synthesis is deep-reasoning work — draft on **Fable**, with
-**Opus as the fallback** when Fable isn't available in the session. Never draft a PRD
-on Sonnet or Haiku: a PRD drafted below that tier is a defect — redraft it. If
-parallelizing drafting across subagents, spawn the drafting subagents on that same
-tier. Everything else this skill does is mechanical — evidence collation, file reads,
-manifest updates, git bookkeeping — and follows the cheapest-capable rule: **Haiku**
-when delegated, unless the step demonstrably needs more.
+**Drafting model:** PRD synthesis runs on the most capable tier available in the
+session (Fable, else Opus) — never Sonnet or Haiku; a PRD drafted below that tier is
+a defect. Drafting subagents use the same tier. Everything mechanical — evidence
+collation, file reads, manifest, git — goes to the cheapest capable model.
 
 ## Phase 4 — Persist
 
-1. **Write MANIFEST.md** — regenerate the one-line-per-PRD registry by scanning
-   frontmatter across `$PRD_DIR/*.md` AND `$PRD_DIR/archive/*.md`: one line per
-   PRD — filename, Status, build_target, Drafted. Atomic write (temp file in the
-   same directory, then rename over); a concurrent `/build` run must never read
-   a partial manifest.
-2. **Commit** (if in a git repo): stage the specific PRD/vision/manifest/log files
-   this run produced. Message: `dream: <N> PRDs + vision from <seed>`, body listing
-   slugs. Push only if origin exists.
-3. **Append the run note** to `$PRD_DIR/notes/dream-log.md`:
+1. **MANIFEST.md** — regenerate by scanning frontmatter across `build-queue/`,
+   `built-prds/`, and `parked/`: one line per PRD (directory, filename, Status,
+   build_target, Drafted). Atomic write (temp file, rename). A concurrent `/build`
+   must never read a partial manifest.
+2. **Commit** — `git pull --rebase` if origin exists, stage only this run's files,
+   message `dream: <N> PRDs + vision from <seed>` with slugs in the body, push if
+   origin exists.
+3. **Run note** in `notes/dream-log.md`:
    ```
    ## <ISO-ts>  /dream  vision-<slug>
+   Profile: projects/<name>.md (or none)
+   Contract: <which build-contract was in force>
+   Lineage: extend <repo> | fork <repo> | greenfield
    Drafted: PRD-foo.md, PRD-bar.md
-   Vision: visions/<slug>.md
-   Seeded from: <Jira key | customer signal | user prompt>
    Build order: foo → bar (bar consumes foo's API)
+   Loop: <name> — metric <…> (loop-ready fleets)
    Open questions: <key unresolved items>
    ```
-4. **Nothing separate to queue.** Every PRD dream drafts already carries
-   `Status: queued` in its frontmatter — that field is the whole queue. End by
-   telling the user the build order and that `/build` will drain it (or
-   `/build $PRD_DIR/PRD-<first>.md` to build one specific PRD first).
-5. **Offer Confluence publication (ask, never assume).** If Confluence write
-   tools are available in this session (Atlassian MCP), ask the user whether
-   they want the PRD(s) just drafted published to Confluence as drafts. Never
-   create or edit Confluence content without an explicit yes in that session —
-   the local `$PRD_DIR` files remain the source of truth either way. If they
-   say yes, match the house style: the metadata block (Jira, Epic, Vision,
-   Engineering target, PM, Drafted) as an info panel at the top, `Status` as a
-   yellow "DRAFT v0.1" status macro, then the core/optional section order
-   above. If no Atlassian tools are connected, skip this step silently.
+4. **Nothing separate to queue** — `Status: queued` in `build-queue/` is the queue.
+   End by stating the build order and that `/build` will drain it (or
+   `/build $PRD_DIR/build-queue/PRD-<first>.md` for one).
+5. **Wiki publication is opt-in** — if Confluence write tools exist, ask; never
+   write unasked. No tools: skip silently.
 
 ## Invocations
 
 - `/dream` → interactive; ask for the seed, walk all phases
 - `/dream <topic>` → seed from topic
-- `/dream from <jira-key>` → seed from a specific ticket/spike (requires Atlassian MCP)
-- `/dream visions` → list known visions and their status, then exit
+- `/dream project <name>` → seed from `$PRD_DIR/projects/<name>.md`
+- `/dream loop <name>` → same, in loop-ready mode (harness-first fleet + Loop contract)
+- `/dream from <ticket-key>` → seed from a tracker item (requires a tracker MCP)
+- `/dream visions` → list visions and their status, then exit
 
 ## Hard rules
 
-1. **Every PRD follows the `/atscale-prd-writer` standard.** No exceptions.
-2. **Never delete or modify existing PRDs.** Draft successors; `/build` archives
-   finished ones — dream never moves or edits a PRD it didn't just write.
-3. **Cite the research.** Every "Why" references specific Phase 1 evidence.
-   Assertions without evidence are fiction.
-4. **Visions are durable.** Update them; don't replace them silently.
-5. **Logs are append-only.** Never rewrite history in the dream-log.
-6. **Don't dream past the research.** Ungrounded components stay in the vision doc
-   as open questions.
-7. **Enterprise features come in pairs.** Consumer capability + operator control
-   plane; if you draft one without the other, say so in Non-Goals.
-8. **No credentials or internal identifiers in PRDs or in this skill's output.**
-   No passwords, tokens, connection strings, cloud IDs. Reference env-var names only.
-9. **Queue what you draft.** Every buildable PRD is written with `Status: queued`
-   — that frontmatter field is the entire queuing step, no separate registration
-   required.
-10. **Discovery over assumption.** Re-run Phase −1 every invocation; environments
-    change between runs.
-11. **Confluence is opt-in per run.** Dream may offer to publish; it never writes
-    to Confluence unasked.
-12. **The writing standard governs all prose.** Every PRD and vision passes
-    `writing-standard.md`'s quality gate — no draft ships on its first pass.
-    Understandability outranks everything else in the standard — when in doubt,
-    ship the version a first-time reader understands fastest.
+1. **Every PRD follows the PRD standard.** No exceptions.
+2. **Never delete or modify existing PRDs.** Draft successors; `/build` moves
+   finished ones; humans park.
+3. **Cite the research.** Every "Why" references Phase 1 evidence.
+4. **Visions are durable.** Update; never replace silently.
+5. **Logs are append-only.**
+6. **Don't dream past the research.**
+7. **Enterprise features come in pairs** — capability + control plane; say so in
+   Non-Goals if one ships without the other.
+8. **No credentials or internal identifiers in PRDs.** Env-var names only.
+9. **Queue what you draft.** `Status: queued` in `build-queue/` is the whole step.
+10. **Discovery over assumption.** Re-run Phase −1 every invocation.
+11. **Wiki publication is opt-in per run.**
+12. **The writing standard governs all prose.** Understandability outranks
+    everything.
+13. **Write to the build contract in force.** Targets, keys, AC line format, and
+    directories come from the installed `/build`'s `build-contract.md`, never from
+    memory of some other build.
+14. **Lineage before greenfield.** A vision states extend / fork / greenfield with
+    evidence; PRDs that extend carry `build_into`.
+15. **Loop-ready means harness-first.** No feature PRD ahead of the harness PRD in a
+    loop-ready fleet; every feature PRD names the metric it moves.

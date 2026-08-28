@@ -28,6 +28,6 @@ is the kit's router: every buildable PRD goes to `/pybuilder`.
 
 ## Acceptance criteria
 
-`## Acceptance criteria`, one AC per line as `N. LEVEL — Given …, When …, Then …`.
+`## Acceptance criteria`, one AC per line as `N. P0|P1|P2 — Given …, When …, Then …`.
 `/pybuilder` reads them in plain English; the numbered form keeps them countable
 by any stricter builder.

@@ -171,6 +171,24 @@ queued ──► building ──► built ──► (file moves to built-prds/)
   auto-buildable — `/build` skips them and they stay `queued`, outside the
   built/blocked flow.
 
+## Project profiles, build contracts, loop-ready fleets
+
+Three additions (v0.10.0) let one `/dream` serve more than one build system and more
+than one project:
+
+- **Build contract.** `/dream` reads the installed `/build`'s `build-contract.md` at
+  run start and writes PRDs to it — accepted `build_target` values, extra keys, the
+  archive directory, the countable acceptance-criteria line (`1. P0 — Given …, When …,
+  Then …`). This kit's `/build` ships a Python-only contract; a private `/build` can
+  ship a Rust+Python one and the same `/dream` follows it.
+- **Project profiles.** `$PRD_DIR/projects/<name>.md` holds a project's seed source,
+  slug prefix, lineage decision, and build defaults. `/dream project <name>` re-reads
+  the seed every run, so a note that changed changes the fleet.
+- **Loop-ready fleets.** `/dream loop <name>` drafts the measurement harness PRD
+  first and writes a Loop contract into the vision (metric, corpus + gold, measure
+  command, preflight probes, deploy target, write scope), so a closed-loop scaffolder
+  can drive the fleet after the first build. Feature PRDs name the metric they move.
+
 ## Repo layout
 
 ```
