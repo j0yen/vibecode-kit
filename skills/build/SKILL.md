@@ -20,11 +20,11 @@ all of this happens inside one `/build` invocation.
 ## Resolve the PRD(s)
 
 Same PRD home resolution as `/dream`: `$DREAM_PRD_DIR` if set, else
-`~/Documents/PRDs/` if it exists, else `./PRDs/`. Create `$PRD_DIR/archive/` if
-it doesn't exist yet.
+`~/Documents/PRDs/` if it exists, else `./PRDs/`. Create `$PRD_DIR/build-queue/`,
+`$PRD_DIR/built-prds/`, and `$PRD_DIR/parked/` if they don't exist yet.
 
 - **User names a specific PRD path** → build just that one; skip queue draining.
-- **User names nothing** → scan `$PRD_DIR/*.md` frontmatter for `Status: queued`,
+- **User names nothing** → scan `$PRD_DIR/build-queue/*.md` frontmatter for `Status: queued`,
   oldest `Date` first, and **drain the queue**: loop the per-PRD lifecycle below
   until no `queued` PRDs remain.
 - **A `Status: building` PRD turns up at scan time** — that's a stale marker
@@ -54,12 +54,12 @@ Read the PRD's frontmatter `build_target`:
 3. Judge the outcome from `/pybuilder`'s risk gate:
    - **Pass** → set `Status: built`, add `Built: YYYY-MM-DD` and a `Receipts:
      <path>` line pointing at the gate's receipts, then move the PRD file into
-     `$PRD_DIR/archive/` (`git mv` if `$PRD_DIR` is a git repo, else `mv`).
+     `$PRD_DIR/built-prds/` (`git mv` if `$PRD_DIR` is a git repo, else `mv`).
    - **Fail** → set `Status: blocked` and add a one-line `Blocked: <reason>`
      summarizing what the gate reported. Leave the file where it is — a
      blocked PRD is not archived.
 4. **Regenerate `MANIFEST.md`** right after this PRD, before touching the next
-   one — same scan as `/dream`: `$PRD_DIR/*.md` + `$PRD_DIR/archive/*.md`, one
+   one — same scan as `/dream`: `$PRD_DIR/build-queue/*.md` + `$PRD_DIR/built-prds/*.md`, one
    line per PRD (filename, Status, build_target, date), atomic write (temp file
    in the same directory, then rename over). This is what makes draining a
    multi-PRD queue interruption-safe: a crash after step 4 leaves the manifest

@@ -152,10 +152,10 @@ pybuilder CLI when `uv` is available. Skills you already have are left untouched
 A PRD's frontmatter `Status` field is the single source of truth; `MANIFEST.md`
 is just a derived index regenerated from it — never hand-edit the manifest.
 `MANIFEST.md` is rebuilt by scanning frontmatter across both `$PRD_DIR/*.md`
-and `$PRD_DIR/archive/*.md`, written atomically (temp file, then rename).
+and `$PRD_DIR/built-prds/*.md`, written atomically (temp file, then rename).
 
 ```
-queued ──► building ──► built ──► (file moves to archive/)
+queued ──► building ──► built ──► (file moves to built-prds/)
               │
               └──► blocked  (stays in place, with a Blocked: reason)
 ```
@@ -163,7 +163,7 @@ queued ──► building ──► built ──► (file moves to archive/)
 - `/dream` writes every new PRD as `Status: queued`, in `$PRD_DIR/`.
 - `/build` picks up `queued` PRDs (oldest first, draining the whole queue),
   marks each `building` while it works, then resolves it: `built` (+ `Built:`
-  date and `Receipts:` pointer, file moved to `$PRD_DIR/archive/`) or `blocked`
+  date and `Receipts:` pointer, file moved to `$PRD_DIR/built-prds/`) or `blocked`
   (+ a one-line `Blocked:` reason, file left in place). No daemon or timer is
   involved — the transitions happen inside the `/dream` and `/build` skill
   runs themselves.
