@@ -8,6 +8,13 @@ description: >
   Use when the user says /build, /build <prd-path>, or asks you to work through
   the PRD queue.
 ---
+> **Fleet note (2026-09-02):** in the j0yen fleet the installed `/build` is
+> [`j0yen/build-skill`](https://github.com/j0yen/build-skill), whose
+> `build-contract.md` covers both Rust and Python targets and is the contract
+> `/dream` reads. This kit copy is the Python-only reference router for
+> standalone kit users; do not install it as `/build` on a fleet node.
+
+
 
 # /build — route a PRD to its builder, then close its lifecycle
 
