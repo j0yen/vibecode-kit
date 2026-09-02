@@ -3,7 +3,7 @@ name: build
 description: >
   Implement a PRD end-to-end and close its lifecycle. Scans the PRD home for
   Status: queued PRDs (oldest first) and drains the queue — or builds one named
-  PRD — dispatching each to /pybuilder, then marking it built (and archiving it)
+  PRD — dispatching each to /pybuild, then marking it built (and archiving it)
   or blocked based on pybuilder's risk gate, regenerating MANIFEST.md after each.
   Use when the user says /build, /build <prd-path>, or asks you to work through
   the PRD queue.
@@ -19,7 +19,7 @@ description: >
 # /build — route a PRD to its builder, then close its lifecycle
 
 `/build` is a thin dispatcher plus the place PRD lifecycle closes. It does not
-scaffold, iterate, or gate anything itself — that's `/pybuilder`'s job. Its own
+scaffold, iterate, or gate anything itself — that's `/pybuild`'s job. Its own
 work is: pick the right PRD(s), hand off, and record what happened in the PRD's
 own frontmatter (and in `MANIFEST.md`, its derived view). No daemon, no timer —
 all of this happens inside one `/build` invocation.
@@ -46,19 +46,19 @@ Same PRD home resolution as `/dream`: `$DREAM_PRD_DIR` if set, else
 
 Read the PRD's frontmatter `build_target`:
 
-- **`python-cli` / `python-lib` / `python-agent`** → invoke `/pybuilder <prd>`.
+- **`python-cli` / `python-lib` / `python-agent`** → invoke `/pybuild <prd>`.
 - **`product`** → not auto-buildable (vision/process/GTM work); see above.
 - **Missing or ambiguous `build_target`** → treat it as `python-cli`/
   `python-lib`/`python-agent` (whichever the PRD's shape suggests) and invoke
-  `/pybuilder`. Python is the only build family, so there's nothing to
+  `/pybuild`. Python is the only build family, so there's nothing to
   disambiguate between.
 
 ## Per-PRD lifecycle
 
 1. Set `Status: building` in the PRD's frontmatter and save — this is the only
    state a crash mid-run leaves behind, so it must land before the handoff.
-2. Invoke `/pybuilder <prd>` and let it run its own pipeline end to end.
-3. Judge the outcome from `/pybuilder`'s risk gate:
+2. Invoke `/pybuild <prd>` and let it run its own pipeline end to end.
+3. Judge the outcome from `/pybuild`'s risk gate:
    - **Pass** → set `Status: built`, add `Built: YYYY-MM-DD` and a `Receipts:
      <path>` line pointing at the gate's receipts, then move the PRD file into
      `$PRD_DIR/built-prds/` (`git mv` if `$PRD_DIR` is a git repo, else `mv`).
@@ -75,10 +75,10 @@ Read the PRD's frontmatter `build_target`:
 
 ## Handoff
 
-Pass the resolved PRD path straight through to `/pybuilder` and let it run its
+Pass the resolved PRD path straight through to `/pybuild` and let it run its
 own pipeline (intake, scaffold, gates, whatever it does). `/build` adds no
 success/failure judgment of its own beyond reading the risk gate to drive the
-status transition above — it reports whichever result `/pybuilder` reports.
+status transition above — it reports whichever result `/pybuild` reports.
 
 ## Model routing
 
@@ -87,7 +87,7 @@ Always the cheapest capable model. The ladder: Haiku < Sonnet < Opus/Fable.
 - **This skill's own work** — scanning `$PRD_DIR`, frontmatter status flips,
   MANIFEST.md regeneration, git bookkeeping — is mechanical. Run it inline; if
   any of it is delegated to a subagent, spawn that subagent on **Haiku**.
-- **Python implementation** happens inside `/pybuilder`, which pins **Sonnet**
+- **Python implementation** happens inside `/pybuild`, which pins **Sonnet**
   for its coding stages and Haiku for its mechanical stages (see its model
   table). Never escalate code work to Opus or Fable — pybuilder's risk gate,
   not a bigger model, is the quality control.

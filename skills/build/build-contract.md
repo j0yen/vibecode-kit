@@ -8,7 +8,7 @@
 
 
 `/dream` reads this file at the start of every run and writes PRDs to it. This
-is the kit's router: every buildable PRD goes to `/pybuilder`.
+is the kit's router: every buildable PRD goes to `/pybuild`.
 
 ## Where PRDs live
 
@@ -26,7 +26,7 @@ is the kit's router: every buildable PRD goes to `/pybuilder`.
 | key | values | required |
 |---|---|---|
 | `Status` | `queued` → `building` / `built` / `blocked` | yes |
-| `build_target` | `python-cli` `python-lib` `python-agent` (→ `/pybuilder`); `product` (skipped) | yes |
+| `build_target` | `python-cli` `python-lib` `python-agent` (→ `/pybuild`); `product` (skipped) | yes |
 | `build_into` | path of an existing repo to extend | when extending |
 | `publish` | `<gh-user>/private` `<gh-user>/public` `none` | no — default: no publish |
 | `Vision` | `visions/<slug>.md` | yes |
@@ -36,5 +36,5 @@ is the kit's router: every buildable PRD goes to `/pybuilder`.
 ## Acceptance criteria
 
 `## Acceptance criteria`, one AC per line as `N. P0|P1|P2 — Given …, When …, Then …`.
-`/pybuilder` reads them in plain English; the numbered form keeps them countable
+`/pybuild` reads them in plain English; the numbered form keeps them countable
 by any stricter builder.

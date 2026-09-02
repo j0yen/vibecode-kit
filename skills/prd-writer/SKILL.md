@@ -5,7 +5,7 @@ description: >
   a vague idea into a clear, buildable plan for a personal software project. No technical
   background needed. Invoke when someone has something they wish existed, a problem they keep
   solving by hand, or a creative tool they imagine but can't find. Works by asking the right
-  questions, not by demanding a filled-in form. Produces a concise spec that /pybuilder can
+  questions, not by demanding a filled-in form. Produces a concise spec that /pybuild can
   build from. Covers: home life and automation, journalling and reflection, photography and
   art, music, child and elderly care, health and fitness, LinkedIn and networking, sales and
   freelance work, design and creative projects, and any personal or consumer software idea.
@@ -14,7 +14,7 @@ description: >
   spec for...", "I have this idea...", "can you help me describe what I want?". Skip: pure
   enterprise or B2B product features (use /atscale-prd-writer), purely technical architecture
   questions (no idea yet to shape), requests to build the thing directly (hand off to
-  /pybuilder once the PRD is done).
+  /pybuild once the PRD is done).
 version: 1.0.0
 ---
 
@@ -31,7 +31,7 @@ screen time is up.
 The gap between that thought and a working app is rarely technical ability — it's the ability to
 *describe clearly what you want*. That's what this skill does. It asks the right questions, helps
 you see what you actually need versus what you think you need, and produces a short document that
-/pybuilder can turn into real, working software.
+/pybuild can turn into real, working software.
 
 You don't need to know how to code. You just need to know what you want.
 
@@ -53,7 +53,7 @@ number of focused questions to understand:
 5. **What it doesn't do yet** — the honest boundary that keeps the first version shippable.
 
 From those answers, the skill produces a **Personal Project PRD**: a short, plain-English
-document /pybuilder can build from, and that you can actually read and recognize as your idea.
+document /pybuild can build from, and that you can actually read and recognize as your idea.
 
 ---
 
@@ -215,11 +215,11 @@ the project achievable. Without it, scope creep turns a weekend project into an 
 
 ---
 
-## Handing off to /pybuilder
+## Handing off to /pybuild
 
-Once the PRD is complete, the natural next step is `/pybuilder`. It takes the PRD and drives a
+Once the PRD is complete, the natural next step is `/pybuild`. It takes the PRD and drives a
 full build loop: scaffold → iterate → prove → gate. You don't need to do anything between the
-two skills — the PRD this skill produces is exactly the input format /pybuilder expects.
+two skills — the PRD this skill produces is exactly the input format /pybuild expects.
 
 If this is your first build, start with `--target cli` (a command-line tool) regardless of your
 eventual goal. It's the fastest path to something working that you can actually use. Once it
@@ -231,5 +231,5 @@ works, you can build a web UI or phone interface on top of it.
 
 - Enterprise or B2B product features (use `/atscale-prd-writer`)
 - Pure technical architecture decisions (this skill shapes *what*, not *how*)
-- Building the project (hand off to `/pybuilder` once done here)
+- Building the project (hand off to `/pybuild` once done here)
 - UX/visual design specs (this produces a behavioral spec, not a wireframe)

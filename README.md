@@ -38,7 +38,7 @@ git config --global user.name "Your Name"
 git config --global user.email "you@example.com"
 ```
 
-**Python toolchain for `/pybuilder`** (required to actually build — pybuilder
+**Python toolchain for `/pybuild`** (required to actually build — pybuilder
 needs Python 3.11+ and `uv`; the core pipeline has zero other third-party
 runtime dependencies)
 
@@ -79,7 +79,7 @@ project in Claude Code gets the plugin automatically:
 ```
 idea ──► /dream ───────► PRDs (+ vision doc, in your PRD folder)
               │
-              └─ /build ──► /pybuilder  (eval-gated Python)
+              └─ /build ──► /pybuild  (eval-gated Python)
 ```
 
 1. **`/dream <topic>`** — listens, gathers evidence, writes a vision, then drafts
@@ -90,8 +90,8 @@ idea ──► /dream ───────► PRDs (+ vision doc, in your PRD f
    bundled writing standard (evidence-first, no hype vocabulary, three-pass
    drafting), and drafting is grounded by a bundled domain reference
    (technical, positioning, PM frameworks).
-2. **`/build`** — routes a PRD to `/pybuilder`.
-3. **`/pybuilder <prd>`** — implements `python-*` PRDs through a five-stage,
+2. **`/build`** — routes a PRD to `/pybuild`.
+3. **`/pybuild <prd>`** — implements `python-*` PRDs through a five-stage,
    evaluation-gated pipeline (intake → scaffold → iterate-and-prove → risk gate →
    postmortem).
 
@@ -101,7 +101,7 @@ Two supporting skills round out the set:
   (14-section template, Customer Pain Test, MUST/SHOULD/MAY, anti-pattern audit).
   Also useful on its own for drafting or reviewing any PRD.
 - **`/prd-writer`** — the same idea for personal projects: turn a loose idea into
-  a spec `/pybuilder` can build, no PM background required.
+  a spec `/pybuild` can build, no PM background required.
 
 `/vibeloop` closes this cycle end to end, and its primary form is goal-driven:
 `/vibeloop <goal>` points every cycle at a target outcome — the loops that
@@ -135,7 +135,7 @@ pybuilder CLI when `uv` is available. Skills you already have are left untouched
 |------|-----------|-------|
 | Claude Code | everything | |
 | git | /dream | commits use your existing git identity |
-| [`uv`](https://docs.astral.sh/uv/) | /pybuilder CLI only | |
+| [`uv`](https://docs.astral.sh/uv/) | /pybuild CLI only | |
 | GitHub CLI (`gh`) + private workspace repo | versioning + offsite backup | [SETUP.md](SETUP.md) §1–2 — paste-prompt setup; `/dream` and `/build` push automatically once origin exists |
 | Atlassian MCP connection | optional | `/dream` uses Jira/Confluence for evidence when connected; otherwise it works from what you give it — [SETUP.md](SETUP.md) §3 |
 | Atlassian CLI (`acli`), GitHub MCP | optional | bulk Jira ops and richer code grounding — [SETUP.md](SETUP.md) §4–5 |
@@ -145,7 +145,7 @@ pybuilder CLI when `uv` is available. Skills you already have are left untouched
 - **PRDs** — `/dream` and `/build` share one PRD home, resolved at runtime:
   `$DREAM_PRD_DIR` if set, else `~/Documents/PRDs/` if it exists, else `./PRDs/`
   in your current project. A git repo there is used if present, never required.
-- **Build state** — `/pybuilder` writes receipts inside each project.
+- **Build state** — `/pybuild` writes receipts inside each project.
 
 ## PRD lifecycle
 
@@ -196,11 +196,11 @@ vibecode-kit/
 ├── install.sh                      # installs all six skills
 ├── skills/
 │   ├── dream/                      # /dream
-│   ├── build/                      # /build — routes a PRD to /pybuilder
+│   ├── build/                      # /build — routes a PRD to /pybuild
 │   ├── vibeloop/                   # /vibeloop — the dream-build-digest loop
 │   ├── prd-writer/                 # /prd-writer
 │   └── atscale-prd-writer/         # /atscale-prd-writer
-└── pybuilder/                      # /pybuilder — skill + CLI source (Python ≥3.11)
+└── pybuilder/                      # /pybuild — skill + CLI source (Python ≥3.11)
 ```
 
 ## License

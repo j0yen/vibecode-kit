@@ -18,7 +18,7 @@ description: >
 `/vibeloop` closes the gap between `/dream` and `/build`: instead of a human invoking each
 skill by hand, one `/vibeloop` invocation orients, checks preflight, dreams only if the queue
 is empty and the operator asked for that, builds up to a capped number of queued PRDs, and
-writes one ledger line recording what happened. It never overrides `/pybuilder`'s risk gate —
+writes one ledger line recording what happened. It never overrides `/pybuild`'s risk gate —
 `/build` reports the verdict, vibeloop just records it. It never schedules itself — the operator
 opts in to a cadence, documented below.
 
@@ -112,7 +112,7 @@ build.
 - **Git identity set**: `git config user.name` and `git config user.email` both resolve to a
   non-empty value (global or local — do not set one if missing, that is a fatal preflight gap,
   not something vibeloop fixes).
-- **`uv` present**: `command -v uv` succeeds (required by `/pybuilder`, which `/build` invokes).
+- **`uv` present**: `command -v uv` succeeds (required by `/pybuild`, which `/build` invokes).
 - **`$PRD_DIR` writable**: a trivial write-and-remove of a scratch file succeeds.
 - **Origin reachable, if one is configured**: if `git -C "$PRD_DIR" remote get-url origin`
   succeeds, confirm it is reachable (e.g. `git -C "$PRD_DIR" ls-remote --exit-code origin
@@ -140,7 +140,7 @@ build.
    exact PRD path each time, rather than letting `/build` drain the whole queue in one call.
 3. For each invocation, record the PRD's filename under `built=[...]` if `/build` marked it
    `Status: built`, or under `blocked=[...]` if `/build` marked it `Status: blocked`, quoting the
-   `Blocked:` reason `/build` wrote. `/build` (via `/pybuilder`'s risk gate) is the sole source of
+   `Blocked:` reason `/build` wrote. `/build` (via `/pybuild`'s risk gate) is the sole source of
    this verdict — vibeloop adds no judgment of its own and never re-runs or overrides a gate
    result.
 4. If `$PRD_DIR/vibeloop/STOP` appears mid-drain (a plateau or manual stop from a concurrent
@@ -235,7 +235,7 @@ Cheapest capable model always — the ladder is Haiku < Sonnet < Opus/Fable.
 - **Dreaming** happens entirely inside `/dream`, which drafts on **Fable, with Opus as the
   fallback**. vibeloop does not draft PRD content itself — it only decides whether to invoke
   `/dream` and passes `intent.md` through as the seed.
-- **Building** happens entirely inside `/build` → `/pybuilder`, which pins **Sonnet** for coding
+- **Building** happens entirely inside `/build` → `/pybuild`, which pins **Sonnet** for coding
   stages and Haiku for its own mechanical stages.
 - **Never escalate vibeloop's own orchestration to Opus or Fable.** There is no reasoning-heavy
   work in this skill — every decision above is a rule applied to file contents, not synthesis.
@@ -259,7 +259,7 @@ Cheapest capable model always — the ladder is Haiku < Sonnet < Opus/Fable.
    configured; push only when `origin` exists; a push failure is a warning, not an error.
 4. **Never create a schedule and never start `/loop` on your own.** Re-arming is always the
    operator's explicit action (R7).
-5. **Never override the `/pybuilder` risk gate.** `/build`'s reported verdict (built/blocked) is
+5. **Never override the `/pybuild` risk gate.** `/build`'s reported verdict (built/blocked) is
    recorded verbatim; vibeloop adds no judgment of its own.
 6. **STOP is sacred.** Any phase that finds `$PRD_DIR/vibeloop/STOP` present halts immediately
    with a `HALTED` ledger line. Only a human deleting the file resumes the loop.

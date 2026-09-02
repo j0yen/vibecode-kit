@@ -9,9 +9,9 @@
 #
 # Skills installed:
 #   /dream               — turn a direction into a fleet of AtScale product PRDs
-#   /build               — route a PRD to /pybuilder
+#   /build               — route a PRD to /pybuild
 #   /vibeloop            — one orient/preflight/dream/build/digest cycle over the PRD queue
-#   /pybuilder           — implement python-* PRDs (skill + CLI)
+#   /pybuild           — implement python-* PRDs (skill + CLI)
 #   /prd-writer          — shape a personal-project idea into a buildable PRD
 #   /atscale-prd-writer  — the enterprise B2B PRD-writing standard /dream follows
 #
@@ -66,7 +66,7 @@ link_skill build               "$REPO_DIR/skills/build"
 link_skill vibeloop            "$REPO_DIR/skills/vibeloop"
 link_skill prd-writer          "$REPO_DIR/skills/prd-writer"
 link_skill atscale-prd-writer  "$REPO_DIR/skills/atscale-prd-writer"
-link_skill pybuilder           "$REPO_DIR/pybuilder/skill"
+link_skill pybuild             "$REPO_DIR/pybuilder/skill"
 
 # --- pybuilder CLI (optional but recommended) --------------------------------
 if command -v uv >/dev/null 2>&1; then
@@ -75,7 +75,7 @@ if command -v uv >/dev/null 2>&1; then
     && echo "→ CLI installed: $(command -v pybuilder || echo "$HOME/.local/bin/pybuilder")" \
     || echo "⚠ uv tool install failed; run 'uv run pybuilder' from $REPO_DIR/pybuilder"
 else
-  echo "⚠ uv not found — pybuilder CLI not installed (the /pybuilder skill needs it)."
+  echo "⚠ uv not found — pybuilder CLI not installed (the /pybuild skill needs it)."
   echo "  Install uv (https://docs.astral.sh/uv/), then: uv tool install $REPO_DIR/pybuilder"
 fi
 
@@ -84,8 +84,8 @@ echo
 echo "Dependency check:"
 MISSING=0
 command -v git     >/dev/null 2>&1 && echo "  ✓ git     " || { echo "  ✗ git     — required by /dream"; MISSING=1; }
-command -v python3 >/dev/null 2>&1 && echo "  ✓ python3 " || { echo "  ✗ python3 — required by /pybuilder (needs 3.11+)"; MISSING=1; }
-command -v uv      >/dev/null 2>&1 && echo "  ✓ uv      " || { echo "  – uv      — needed only for /pybuilder's CLI"; MISSING=1; }
+command -v python3 >/dev/null 2>&1 && echo "  ✓ python3 " || { echo "  ✗ python3 — required by /pybuild (needs 3.11+)"; MISSING=1; }
+command -v uv      >/dev/null 2>&1 && echo "  ✓ uv      " || { echo "  – uv      — needed only for /pybuild's CLI"; MISSING=1; }
 echo
 if [ "$MISSING" -eq 1 ]; then
   echo "→ see the README's Prerequisites section for setup commands:"
