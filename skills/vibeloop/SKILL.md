@@ -99,7 +99,7 @@ State this discovery in one short line before continuing: where `$PRD_DIR` resol
    ```
 3. Read the last few lines of `$PRD_DIR/vibeloop/ledger.md` (create it empty if absent — do not
    invent past history).
-4. Count the queue: PRDs directly under `$PRD_DIR/*.md` whose frontmatter has `Status: queued`
+4. Count the queue: PRDs in the installed `/build`'s queue directory — `$PRD_DIR/build-queue/*.md` per its build contract (`$PRD_DIR/*.md` in the flat kit layout) — whose frontmatter has `Status: queued`
    (the same scan `/dream` and `/build` use — stale `Status: building` markers count as queued
    too, per `/build`'s own rule). Record this as `queue_before`.
 
