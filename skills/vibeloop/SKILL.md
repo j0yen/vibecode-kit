@@ -60,14 +60,17 @@ wins:
 ```
 $PRD_DIR/vibeloop/
 ├── state.json     # {cycle, no_progress_streak, max_prds_per_cycle, plateau_limit,
-│                   #  max_actions_per_prd_per_cycle, build_mode}
+│                   #  max_actions_per_prd_per_cycle, build_mode,
+│                   #  waiting_streak, waiting_limit}
 ├── ledger.md       # append-only, one line per cycle
 ├── STOP            # absent = running; present = halted, contains the reason
 └── intent.md       # optional — operator-authored standing dream seed
 ```
 `max_actions_per_prd_per_cycle` (default `1`) and `build_mode` (`serial` default,
-`parallel` opt-in) are throughput knobs — see Build (R4) below. Both are new; a
-`state.json` written before they existed is missing the keys, which read as their
+`parallel` opt-in) are throughput knobs — see Build (R4) below. `waiting_streak`
+(default `0`) and `waiting_limit` (default `12`) track consecutive `WAITING` cycles —
+see Digest (R5) and the Plateau and waiting pauses step below. All four are new-ish; a
+`state.json` written before any of them existed is missing the keys, which read as their
 defaults and get written back the next time Digest (R5) runs.
 
 **Git** — same contract as `/dream`: commit with whatever identity is already configured (never
@@ -99,7 +102,9 @@ State this discovery in one short line before continuing: where `$PRD_DIR` resol
            'max_prds_per_cycle': 2,
            'plateau_limit': 3,
            'max_actions_per_prd_per_cycle': 1,
-           'build_mode': 'serial'
+           'build_mode': 'serial',
+           'waiting_streak': 0,
+           'waiting_limit': 12
        }, indent=2) + '\n')
    print(p.read_text())
    "
@@ -140,9 +145,38 @@ build.
 
 ### 4. Build (R4) — drain up to `max_prds_per_cycle` queued PRDs
 
-1. List queued PRDs (`Status: queued`, including any newly dreamed ones), oldest `Drafted`/`Date`
-   first — same ordering `/build` uses when draining.
-2. Take the first `max_prds_per_cycle` (from state.json) off that list. This cap is vibeloop's,
+1. **P1 — resolve stale external blocks first.** Scan `$PRD_DIR/build-queue/` (or wherever the
+   installed `/build`'s contract keeps in-progress PRDs) for any PRD whose `Status:` is `blocked`
+   (set by a prior `/build` call after a failed risk-gate run — README's lifecycle: `blocked`
+   stays in place with a `Blocked: <reason>` line) whose `Blocked:` text names another PRD by
+   filename or slug. If that named PRD is now present in `$PRD_DIR/built-prds/`, requeue this one:
+   set `Status: queued` (keep the existing `Blocked:` line in place as a note — do not delete it),
+   and let it flow into the list below same as any other queued PRD; it may be classified
+   `selectable` and picked up in this same cycle's selection at step 3. This is the only case
+   where vibeloop itself edits a PRD's `Status:` line — every other status transition belongs to
+   `/build` (Hard rule 13).
+2. List queued PRDs (`Status: queued`, including any newly dreamed ones and any just requeued by
+   step 1), oldest `Drafted`/`Date` first — same ordering `/build` uses when draining. For
+   **every** PRD in this full list — not just the ones about to be selected — read its
+   frontmatter and classify why it either can or cannot be selected this cycle:
+   - `depends-on:<slug>` — the PRD has a `Depends-on:` line naming another PRD, and that PRD's
+     slug is not present in `$PRD_DIR/built-prds/` (the same location `/build`'s own lifecycle
+     moves a shipped PRD to — this step only reads that outcome, it does not reimplement
+     dependency resolution).
+   - `blocked:<reason>` — the PRD has no unresolved `Depends-on:`, but carries a `Blocked:` line
+     whose text contains one of a small listed vocabulary of external-event words (case-
+     insensitive substring match, first match in this order wins): `measurement`, `human`,
+     `credential`, `host`, `gate`. Tag it with that word, e.g. `blocked:human` for `Blocked: needs
+     human sign-off`. A `Blocked:` line whose text matches none of these words does not count as
+     external — leave the PRD `selectable`; `/build`'s own risk gate is what decides whether it
+     can actually proceed.
+   - `selectable` — neither of the above.
+   Record this per-PRD classification (call the non-`selectable` ones this cycle's
+   `unselectable=[...]`) for Digest (R5) step 2's `WAITING` decision and the ledger's
+   `waiting_on=` field.
+3. Take the first `max_prds_per_cycle` (from state.json) **`selectable`** PRDs off that list —
+   skip any classified `depends-on:...` or `blocked:...`; they are recorded above but never named
+   in a `/build` call this cycle. This cap is vibeloop's,
    not `/build`'s, and it bounds this whole step: **no more than these `max_prds_per_cycle`
    PRDs are ever touched this cycle**, in either mode below. Read `max_actions_per_prd_per_cycle`
    and `build_mode` from state.json (defaults `1` and `serial` — see Phase −1) and dispatch with
@@ -213,9 +247,23 @@ build.
      meaning: still in progress at the action/round cap, but its `Status` or the manifest
      `action` changed during this cycle — see the serial-mode step 5 and parallel-mode diff rules in Build (R4)). A cycle that made real
      headway on a long PRD is not `IDLE` just because nothing finished.
-   - `IDLE` — nothing built, dreamed, or advanced, and the resulting `no_progress_streak` (below)
+   - `WAITING` — nothing built, dreamed, or advanced; `queue_after` (equivalently `queue_before`,
+     since nothing moved) is non-empty; **zero PRDs were
+     `selectable`** this cycle (Build (R4) step 2's per-PRD classification — no PRD ever entered
+     the selection pool, so no `/build` call happened at all); and every unselectable PRD's
+     reason is `depends-on:<slug>` or a `blocked:<reason>` in the external vocabulary — never a
+     plain `selectable` PRD that was simply not attempted. Record the distinct reasons (dedupe
+     identical `depends-on:<slug>`/`blocked:<reason>` tags across PRDs, keeping a count) as
+     `waiting_on=[...]` in the ledger line (step 3). `no_progress_streak` is **left unchanged** by
+     a `WAITING` cycle — only `waiting_streak` moves (step 4). This is the case this PRD exists
+     for: a loop correctly waiting on a dependency (e.g. every queued PRD's `Depends-on` names a
+     measurement PRD not yet built) is not the same as a loop that could have built something and
+     didn't.
+   - `IDLE` — nothing built, dreamed, or advanced, and either the queue is empty or at least one
+     queued PRD was `selectable` this cycle (so vibeloop could have attempted something and chose
+     not to, or attempted it and it didn't finish), and the resulting `no_progress_streak` (below)
      is still under `plateau_limit`.
-   - `PLATEAU` — nothing built, dreamed, or advanced, and `no_progress_streak` has just reached
+   - `PLATEAU` — same condition as `IDLE` above, and `no_progress_streak` has just reached
      `plateau_limit`. (Step 6 handles what this triggers.)
 
    Open question carried from the PRD (owner: Joe, due after ten cycles under this rule):
@@ -225,49 +273,75 @@ build.
 3. Append exactly one line to `$PRD_DIR/vibeloop/ledger.md` (never rewrite or reorder existing
    lines — append-only):
    ```
-   <ISO-ts> cycle=<n> goal="<first ~8 words of intent.md>" queue=<before>-><after> built=[...] blocked=[...] pending=[...] advanced=[...] dreamed=[...] verdict=<PROGRESS|IDLE|PLATEAU|ABORTED|HALTED> note="<free text, optional>"
+   <ISO-ts> cycle=<n> goal="<first ~8 words of intent.md>" queue=<before>-><after> built=[...] blocked=[...] pending=[...] advanced=[...] dreamed=[...] verdict=<PROGRESS|IDLE|PLATEAU|WAITING|ABORTED|HALTED> waiting_on=[...] note="<free text, optional>"
    ```
    `built`/`blocked`/`pending`/`advanced` entries carry the per-PRD action count, e.g.
    `built=[PRD-x.md(3)]`, `blocked=[PRD-x.md(2): "<Blocked: reason>"]`, `pending=[PRD-y.md(4)]`,
    `advanced=[PRD-z.md(4)]`. Use empty `[]` for any of `built`/`blocked`/`pending`/`advanced`/
    `dreamed` that had nothing to report; omit the `goal=` field entirely when no `intent.md`
    exists, and omit the trailing `note="..."` when there is nothing to say (it is the one free-text field, used for out-of-selection activity in parallel mode and any other remark worth keeping).
-4. Update `state.json`: increment `cycle`; if this cycle built, dreamed, or advanced anything,
-   reset `no_progress_streak` to `0`, otherwise increment it by `1`; and write back
-   `max_actions_per_prd_per_cycle`/`build_mode` defaults if a pre-existing state.json was missing
-   them (Phase −1 already defaults them for a brand-new file — this is for one written before
-   these keys existed). Example:
+   Omit `waiting_on=` entirely except on a `WAITING` verdict line, where it lists the distinct
+   unselectable reasons from Build (R4) step 2 with counts, e.g.
+   `waiting_on=[depends-on:PRD-mcphost-measure-comparable x3]` or
+   `waiting_on=[blocked:measurement x1, blocked:human x1]`.
+4. Update `state.json`: increment `cycle`; update `no_progress_streak` and `waiting_streak`
+   per the verdict decided in step 2; and write back
+   `max_actions_per_prd_per_cycle`/`build_mode`/`waiting_streak`/`waiting_limit` defaults if a
+   pre-existing state.json was missing them (Phase −1 already defaults them for a brand-new file
+   — this is for one written before these keys existed). Example:
    ```bash
    python3 -c "
    import json, pathlib
    p = pathlib.Path('$PRD_DIR/vibeloop/state.json')
    s = json.loads(p.read_text())
    s['cycle'] += 1
-   s['no_progress_streak'] = 0 if made_progress else s['no_progress_streak'] + 1
+   s.setdefault('no_progress_streak', 0)
+   s.setdefault('waiting_streak', 0)
    s.setdefault('max_actions_per_prd_per_cycle', 1)
    s.setdefault('build_mode', 'serial')
+   s.setdefault('waiting_limit', 12)
+   if verdict == 'WAITING':
+       s['waiting_streak'] += 1
+       # no_progress_streak is untouched on a WAITING cycle
+   else:
+       s['waiting_streak'] = 0
+       s['no_progress_streak'] = 0 if made_progress else s['no_progress_streak'] + 1
    p.write_text(json.dumps(s, indent=2) + '\n')
    "
    ```
-   (Substitute the literal `True`/`False` for `made_progress` when running this — it is written
-   here as a placeholder for the boolean decided in step 2, and is `True` when anything was
-   built, dreamed, or advanced.)
+   (Substitute the literal `True`/`False` for `made_progress`, and the literal verdict string
+   for `verdict`, when running this — both are placeholders for what step 2 decided.
+   `made_progress` is `True` when anything was built, dreamed, or advanced; it is always `False`
+   on a `WAITING` cycle by definition, but `no_progress_streak` still must not move then.)
 5. Commit, path-scoped to exactly what this cycle touched: `ledger.md`, `state.json`, and any
    PRD/vision/manifest files `/dream` or `/build` wrote or moved. Use the workspace's existing
    git identity — never set or hardcode one, never `git add -A`. Suggested message:
    `vibeloop: cycle <n> — <verdict>`. Push only if `origin` exists; a push failure is a warning
    told to the user, not an error that fails the cycle. Never force-push.
 
-### 6. Plateau pause (R6)
+### 6. Plateau and waiting pauses (R6)
 
 If step 5.2 decided `PLATEAU`: write `$PRD_DIR/vibeloop/STOP` containing the reason, e.g.:
 ```
 PLATEAU: 3 consecutive cycles with no PRD built, advanced, or dreamed (plateau_limit=3).
 Resume by deleting this file: rm $PRD_DIR/vibeloop/STOP
 ```
-State this to the user plainly, in addition to the ledger line: the loop has paused itself, and
-resuming is a human act — nothing in this skill deletes STOP, ever, including a later `/vibeloop`
-invocation. A `/vibeloop` call while STOP exists only ever produces `HALTED` (step 1).
+
+If step 5.2 decided `WAITING` and the just-updated `waiting_streak` (step 5.4) is now **greater
+than** `waiting_limit`: write `$PRD_DIR/vibeloop/STOP` containing the reason, e.g.:
+```
+WAITING: depends-on:PRD-mcphost-measure-comparable for 13 cycles (waiting_limit=12).
+Resume by deleting this file: rm $PRD_DIR/vibeloop/STOP
+```
+Use this cycle's `waiting_on=` reasons (step 5.3) and `waiting_streak` in the message. This is a
+separate limit from `plateau_limit` — a loop that is correctly waiting on a real dependency still
+halts eventually, with a reason a human can act on, rather than polling a blocked dependency
+forever unattended (Goals: "keep the plateau rule for the case it was written for" — this is the
+matching guardrail for the `WAITING` case).
+
+Either way, state this to the user plainly, in addition to the ledger line: the loop has paused
+itself, and resuming is a human act — nothing in this skill deletes STOP, ever, including a later
+`/vibeloop` invocation. A `/vibeloop` call while STOP exists only ever produces `HALTED` (step 1).
 
 ## `/vibeloop status` (R8) — read-only, mutates nothing
 
@@ -280,6 +354,11 @@ A separate invocation shape. Do not run any of the cycle steps above. Report, in
   absent — read-only status never writes them back). Say plainly which build mode is in force:
   "serial — one `/build` call per selected PRD" or "parallel — one bare `/build` call per round
   across the selection."
+- `waiting_streak` and `waiting_limit` from `state.json` (defaults `0` and `12` if the keys are
+  absent), and **`waiting on:`** — scan `ledger.md` backward for the most recent line with
+  `verdict=WAITING` and print its `waiting_on=[...]` reasons verbatim, e.g. `waiting on:
+  depends-on:PRD-mcphost-measure-comparable x3`. If no `WAITING` line has ever been recorded, say
+  so plainly ("waiting on: none recorded yet") rather than omitting the line.
 - Whether `$PRD_DIR/vibeloop/STOP` is present, and if so, its contents.
 
 Nothing is written, moved, or committed by `/vibeloop status`.
@@ -356,9 +435,13 @@ Cheapest capable model always — the ladder is Haiku < Sonnet < Opus/Fable.
 9. **Discovery over assumption.** Re-run Phase −1 every invocation; `$PRD_DIR` and the git/tool
    environment can change between runs.
 10. **Never exceed `max_prds_per_cycle` distinct PRDs in one cycle.** Build (R4) selects that
-    many at step 4.2 and touches no others, in either mode, for the rest of the cycle.
+    many at step 4.3 and touches no others, in either mode, for the rest of the cycle.
 11. **Never call `/build` once `$PRD_DIR/vibeloop/STOP` appears.** Checked before every call in
     serial mode and before every round in parallel mode (R4); a STOP written mid-cycle by a
     concurrent process ends the drain immediately, same as rule 6.
 12. **Never retry a `blocked` PRD within the same cycle.** Once a selected PRD reads `blocked`,
     it is recorded and dropped from every later `/build` call this cycle, in both modes.
+13. **Vibeloop edits a PRD's `Status:` line in exactly one case.** Requeuing a stale `blocked`
+    PRD whose `Blocked:` line names another PRD now present in `built-prds/` (Build (R4) step 1,
+    P1). Every other status transition — `queued` → `building` → `built`/`blocked` — belongs to
+    `/build`, never to vibeloop itself.
