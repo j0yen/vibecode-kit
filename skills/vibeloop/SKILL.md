@@ -445,3 +445,15 @@ Cheapest capable model always — the ladder is Haiku < Sonnet < Opus/Fable.
     PRD whose `Blocked:` line names another PRD now present in `built-prds/` (Build (R4) step 1,
     P1). Every other status transition — `queued` → `building` → `built`/`blocked` — belongs to
     `/build`, never to vibeloop itself.
+
+
+## Digest doctrine — five whys per failure family (2026-09-09)
+
+Before Digest queues or proposes any fix for a failure family, it records the
+family's why-chain: up to five whys, each backed by an observation from the run
+record (never narrative), stopping only at a level outside the loop's control.
+The fix targets the deepest actionable level; a shallow fix is queued only as a
+guard beside it. A family whose notes carry no why-chain is triaged, not fixed.
+(Shared doctrine with /dream hard rule 15 and buildloop-factory Law 29; origin:
+2026-09-09 burst-lane 5-whys, operator rule "always fix the source of the
+problem and not symptoms.")

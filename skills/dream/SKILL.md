@@ -134,6 +134,19 @@ sources allow:
 
 Cite specific findings. An assertion without evidence is fiction.
 
+**Failure-derived seeds get a five-whys chain (most important rule of research).**
+When the seed originates in a failure — an incident, a digest's failure family, a
+red gate, a support complaint — Phase 1 is not done until the why-chain is
+written: why did it fail? why did that precursor hold? — up to five levels, each
+answered by an observation (log line, receipt, command output), stopping only at
+a level outside the system's control. The vision's problem statement and the
+component decomposition then target the DEEPEST actionable level; a component
+that fixes a shallower level ships only as an explicit guard beside the root
+fix, never alone. A PRD dreamed from a level-1 symptom builds the wrong thing
+with perfect ACs — the most expensive failure this skill can produce. (Origin:
+2026-09-09 burst-lane — the level-1 fix was `mkdir`; the level-5 fix was
+outcome-asserting verification, and it closed eight faults at once.)
+
 ## Phase 2 — Vision
 
 Write or update `$PRD_DIR/visions/<slug>.md`:
@@ -309,5 +322,8 @@ collation, file reads, manifest, git — goes to the cheapest capable model.
     memory of some other build.
 14. **Lineage before greenfield.** A vision states extend / fork / greenfield with
     evidence; PRDs that extend carry `build_into`.
-15. **Loop-ready means harness-first.** No feature PRD ahead of the harness PRD in a
+15. **Five whys before dreaming a fix.** A failure-derived seed without an
+    evidence-backed why-chain is not researched; PRDs target the deepest
+    actionable level.
+16. **Loop-ready means harness-first.** No feature PRD ahead of the harness PRD in a
     loop-ready fleet; every feature PRD names the metric it moves.
