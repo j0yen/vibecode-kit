@@ -158,6 +158,14 @@ Write or update `$PRD_DIR/visions/<slug>.md`:
   quantified consequence; no solution references
 - **Lineage** — the Phase 0 decision with its evidence
 - **End-state** — the concrete capability that exists when done
+- **What would have to be true** — the end-state run forward (Roger Martin's
+  question, the mirror of five whys). Start from the end-state and ask what
+  conditions must hold for it to be real; for each condition ask again, until
+  every leaf is something testable this week or already known true (cite the
+  evidence). Three to seven leaves; mark each `known | testable | assumed`.
+  Name the **weakest link** — the `assumed` leaf whose failure kills the
+  vision — in one line. The weakest link becomes the first PRD or the first
+  open question; a fleet that builds around it is building on a guess.
 - **Components** — one bullet per future PRD, each with a one-line problem statement
 - **Order** — dependencies; what ships in parallel
 - **Loop contract** (loop-ready fleets only; see below)
@@ -329,3 +337,8 @@ collation, file reads, manifest, git — goes to the cheapest capable model.
     actionable level.
 16. **Loop-ready means harness-first.** No feature PRD ahead of the harness PRD in a
     loop-ready fleet; every feature PRD names the metric it moves.
+
+17. **What would have to be true before decomposing.** Every vision carries the
+    condition chain and names its weakest link; the first PRD or the first open
+    question addresses that link. Five whys looks back at a failure; this looks
+    forward at the end-state. Both end at something observable.
