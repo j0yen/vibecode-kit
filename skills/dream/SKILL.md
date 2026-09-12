@@ -134,6 +134,8 @@ sources allow:
 
 Cite specific findings. An assertion without evidence is fiction.
 
+**Failure check on every seed (one line, mandatory).** Before Phase 2, write one line: `Failure under this seed: <yes — what broke, with the observation> | no — <why this is an opportunity, not a symptom>`. A seed that reads as product or opportunity often sits on a broken assumption ("nobody signs up", "add feature X"); the check is what catches it. A `yes` makes the seed failure-derived and triggers the full chain below. A `no` needs no chain — a why-chain forced onto a seed with no failure invents causes, which is fiction. The line goes in the vision under **Problem statement** and in the run log.
+
 **Failure-derived seeds get a five-whys chain (most important rule of research).**
 When the seed originates in a failure — an incident, a digest's failure family, a
 red gate, a support complaint — Phase 1 is not done until the why-chain is
@@ -322,7 +324,7 @@ collation, file reads, manifest, git — goes to the cheapest capable model.
     memory of some other build.
 14. **Lineage before greenfield.** A vision states extend / fork / greenfield with
     evidence; PRDs that extend carry `build_into`.
-15. **Five whys before dreaming a fix.** A failure-derived seed without an
+15. **Failure check on every seed; five whys before dreaming a fix.** Every seed gets the one-line failure check. A failure-derived seed without an
     evidence-backed why-chain is not researched; PRDs target the deepest
     actionable level.
 16. **Loop-ready means harness-first.** No feature PRD ahead of the harness PRD in a
