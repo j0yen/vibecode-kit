@@ -216,7 +216,15 @@ standard, prose to `writing-standard.md` (three-step method: outline → draft �
 proofread on every document).
 
 **Before each PRD:** artifact check (PRD vs RFC vs one-pager), Customer Pain Test,
-Ship-Independently test.
+Ship-Independently test, and the **slug uniqueness check**. A slug is the build's
+primary key (manifest, claims, receipts) and must name exactly one PRD in exactly
+one of `build-queue/`, `built-prds/`, `parked/`. If the installed `/build` ships a
+slug check (`scripts/prd-slug-check.sh <slug>` next to its `build-contract.md`),
+run it: exit 0 means free; exit 1 prints the existing location and a proposed
+suffix, so use that suffix. If no such script exists, search all three directories
+for `PRD-<slug>.md` yourself. Never write a PRD under a slug that already exists
+anywhere in the corpus, even when the existing one has shipped; a follow-on gets
+its own name (`-v2`, `-followup`).
 
 **Frontmatter** — bullet form, within the first 80 lines, keys from the build
 contract. Kit default shown; a private `/build` contract may add keys such as
