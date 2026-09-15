@@ -215,6 +215,12 @@ One PRD per component, in dependency order, at `$PRD_DIR/build-queue/PRD-<slug>.
 standard, prose to `writing-standard.md` (three-step method: outline → draft →
 proofread on every document).
 
+**Amending (`/dream amend <slug>`):** check hard rule 2's two conditions first
+(manifest status `queued`; no dispatch iter_log). Re-run Phase 1 on the delta only,
+edit the file in place, append the amendment iter_log line, keep every existing AC
+number stable, and refresh the MANIFEST line if frontmatter changed. When a
+condition fails, say which one and draft a successor instead.
+
 **Before each PRD:** artifact check (PRD vs RFC vs one-pager), Customer Pain Test,
 Ship-Independently test, and the **slug uniqueness check**. A slug is the build's
 primary key (manifest, claims, receipts) and must name exactly one PRD in exactly
@@ -316,13 +322,25 @@ collation, file reads, manifest, git — goes to the cheapest capable model.
 - `/dream project <name>` → seed from `$PRD_DIR/projects/<name>.md`
 - `/dream loop <name>` → same, in loop-ready mode (harness-first fleet + Loop contract)
 - `/dream from <ticket-key>` → seed from a tracker item (requires a tracker MCP)
+- `/dream amend <slug>` → edit a queued, unstarted PRD in place (hard rule 2's
+  conditions; refuse with the reason and offer a successor when they fail)
 - `/dream visions` → list visions and their status, then exit
 
 ## Hard rules
 
 1. **Every PRD follows the PRD standard.** No exceptions.
-2. **Never delete or modify existing PRDs.** Draft successors; `/build` moves
-   finished ones; humans park.
+2. **Amend in place only while a PRD is untouched; otherwise draft successors.**
+   A PRD may be edited in place by `/dream amend <slug>` when BOTH hold: its
+   manifest status is `queued`, and its file carries no dispatch `iter_log` line
+   from `/build` (operator notes do not count). The amendment is one commit that
+   keeps the slug, never renumbers or rewords an existing AC (new ACs append),
+   appends `- iter_log: <ts> amended by /dream (<seed>) — <what changed>`, and
+   gets a dream-log entry. Once `/build` has taken any step (status `building`,
+   `in_progress`, `blocked`, or any dispatch iter_log), the file is a contract
+   under construction — receipts and claims cite its AC numbers — so draft a
+   successor instead; `/build` moves finished ones; humans park. Never delete.
+   (Relaxed 2026-09-15, Joe: a queued PRD the loop deferred for an incomplete
+   requirement cost a v2 plus a park where one amend would have done.)
 3. **Cite the research.** Every "Why" references Phase 1 evidence.
 4. **Visions are durable.** Update; never replace silently.
 5. **Logs are append-only.**
