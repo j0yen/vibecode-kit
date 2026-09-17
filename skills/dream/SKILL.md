@@ -149,6 +149,18 @@ with perfect ACs — the most expensive failure this skill can produce. (Origin:
 2026-09-09 burst-lane — the level-1 fix was `mkdir`; the level-5 fix was
 outcome-asserting verification, and it closed eight faults at once.)
 
+**Then rhyme (cross-chain whys, levels 6-8).** A sixth why inside one chain
+invents causes. When the vision already holds two or more failure-derived
+addenda within seven days (or the seed names several failures), lay the finished
+five-whys chains side by side and ask once, across them: why do these level-5
+roots rhyme? Answer with observations, up to three more levels (6-8), stopping
+where the answer is a rule the operator sets. Write it as a vision section
+titled `Cross-chain whys 6-8 (rhyme check <date>)`; the rhyme's deepest level
+becomes a rule or a structural PRD, not another successor. (Origin: 2026-09-17
+— four red gates, four correct level-5 fixes, one shape: mechanisms shipped on
+fixture proof with the live AC deferred; level 8 was the loop's objective,
+which became "all gates green" and "no-defer live ACs".)
+
 ## Phase 2 — Vision
 
 Write or update `$PRD_DIR/visions/<slug>.md`:
@@ -166,6 +178,9 @@ Write or update `$PRD_DIR/visions/<slug>.md`:
   Name the **weakest link** — the `assumed` leaf whose failure kills the
   vision — in one line. The weakest link becomes the first PRD or the first
   open question; a fleet that builds around it is building on a guess.
+- **Cross-chain whys 6-8 (rhyme check <date>)** — only when two or more
+  failure-derived addenda exist in this vision within seven days; the shared
+  root and the rule or structural component it implies (see Phase 1, rhyme)
 - **Components** — one bullet per future PRD, each with a one-line problem statement
 - **Order** — dependencies; what ships in parallel
 - **Loop contract** (loop-ready fleets only; see below)
@@ -368,3 +383,6 @@ collation, file reads, manifest, git — goes to the cheapest capable model.
     condition chain and names its weakest link; the first PRD or the first open
     question addresses that link. Five whys looks back at a failure; this looks
     forward at the end-state. Both end at something observable.
+18. **Five whys, then rhyme.** Never deepen one chain past five; when two or more
+    chains exist in a vision within seven days, run the rhyme check (Phase 1) and
+    let its deepest level become a rule or a structural PRD.
