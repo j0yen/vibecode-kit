@@ -70,6 +70,18 @@ hardcode a name/email. `git pull --rebase` first when an `origin` exists — ano
 machine may have advanced the queue. Push only if `origin` exists; a push failure is
 a warning. Not a repo: offer `git init` once; plain files are fine if declined.
 
+**Lineage freshness** — for every `build_into` path the profile or the seed names
+(a repo whose file:line this run is about to cite), run
+`skills/dream/scripts/lineage-freshness.sh <path>` when the script exists in this
+kit installation (an older kit without it: skip, say so once). State the verdict
+inline: `lineage: <path> <verdict>`. On `behind <n>`, Phase 1's engineering-
+ground-truth citations for that repo come from `git show origin/main:<file>`
+instead of the local working tree, and any PRD citing it carries
+`- Cited-tree: <repo>@<remote-sha>` in its frontmatter (the script's own
+`remote-sha=` line). On `dirty <n>`, cite the local tree as usual — dream never
+stashes — and note the dirty count in the discovery line. On `no-remote` or
+`missing`, cite the local tree and say freshness could not be checked.
+
 **Evidence sources (all optional; detect, never assume)**
 - *Issue/wiki tracker*: Atlassian MCP tools (`searchJiraIssuesUsingJql`,
   `getJiraIssue`, Confluence search) — discover the cloud ID via the MCP's
@@ -126,6 +138,9 @@ sources allow:
 3. **Engineering ground truth.** Skim the actual code the PRD will touch — local
    repos, or GitHub read-only — for API surfaces, types, error paths. Cite repo,
    file, PR/issue. A PRD that describes an API differently from the code is wrong.
+   When Phase −1 found the cited repo `behind`, read it via
+   `git show origin/main:<file>` instead of the local checkout, and say so — a
+   `file:line` citation from a stale tree sends the builder to the wrong place.
 4. **Open-source intelligence (when the seed asks for it or the domain is new).**
    What people adopt, what they ask for (issues, roadmaps, launches), what the
    incumbents do. Cite URLs. Do the research the seed names explicitly — a seed
@@ -254,6 +269,7 @@ contract. Kit default shown; a private `/build` contract may add keys such as
 - Status: queued
 - build_target: <from the contract>
 - build_into: <abs path>           # only when extending an existing repo
+- Cited-tree: <repo>@<sha>         # one per repo Phase −1 found behind
 - publish: <from the contract>     # e.g. j0yen/private; omit if the contract has no publish key
 - Vision: visions/<slug>.md
 - Depends-on: PRD-<slug>.md        # when order matters
@@ -265,6 +281,11 @@ contract. Kit default shown; a private `/build` contract may add keys such as
 ```
 `Absorbed scope: <what it folds in>` directly under the frontmatter when a PRD
 supersedes prior work (a parked draft, an abandoned spike).
+
+`Cited-tree: <repo>@<sha>` — one line per repo Phase −1 found `behind`; `<sha>` is
+the `remote-sha=` value `lineage-freshness.sh` printed. Omit it for a
+`fresh`/`dirty`/`no-remote`/`missing` repo — citing the local tree there is already
+unambiguous.
 
 `Status` is a lifecycle field: `queued` → `building` → `built` (file moves to
 `built-prds/`) or `blocked`. Dream writes `queued`; `/build` advances it.
