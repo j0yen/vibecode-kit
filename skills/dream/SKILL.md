@@ -377,6 +377,17 @@ collation, file reads, manifest, git — goes to the cheapest capable model.
    successor instead; `/build` moves finished ones; humans park. Never delete.
    (Relaxed 2026-09-15, Joe: a queued PRD the loop deferred for an incomplete
    requirement cost a v2 plus a park where one amend would have done.)
+   **Narrow exception (2026-09-18, decision 36622292):** a `building`,
+   `blocked`, or `parked` predecessor may still be amended in place, but
+   only to add `Superseded-by:` and/or `transferred_acs:` — the keys that
+   change who owns its remaining ACs, not the contract text any receipt
+   cites. No AC text, number, or any other key may change under this
+   exception. Same commit shape as above (append the `iter_log` line, no
+   renumbering). Run
+   `skills/dream/scripts/amend-key-gate.sh <status> <has-dispatch-iter-log>
+   <keys>` before writing; `allow` (exit 0) proceeds, `deny: <reason>`
+   (exit 2) refuses with that reason. See PRD-build-prd-superseded-by
+   requirement 9 / AC13.
 3. **Cite the research.** Every "Why" references Phase 1 evidence.
 4. **Visions are durable.** Update; never replace silently.
 5. **Logs are append-only.**
