@@ -327,7 +327,9 @@ second), never by AC number.
 **wm-build PRDs are never daemon-built (Joe 2026-10-05, permanent: "we cannot use
 wm-build to fix wm-build. always use alternatives").** Every PRD whose `build_into`
 is the wm-build repo carries `- Direct-build: hand (permanent rule 2026-10-05;
-wm-build never builds wm-build)` directly under `- Status: queued`, and its run
+wm-build never builds wm-build)` directly under `- Status: queued` (documentation only:
+the skip itself is the daemon config `[daemon] direct_repos` listing the wm-build repo;
+a free-text `Direct-build:` line does NOT make the daemon skip), and its run
 note says `Build path: hand (fence → sonnet coder → plain PR in a land gap)`. The
 daemon builds product PRDs only; the operator fences and hand-lands wm-build PRDs
 (decision: ~/Notes/wiki/decisions/2026-10-05-wm-build-never-builds-wm-build.md).
