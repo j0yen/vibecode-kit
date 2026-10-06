@@ -317,6 +317,21 @@ Security & compliance · GTM considerations · Appendix / companion documents.
 missing edge cases, scope-creep hedging, too big, cargo-cult competitive features,
 engineering spec masquerading as a PRD.
 
+**Size cap (Joe 2026-10-05 "go"):** at most 8 acceptance criteria per PRD. The
+inner coder's token cost grows superlinearly with AC count (10-05 ledger: 11–13-AC
+wm-build PRDs cost ~10 M weighted tokens each, ~25× a 5-AC PRD) and a long branch
+conflicts more at land. A component that needs more than 8 ACs is two PRDs with a
+`Depends-on`; split by ship-independent seams (config + plumbing first, behaviour
+second), never by AC number.
+
+**wm-build PRDs are never daemon-built (Joe 2026-10-05, permanent: "we cannot use
+wm-build to fix wm-build. always use alternatives").** Every PRD whose `build_into`
+is the wm-build repo carries `- Direct-build: hand (permanent rule 2026-10-05;
+wm-build never builds wm-build)` directly under `- Status: queued`, and its run
+note says `Build path: hand (fence → sonnet coder → plain PR in a land gap)`. The
+daemon builds product PRDs only; the operator fences and hand-lands wm-build PRDs
+(decision: ~/Notes/wiki/decisions/2026-10-05-wm-build-never-builds-wm-build.md).
+
 **Range:** three to seven PRDs per vision; don't draft past the research. Ungrounded
 components stay in the vision as open questions.
 
