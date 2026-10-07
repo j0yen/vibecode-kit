@@ -1,0 +1,5 @@
+# .buildloop/ci-equivalent.toml — CI-equivalent for scripts/main-push-gate.sh.
+# vibecode-kit is skills (markdown) + shell tests/scripts; the closest
+# "does it compile" is a bash -n syntax pass over every shell file.
+[default]
+command = "bash -c 'find skills tests -name \"*.sh\" -print0 | xargs -0 -n1 bash -n'"
