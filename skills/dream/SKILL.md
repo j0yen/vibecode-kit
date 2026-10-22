@@ -49,6 +49,7 @@ live and fall back to the stated manual step when it is not.
 | `dream.dryrun` | end of Phase 3, each PRD | none; say so |
 | `dream.amend` | before any amend | `scripts/amend-key-gate.sh` (this skill) |
 | `dream.persist` | Phase 4, per batch | the manual Phase 4 steps |
+| `dream.premise` | pre-admission, creative PRDs | AC 1 also proves the premise |
 | `dream.scorecard` | Phase 0 | none |
 
 **Project profile** (optional): `$PRD_DIR/projects/<name>.md` — seed sources, slug
@@ -76,10 +77,10 @@ search, local repos. Absent → say so.
 2. Real traffic (a user or caller id).
 3. The user's explicit ask, dated.
 
-Every PRD carries `Seed:` in the contract's form (`chain:<run-id>:<family>`,
-`traffic:<id>`, or `joe:<YYYY-MM-DD>`; lint:seed-missing). A family whose owner is the
-measurement harness itself, not the product, becomes a hand fix to the harness, not a
-PRD; write one line: `harness-vs-host: <family> → <host PRD | harness hand fix>`.
+Every PRD carries `Seed:` in the contract's Seed grammar; kit default
+`user:<YYYY-MM-DD>` (lint:seed-missing). A family whose owner is the measurement
+harness itself, not the product, becomes a hand fix to the harness, not a PRD; write
+one line: `harness-vs-target: <family> → <target PRD | harness hand fix>`.
 
 **Grounded vs creative.** A grounded PRD cites its seed's evidence. A creative PRD is
 drafted only on an explicit ask, carries `Grounding: creative`, a `Falsifier:` line,
@@ -151,8 +152,17 @@ three dirs). Never reuse a slug, even a shipped one.
 only keys the table lists (lint:unknown-frontmatter-key) and never a key the table marks
 daemon-owned. Always: `Status: queued`, `Drafted:`, `Seed:`, the target keys, `Vision:`,
 `Depends-on:` when order matters. Superseding prior work → `Absorbs:` (lint). Follow
-any per-repo rule the contract states (for example, a marker line for a repo the
-contract says is hand-built).
+every per-repo rule the contract states. A PRD whose target is the build tool's own
+repo carries the contract's hand-built marker; if the contract defines none, write
+`Status: blocked` + `Blocked-on: contract hand-built marker`.
+
+Required keys (the drift test reads this list; every key must be in the contract table):
+```
+- Status:
+- Drafted:
+- Seed:
+- Vision:
+```
 
 **Body, in order:** TL;DR → Problem statement (cited) → Goals / Non-Goals → User stories
 (3–7, persona-tagged; enterprise features come as capability + control-plane pairs) →
