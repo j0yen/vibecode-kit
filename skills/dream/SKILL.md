@@ -1,437 +1,269 @@
 ---
 name: dream
 description: >
-  Product-PRD dreaming that feeds a build loop. Listens to a seed (a topic, a note, a
-  project profile, a ticket), gathers evidence, synthesizes a vision, then writes a fleet
-  of buildable PRDs to whatever /build is installed — it reads that build's contract at
-  run start, so the same skill drives a Python-only kit /build and a Rust+Python private
-  /build without edits. Loop-ready mode drafts the measurement harness first so a
-  closed-loop scaffolder can drive the fleet. Use when the user says /dream,
-  /dream <topic>, /dream project <name>, /dream loop <name>, or asks to "draft PRDs for
-  X", "vision out the next area", or "turn these notes into product docs."
+  Product-PRD dreaming that feeds a build loop. Takes a seed (a failure family, real
+  traffic, a note, a project profile, a ticket, or an explicit ask), gathers evidence,
+  synthesizes a vision, then writes buildable PRDs to whatever /build is installed. It
+  reads that build's contract at run start, including the contract's hook scripts, so
+  the same skill drives any /build without edits. Use when the user says /dream,
+  /dream <topic>, /dream project <name>, /dream loop <name>, /dream amend <slug>, or
+  asks to "draft PRDs for X" or "turn these notes into product docs."
 ---
 
-# /dream — a seed into a fleet of buildable PRDs
+# /dream — a seed into buildable PRDs
 
-`/dream` turns a direction into Product Requirements Documents that a build skill can
-implement without a human in the loop. It listens, researches, synthesizes a vision,
-decomposes the vision into PRD-sized pieces, and writes each PRD to the bundled
-PRD standard (`/atscale-prd-writer`: Customer Pain Test on every problem statement,
-Goldilocks requirements with P0/P1/P2, Given/When/Then acceptance criteria, explicit
-non-goals, success metrics with baselines, the anti-pattern audit before committing).
+`/dream` turns a seed into PRDs a builder can implement without a human. It researches,
+writes a vision, splits it into PRD-sized pieces, and writes each PRD to the PRD standard
+(`/atscale-prd-writer`: Customer Pain Test, P0/P1/P2 requirements, Given/When/Then ACs,
+non-goals, metrics with baselines, anti-pattern audit). Dream does not implement.
 
-Dream doesn't implement. `/build` routes each PRD to its builder. Dream's job is to
-make what gets built worth building — and to make it buildable as written.
+Every PRD must name what it moves (its `Seed:`), and its evidence must be checked
+before it leaves the drafter. Prose rules in this file point at the check that enforces
+them (`lint:<id>`); a rule tagged `judgment` has no check. Why each rule exists:
+`history.md`.
 
-## Phase −1 — Discover the environment (always run first)
+## Phase −1 — Discover (every invocation)
 
-Resolve every item below at the start of every invocation and state what you found
-in one short line each. Never assume a path exists — check.
+State one short line per item. Never assume a path exists.
 
-**PRD home** (`$PRD_DIR`) — first match wins:
-1. `$DREAM_PRD_DIR` if the env var is set.
-2. `~/Documents/PRDs/` if it exists.
-3. `./PRDs/` under the current working directory — create it if absent.
+**PRD home** (`$PRD_DIR`), first match: `$DREAM_PRD_DIR`; `~/Documents/PRDs/`;
+`./PRDs/` (create). Layout: `build-queue/` (the only dir /build scans), `built-prds/`,
+`parked/`, `visions/`, `projects/`, `notes/dream-log.md`, `MANIFEST.md` (derived).
+Dream writes only `build-queue/`, `visions/`, `notes/`, `MANIFEST.md`.
 
-Inside `$PRD_DIR`:
-```
-$PRD_DIR/
-├── build-queue/PRD-<slug>.md   # what dream writes; the only dir /build scans
-├── built-prds/PRD-<slug>.md    # shipped; /build moves files here; dream only reads
-├── parked/PRD-<slug>.md        # set aside by a human; evidence, never scanned
-├── visions/<slug>.md           # one vision per area; durable
-├── projects/<name>.md          # project profiles (see below)
-├── notes/dream-log.md          # append-only run log
-└── MANIFEST.md                 # derived index; regenerate, never hand-edit
-```
-Create `build-queue/`, `built-prds/`, `parked/`, `visions/`, `notes/` if missing. Dream
-writes only to `build-queue/`, `visions/`, `notes/`, and `MANIFEST.md`.
+**Build contract.** Find the installed `/build` skill's `build-contract.md` and read it.
+It defines targets, frontmatter keys, the AC line format, caps, and directories. No
+contract: kit default (`build_target` ∈ `python-cli | python-lib | python-agent |
+product`, numbered ACs, cap 8). Say which contract is in force. A PRD that misses the
+contract is stranded.
 
-**Build contract** — find the installed `/build` skill (the `build` entry in the
-session's skill list; on disk usually `~/.claude/skills/build/`, possibly a symlink).
-If it has a `build-contract.md`, read it: it defines the accepted `build_target`
-values, required companion keys (`build_into`, `publish`, …), the archive directory
-name, the acceptance-criteria line format, and how it publishes. **Write PRDs to that
-contract.** If no contract file exists, use this kit's default: `build_target` ∈
-`python-cli | python-lib | python-agent | product`, ACs as numbered lines. Say which
-contract is in force. A PRD that doesn't match the contract is stranded, not built.
+**Dream hooks.** If the contract has a `## Dream hooks` table, resolve each row's script
+relative to the contract's directory. A row whose script is missing or marked
+`(stage N)` is absent. Say which hooks are live. The phases below run a hook when it is
+live and fall back to the stated manual step when it is not.
 
-**Project profile** (optional) — `$PRD_DIR/projects/<name>.md`. Selected by
-`/dream project <name>`, `/dream loop <name>`, or when the seed names the project.
-A profile carries: the seed source(s) to re-read every run (a note, a doc), the slug
-prefix, the vision file, the lineage decision, build defaults (`build_target`,
-`build_into`, `publish`), and — for loop-ready fleets — the loop name and the loop
-contract seed. Profiles are data a human maintains; dream reads them, cites them, and
-may append a dated "Dream notes" section but never rewrites a human's lines.
+| hook | when | fallback when absent |
+|---|---|---|
+| `dream.seeds` | Phase 0 | read seeds the user names |
+| `dream.lint` | end of Phase 3, each PRD | the contract's lint script, else self-audit |
+| `dream.dryrun` | end of Phase 3, each PRD | none; say so |
+| `dream.amend` | before any amend | `scripts/amend-key-gate.sh` (this skill) |
+| `dream.persist` | Phase 4, per batch | the manual Phase 4 steps |
+| `dream.scorecard` | Phase 0 | none |
 
-**Git** — if `$PRD_DIR` is a git repo, commit what you write (stage the specific
-files, never `git add -A`) with the machine's existing identity; never set or
-hardcode a name/email. `git pull --rebase` first when an `origin` exists — another
-machine may have advanced the queue. Push only if `origin` exists; a push failure is
-a warning. Not a repo: offer `git init` once; plain files are fine if declined.
+**Project profile** (optional): `$PRD_DIR/projects/<name>.md` — seed sources, slug
+prefix, vision, lineage decision, build defaults, loop name. Dream may append a dated
+"Dream notes" section; it never rewrites a human's lines.
 
-**Lineage freshness** — for every `build_into` path the profile or the seed names
-(a repo whose file:line this run is about to cite), run
-`skills/dream/scripts/lineage-freshness.sh <path>` when the script exists in this
-kit installation (an older kit without it: skip, say so once). State the verdict
-inline: `lineage: <path> <verdict>`. On `behind <n>`, Phase 1's engineering-
-ground-truth citations for that repo come from `git show origin/main:<file>`
-instead of the local working tree, and any PRD citing it carries
-`- Cited-tree: <repo>@<remote-sha>` in its frontmatter (the script's own
-`remote-sha=` line). On `dirty <n>`, cite the local tree as usual — dream never
-stashes — and note the dirty count in the discovery line. On `no-remote` or
-`missing`, cite the local tree and say freshness could not be checked.
+**Git.** If `$PRD_DIR` is a repo: `git pull --rebase` first; stage only this run's
+files; machine identity, never set one; push if `origin` exists. Never commit in a
+clone a build daemon owns (the persist hook refuses it).
 
-**Evidence sources (all optional; detect, never assume)**
-- *Issue/wiki tracker*: Atlassian MCP tools (`searchJiraIssuesUsingJql`,
-  `getJiraIssue`, Confluence search) — discover the cloud ID via the MCP's
-  resource-discovery call, never hardcode it. Absent → say so.
-- *Code*: `gh auth status` succeeds, or GitHub MCP tools are present → read-only
-  grounding in real repos (`gh search code`, `gh repo view`, `gh api`). Absent → say so.
-- *Web*: a web search/fetch tool in the session → open-source intelligence for
-  Phase 1. Absent → rely on what the user provides and say so.
-- *Local repos*: whatever the profile or seed names under the home directory.
+**Lineage freshness.** For every `build_into` repo about to be cited, run
+`scripts/lineage-freshness.sh <path>` and print `lineage: <path> <verdict>`. On
+`behind <n>`, cite from `git show origin/main:<file>` and add
+`Cited-tree: <repo>@<remote-sha>` to the PRD. `dirty`: cite local, note the count.
+`no-remote`/`missing`: cite local, say freshness is unknown.
 
-**Run log** — `$PRD_DIR/notes/dream-log.md`.
+**Evidence sources** (detect, never assume): tracker MCP, `gh` / GitHub MCP, web
+search, local repos. Absent → say so.
 
-## Domain context
+## Phase 0 — Seed
 
-`reference.md` (sibling file) holds grounding for one domain family — semantic
-layers, query protocols, governed AI data access — plus general product-management
-frameworks. Read the PM-frameworks section for every seed; read the domain section
-only when the seed is in that family. For any other domain, Phase 1 research is the
-grounding; do not import the semantic-layer vocabulary into unrelated PRDs.
+**Allowed seeds**, in priority order:
+1. A family from the `dream.seeds` hook (a failure the build's measurement found, with
+   no PRD covering it).
+2. Real traffic (a user or caller id).
+3. The user's explicit ask, dated.
 
-## Phase 0 — Listen
+Every PRD carries `Seed:` in the contract's form (`chain:<run-id>:<family>`,
+`traffic:<id>`, or `joe:<YYYY-MM-DD>`; lint:seed-missing). A family whose owner is the
+measurement harness itself, not the product, becomes a hand fix to the harness, not a
+PRD; write one line: `harness-vs-host: <family> → <host PRD | harness hand fix>`.
 
-Read, in this order:
-- The seed: the user's prompt, or the profile's seed source(s) re-read fresh (a note
-  that changed since the last dream changes the fleet).
-- `$PRD_DIR/visions/` — extend, don't duplicate.
-- `$PRD_DIR/MANIFEST.md`, `build-queue/`, `built-prds/`, `parked/` — what exists,
-  what shipped, what a human set aside (parked PRDs are evidence of intent, not work
-  to redo).
-- The tail of the run log.
+**Grounded vs creative.** A grounded PRD cites its seed's evidence. A creative PRD is
+drafted only on an explicit ask, carries `Grounding: creative`, a `Falsifier:` line,
+and a `Premise:` command that tests the premise cheaply before any build. Ungrounded
+components stay in the vision as open questions. There is no fixed PRD count.
 
-**Lineage check (before any greenfield decision).** Search for prior work that
-already realizes part of the seed: visions and built PRDs here, repos the code
-evidence source can see, and anything the profile names. Decide one of:
-- **extend** — a live repo implements the substrate; PRDs carry `build_into` and
-  the contract's extend target;
-- **fork** — prior work exists but the seed changes a load-bearing model (storage,
-  auth, editing surface); say precisely what changes and what is reused;
-- **greenfield** — nothing usable exists; cite what was checked.
-Record the decision and its evidence in the vision's **Lineage** section. Never
-start greenfield on a seed whose predecessor sits one search away.
+Then read: the seed source (fresh); `visions/`; `MANIFEST.md`, `build-queue/`,
+`built-prds/`, `parked/` (parked PRDs are evidence, not work to redo); the dream-log
+tail; the scorecard hook output when live.
 
-Sit with all of it. The point is to notice what problem actually needs solving, not
-to confirm the topic the user named.
+**Lineage check.** Search for prior work that already covers part of the seed and
+decide **extend** (carry `build_into`), **fork** (say what load-bearing model changes),
+or **greenfield** (cite what was checked). Record it in the vision's Lineage section.
 
 ## Phase 1 — Research
 
-Every PRD claim is grounded in something real. Probe, in whatever order the
-sources allow:
+Ground every claim; cite file, PR, issue, or URL.
+1. Tracker bodies (spikes, epics) when connected.
+2. User evidence: calls, threads, logs; quantify.
+3. Engineering ground truth: the code the PRD will touch, from `origin/main` when the
+   repo is behind. A PRD that describes an API unlike the code is wrong.
+4. Outside research when the seed asks for it or the domain is new.
+5. Existing PRDs, visions, parked work. Never duplicate intent (the slug check's
+   similarity mode flags near-duplicates).
 
-1. **Tracker (if connected).** Full bodies of relevant spikes/epics; recent tickets
-   in the area. Spikes carry half-formed requirements that need a proper PRD.
-2. **User-provided evidence (always).** Calls, threads, notes, quotes; quantify.
-3. **Engineering ground truth.** Skim the actual code the PRD will touch — local
-   repos, or GitHub read-only — for API surfaces, types, error paths. Cite repo,
-   file, PR/issue. A PRD that describes an API differently from the code is wrong.
-   When Phase −1 found the cited repo `behind`, read it via
-   `git show origin/main:<file>` instead of the local checkout, and say so — a
-   `file:line` citation from a stale tree sends the builder to the wrong place.
-4. **Open-source intelligence (when the seed asks for it or the domain is new).**
-   What people adopt, what they ask for (issues, roadmaps, launches), what the
-   incumbents do. Cite URLs. Do the research the seed names explicitly — a seed
-   that says "research how X renders Y" is an instruction, not a suggestion.
-5. **Existing PRDs, visions, parked work.** Never duplicate intent.
+**Failure check (every seed, one line):** `Failure under this seed: yes — <what broke,
+with the observation> | no — <why this is an opportunity>`. It goes in the vision and
+the run log.
 
-Cite specific findings. An assertion without evidence is fiction.
+**Five whys (failure seeds).** Ask why up to five levels, each answered by an
+observation, stopping at a level outside the system's control. PRDs target the deepest
+actionable level; a shallower fix ships only as a guard beside the root fix.
 
-**Failure check on every seed (one line, mandatory).** Before Phase 2, write one line: `Failure under this seed: <yes — what broke, with the observation> | no — <why this is an opportunity, not a symptom>`. A seed that reads as product or opportunity often sits on a broken assumption ("nobody signs up", "add feature X"); the check is what catches it. A `yes` makes the seed failure-derived and triggers the full chain below. A `no` needs no chain — a why-chain forced onto a seed with no failure invents causes, which is fiction. The line goes in the vision under **Problem statement** and in the run log.
+**Rhyme (levels 6-8).** When a vision holds two or more failure addenda within seven
+days, lay the chains side by side and ask once why their roots rhyme, up to three more
+levels. Write `Cross-chain whys 6-8 (rhyme check <date>)` in the vision; its deepest
+level becomes a rule or a structural PRD.
 
-**Failure-derived seeds get a five-whys chain (most important rule of research).**
-When the seed originates in a failure — an incident, a digest's failure family, a
-red gate, a support complaint — Phase 1 is not done until the why-chain is
-written: why did it fail? why did that precursor hold? — up to five levels, each
-answered by an observation (log line, receipt, command output), stopping only at
-a level outside the system's control. The vision's problem statement and the
-component decomposition then target the DEEPEST actionable level; a component
-that fixes a shallower level ships only as an explicit guard beside the root
-fix, never alone. A PRD dreamed from a level-1 symptom builds the wrong thing
-with perfect ACs — the most expensive failure this skill can produce. (Origin:
-2026-09-09 burst-lane — the level-1 fix was `mkdir`; the level-5 fix was
-outcome-asserting verification, and it closed eight faults at once.)
-
-**Then rhyme (cross-chain whys, levels 6-8).** A sixth why inside one chain
-invents causes. When the vision already holds two or more failure-derived
-addenda within seven days (or the seed names several failures), lay the finished
-five-whys chains side by side and ask once, across them: why do these level-5
-roots rhyme? Answer with observations, up to three more levels (6-8), stopping
-where the answer is a rule the operator sets. Write it as a vision section
-titled `Cross-chain whys 6-8 (rhyme check <date>)`; the rhyme's deepest level
-becomes a rule or a structural PRD, not another successor. (Origin: 2026-09-17
-— four red gates, four correct level-5 fixes, one shape: mechanisms shipped on
-fixture proof with the live AC deferred; level 8 was the loop's objective,
-which became "all gates green" and "no-defer live ACs".)
+`reference.md` holds PM frameworks (read every time) and one domain family (read only
+for that domain).
 
 ## Phase 2 — Vision
 
-Write or update `$PRD_DIR/visions/<slug>.md`:
+Write or extend `visions/<slug>.md` (never replace): TL;DR · Problem statement
+(Customer Pain Test: who, what, why they can't, quantified cost; no solution) ·
+Lineage · End-state · **What would have to be true** (the end-state run forward, three
+to seven leaves marked `known | testable | assumed`, name the weakest link — it becomes
+the first PRD or the first open question) · Cross-chain whys (when due) · Components
+(one line each) · Order · Loop contract (loop-ready only) · Open questions with owners.
 
-- **TL;DR** — what is true when the vision is realized
-- **Problem statement** — Customer Pain Test: WHO + WHAT + WHY they can't today +
-  quantified consequence; no solution references
-- **Lineage** — the Phase 0 decision with its evidence
-- **End-state** — the concrete capability that exists when done
-- **What would have to be true** — the end-state run forward (Roger Martin's
-  question, the mirror of five whys). Start from the end-state and ask what
-  conditions must hold for it to be real; for each condition ask again, until
-  every leaf is something testable this week or already known true (cite the
-  evidence). Three to seven leaves; mark each `known | testable | assumed`.
-  Name the **weakest link** — the `assumed` leaf whose failure kills the
-  vision — in one line. The weakest link becomes the first PRD or the first
-  open question; a fleet that builds around it is building on a guess.
-- **Cross-chain whys 6-8 (rhyme check <date>)** — only when two or more
-  failure-derived addenda exist in this vision within seven days; the shared
-  root and the rule or structural component it implies (see Phase 1, rhyme)
-- **Components** — one bullet per future PRD, each with a one-line problem statement
-- **Order** — dependencies; what ships in parallel
-- **Loop contract** (loop-ready fleets only; see below)
-- **Open questions** — each with a named owner
+## Loop-ready fleets (`/dream loop <name>` or a profile `Loop:` line)
 
-Visions accumulate; they don't get replaced.
+The vision carries a Loop contract: loop name, metric (validated by hand on 3–5 known
+cases first), population, corpus + gold (gold is truth, never the baseline), proxy and
+truth tiers, measure command, preflight probes, deploy target, write scope, failure
+families. Build order is harness PRD → deploy PRD → feature PRDs; each feature PRD
+carries `Loop: <name>: <metric it moves>`. No feature PRD ahead of the harness.
 
-## Loop-ready fleets
+## Phase 3 — Draft
 
-A loop-ready fleet is one a closed-loop scaffolder (a "buildloop": orient → preflight
-→ harness gate → dream → build → deploy → measure → digest) will drive after the
-first build. Enter this mode via `/dream loop <name>` or a profile with a `Loop:`
-line. It changes two things.
+One PRD per component at `build-queue/PRD-<slug>.md`, prose to `writing-standard.md`
+(outline → draft → proofread).
 
-**1. The vision carries a Loop contract** — everything the scaffolder needs, decided
-now with evidence, not later by guesswork:
+**Before each PRD:** PRD vs RFC vs one-pager; Customer Pain Test; ship-independently
+test; slug check (the contract's `prd-slug-check.sh <slug>` if present, else search all
+three dirs). Never reuse a slug, even a shipped one.
 
-| field | meaning |
-|---|---|
-| loop name | `<name>-buildloop` |
-| metric | one number per run, what it measures, how it's scored; validated by hand on 3–5 known-good/known-bad cases before it becomes a PRD |
-| population | what the corpus represents (users × actions × conditions) and its real size |
-| corpus + gold | where entries and their ground-truth expectations live; gold is truth, never the baseline being beaten |
-| proxy tier / truth tier | the cheap fast check and the expensive faithful one, labelled |
-| measure command | the executable that emits the score and a run record |
-| preflight probes | substrate (data/infra up) and artifact (deployed binary answers) |
-| deploy target | where the shipped artifact runs and how it's redeployed |
-| write scope | the only repos/orgs the loop may push to |
-| failure families | how failures cluster; one fix per family |
+**Frontmatter = the contract's Frontmatter table.** Bullet form, first 80 lines. Write
+only keys the table lists (lint:unknown-frontmatter-key) and never a key the table marks
+daemon-owned. Always: `Status: queued`, `Drafted:`, `Seed:`, the target keys, `Vision:`,
+`Depends-on:` when order matters. Superseding prior work → `Absorbs:` (lint). Follow
+any per-repo rule the contract states (for example, a marker line for a repo the
+contract says is hand-built).
 
-**2. The fleet is harness-first.** Build order is: (a) the **harness PRD** — corpus,
-gold, scorer, measure command, preflight probes, ledger; (b) the **deploy PRD** —
-unit files, env contract, redeploy script; (c) feature PRDs, each carrying a
-frontmatter `Loop: <name>: <metric it moves>` line so the loop's digest can cluster
-results by family. A feature PRD before the harness is a fleet the loop cannot
-measure; do not draft it that way. When the seed itself names the reflection
-component (a synthetic user population, a conformance suite), that component IS the
-harness PRD.
+**Body, in order:** TL;DR → Problem statement (cited) → Goals / Non-Goals → User stories
+(3–7, persona-tagged; enterprise features come as capability + control-plane pairs) →
+Requirements (P0/P1/P2; "fast", "seamless", "scalable", "robust" need numbers) →
+Success metrics table (baseline, target, method, timeframe) → Technical considerations
+→ Migration / compatibility → Open questions table → Acceptance criteria.
 
-Language follows the build contract: the harness may be Python (`python-agent`) while
-the substrate is Rust, or the reverse — pick per component, state why.
+### Acceptance criteria
 
-## Phase 3 — Decompose & draft
+Under `## Acceptance criteria`, one AC per line: `N. P0 — Given …, When …, Then ….`
+Builders count `N. ` lines; tables and prose blocks are invisible. Edge cases on every
+PRD: empty input, no permission, concurrent actors, load, upstream down.
 
-One PRD per component, in dependency order, at `$PRD_DIR/build-queue/PRD-<slug>.md`
-(slug `^[a-z0-9]+(-[a-z0-9]+)*$`, prefixed per profile), each to the full PRD
-standard, prose to `writing-standard.md` (three-step method: outline → draft →
-proofread on every document).
+- At most the contract's AC cap (kit default 8); more → two PRDs with `Depends-on`,
+  split by ship-independent seams, never by number (lint).
+- Stay under the contract's line-byte cap with margin (lint).
+- One repo per PRD; a second repo → sibling PRD + `Depends-on`
+  (lint:cross-repo-path-in-ac).
+- Never pre-assign a shared counter (migration numbers, ordinal ids); say "the next
+  free number at land time" (lint:shared-counter-preassigned).
+- Adding a member to a generated set goes through its generator plus a drift test; the
+  AC states the property (lint:generator-set-member).
+- State the property, not a count ("every tool in the registry …", not "exactly 41
+  tools") — judgment.
+- AC 1 proves the class closed, not the one instance — judgment.
+- Never "the full suite is green" as an AC; use the contract's deferral key.
 
-**Amending (`/dream amend <slug>`):** check hard rule 2's two conditions first
-(manifest status `queued`; no dispatch iter_log). Re-run Phase 1 on the delta only,
-edit the file in place, append the amendment iter_log line, keep every existing AC
-number stable, and refresh the MANIFEST line if frontmatter changed. When a
-condition fails, say which one and draft a successor instead.
+### Live ACs (when the contract defines a Live grammar)
 
-**Before each PRD:** artifact check (PRD vs RFC vs one-pager), Customer Pain Test,
-Ship-Independently test, and the **slug uniqueness check**. A slug is the build's
-primary key (manifest, claims, receipts) and must name exactly one PRD in exactly
-one of `build-queue/`, `built-prds/`, `parked/`. If the installed `/build` ships a
-slug check (`scripts/prd-slug-check.sh <slug>` next to its `build-contract.md`),
-run it: exit 0 means free; exit 1 prints the existing location and a proposed
-suffix, so use that suffix. If no such script exists, search all three directories
-for `PRD-<slug>.md` yourself. Never write a PRD under a slug that already exists
-anywhere in the corpus, even when the existing one has shipped; a follow-on gets
-its own name (`-v2`, `-followup`).
+- An AC whose Given or When names a production host, service, or public URL carries the
+  contract's Live tail with a verbatim evidence command (lint:premise-ac-not-live).
+- A premise check (is the premise true at all?) that only prod can answer goes in the
+  `Premise:` key, never in a builder AC; the builder cannot run it.
+- Every file or script the evidence names exists at the target repo's `origin/main` or
+  is the deliverable of another AC in the same PRD (lint:live-evidence-referent-missing).
+- Evidence follows the contract's `## Lint rules` table (shell prefixes, required
+  headers, cleanup of anything the command creates). Read the table before writing
+  evidence; the lint hook enforces it.
+- A Live AC that can only pass after a later event (a deploy, the next measurement run)
+  says so and carries `Blocked-on:` (lint:later-event-without-blocked-on).
+- A precondition only a human can produce → `Status: blocked` + `Blocked-on:`.
 
-**Frontmatter** — bullet form, within the first 80 lines, keys from the build
-contract. Kit default shown; a private `/build` contract may add keys such as
-`build_into`, `build_priority`, `publish`, `deferred_acs`:
-```
-- Status: queued
-- build_target: <from the contract>
-- build_into: <abs path>           # only when extending an existing repo
-- Cited-tree: <repo>@<sha>         # one per repo Phase −1 found behind
-- publish: <from the contract>     # e.g. j0yen/private; omit if the contract has no publish key
-- Vision: visions/<slug>.md
-- Depends-on: PRD-<slug>.md        # when order matters
-- Loop: <name>: <metric>           # loop-ready fleets only
-- PM: <the user>
-- Drafted: YYYY-MM-DD
-- Engineering target: <repo/codebase the feature lands in>
-- Tracker: <issue key, or omit when no tracker is connected>
-```
-`Absorbed scope: <what it folds in>` directly under the frontmatter when a PRD
-supersedes prior work (a parked draft, an abandoned spike).
+**Anti-pattern audit:** solution-first, vague requirements, missing edge cases, scope
+hedging, too big, cargo-cult features, an engineering spec posing as a PRD.
 
-`Cited-tree: <repo>@<sha>` — one line per repo Phase −1 found `behind`; `<sha>` is
-the `remote-sha=` value `lineage-freshness.sh` printed. Omit it for a
-`fresh`/`dirty`/`no-remote`/`missing` repo — citing the local tree there is already
-unambiguous.
+**Check each PRD:** run `dream.lint` until it exits 0, then `dream.dryrun` when live.
+Fix the PRD, never the check. A finding you believe is wrong goes to the user as one
+line; the PRD waits.
 
-`Status` is a lifecycle field: `queued` → `building` → `built` (file moves to
-`built-prds/`) or `blocked`. Dream writes `queued`; `/build` advances it.
+**Drafting model:** the most capable tier in the session; mechanical work (collation,
+reads, manifest, git) goes to the cheapest capable model. Review follows the operator's
+standing review policy.
 
-**Body — core, inverted pyramid, this order:** TL;DR → Problem statement (with
-Phase 1 citations) → Goals / Non-Goals → User stories (3–7, persona-tagged;
-capability + control-plane pairs for enterprise features) → Requirements (P0/P1/P2,
-functional and non-functional; "fast", "seamless", "scalable", "robust" are banned
-without numbers) → Success metrics (primary, secondary, guardrail; baseline, target,
-method, timeframe — a table) → Technical considerations (constraints and interfaces,
-not implementation; name reused crates/modules from the lineage) → Migration /
-compatibility → Open questions (table: question, owner, due) → Acceptance criteria.
+## Amend (`/dream amend <slug>`)
 
-**Acceptance criteria — the countable form.** Under the heading
-`## Acceptance criteria`, one AC per line, numbered, level inline, Given/When/Then
-on the same line:
-```
-1. P0 — Given an empty document, When a viewer requests it, Then 200 with an empty body.
-2. P1 — Given 50 concurrent readers, When they read the same document, Then p95 < 150 ms.
-```
-Builders count `N. ` lines; `AC-1:` prefixes, tables, and prose blocks are invisible
-to them. Edge-case ritual on every PRD: empty input? no permission? concurrent
-actors? under load? upstream down?
-
-**Body — optional, when warranted:** UX & interaction model · API specification ·
-Security & compliance · GTM considerations · Appendix / companion documents.
-
-**Anti-pattern audit before committing:** solution-first, vague requirements,
-missing edge cases, scope-creep hedging, too big, cargo-cult competitive features,
-engineering spec masquerading as a PRD.
-
-**Size cap (Joe 2026-10-05 "go"):** at most 8 acceptance criteria per PRD. The
-inner coder's token cost grows superlinearly with AC count (10-05 ledger: 11–13-AC
-wm-build PRDs cost ~10 M weighted tokens each, ~25× a 5-AC PRD) and a long branch
-conflicts more at land. A component that needs more than 8 ACs is two PRDs with a
-`Depends-on`; split by ship-independent seams (config + plumbing first, behaviour
-second), never by AC number.
-
-**wm-build PRDs are never daemon-built (Joe 2026-10-05, permanent: "we cannot use
-wm-build to fix wm-build. always use alternatives").** Every PRD whose `build_into`
-is the wm-build repo carries `- Direct-build: hand (permanent rule 2026-10-05;
-wm-build never builds wm-build)` directly under `- Status: queued` (documentation only:
-the skip itself is the daemon config `[daemon] direct_repos` listing the wm-build repo;
-a free-text `Direct-build:` line does NOT make the daemon skip), and its run
-note says `Build path: hand (fence → sonnet coder → plain PR in a land gap)`. The
-daemon builds product PRDs only; the operator fences and hand-lands wm-build PRDs
-(decision: ~/Notes/wiki/decisions/2026-10-05-wm-build-never-builds-wm-build.md).
-
-**Range:** three to seven PRDs per vision; don't draft past the research. Ungrounded
-components stay in the vision as open questions.
-
-**Drafting model:** PRD synthesis runs on the most capable tier available in the
-session (Fable, else Opus) — never Sonnet or Haiku; a PRD drafted below that tier is
-a defect. Drafting subagents use the same tier. Everything mechanical — evidence
-collation, file reads, manifest, git — goes to the cheapest capable model.
+Run `dream.amend <slug> <keys>` (absent → `scripts/amend-key-gate.sh <status>
+<has-dispatch-iter-log> <keys>`). It reads the PRD's run state; refuse with its reason
+when it denies.
+- Queued, no dispatch `iter_log` → amend: re-research the delta, edit in place, keep
+  every AC number, append new ACs, append `- iter_log: <ts> amended by /dream (<seed>) —
+  <what changed>`, log it.
+- An open run reads a snapshot, so an amend is invisible to it; the hook says what the
+  operator must do instead.
+- Started, blocked, or parked → only `Superseded-by:` / `transferred_acs:`; otherwise
+  draft a successor with `Absorbs:`.
+- Wrong premise → successor, never an amend.
 
 ## Phase 4 — Persist
 
-1. **MANIFEST.md** — regenerate by scanning frontmatter across `build-queue/`,
-   `built-prds/`, and `parked/`: one line per PRD (directory, filename, Status,
-   build_target, Drafted). Atomic write (temp file, rename). A concurrent `/build`
-   must never read a partial manifest.
-2. **Commit** — `git pull --rebase` if origin exists, stage only this run's files,
-   message `dream: <N> PRDs + vision from <seed>` with slugs in the body, push if
-   origin exists.
-3. **Run note** in `notes/dream-log.md`:
-   ```
-   ## <ISO-ts>  /dream  vision-<slug>
-   Profile: projects/<name>.md (or none)
-   Contract: <which build-contract was in force>
-   Lineage: extend <repo> | fork <repo> | greenfield
-   Drafted: PRD-foo.md, PRD-bar.md
-   Build order: foo → bar (bar consumes foo's API)
-   Loop: <name> — metric <…> (loop-ready fleets)
-   Open questions: <key unresolved items>
-   ```
-4. **Nothing separate to queue** — `Status: queued` in `build-queue/` is the queue.
-   End by stating the build order and that `/build` will drain it (or
-   `/build $PRD_DIR/build-queue/PRD-<first>.md` for one).
-5. **Wiki publication is opt-in** — if Confluence write tools exist, ask; never
-   write unasked. No tools: skip silently.
+With `dream.persist` live: call it per batch of at most 4 PRDs. It regenerates the
+manifest, guards the diff, commits, pushes, and checks each PRD is eligible to build.
+An ineligible PRD fails the batch; fix it and re-run.
+
+Without it:
+1. Regenerate `MANIFEST.md` from frontmatter across the three dirs (atomic write; both
+   `- Key: v` and `Key: v`); stop if the diff touches lines this run did not add.
+2. `git pull --rebase`; stage only this run's files; commit
+   `dream: <N> PRDs (<slugs>)`; push.
+
+Then append the run note to `notes/dream-log.md`:
+```
+## <ISO-ts>  /dream  vision-<slug>
+Contract: <path>   Hooks: <live hooks>
+Seeds: <Seed values>
+Lineage: extend <repo> | fork <repo> | greenfield
+Drafted: PRD-foo.md, PRD-bar.md   Build order: foo → bar
+Lint: <clean | findings fixed>   Eligibility: <per slug>
+Open questions: <items>
+```
+`Status: queued` in `build-queue/` is the queue; end by stating the build order. Wiki
+publication is opt-in: ask when write tools exist.
 
 ## Invocations
 
-- `/dream` → interactive; ask for the seed, walk all phases
-- `/dream <topic>` → seed from topic
-- `/dream project <name>` → seed from `$PRD_DIR/projects/<name>.md`
-- `/dream loop <name>` → same, in loop-ready mode (harness-first fleet + Loop contract)
-- `/dream from <ticket-key>` → seed from a tracker item (requires a tracker MCP)
-- `/dream amend <slug>` → edit a queued, unstarted PRD in place (hard rule 2's
-  conditions; refuse with the reason and offer a successor when they fail)
-- `/dream visions` → list visions and their status, then exit
+`/dream` (interactive) · `/dream <topic>` · `/dream project <name>` ·
+`/dream loop <name>` · `/dream from <ticket>` · `/dream amend <slug>` ·
+`/dream visions` (list and exit).
 
 ## Hard rules
 
-1. **Every PRD follows the PRD standard.** No exceptions.
-2. **Amend in place only while a PRD is untouched; otherwise draft successors.**
-   A PRD may be edited in place by `/dream amend <slug>` when BOTH hold: its
-   manifest status is `queued`, and its file carries no dispatch `iter_log` line
-   from `/build` (operator notes do not count). The amendment is one commit that
-   keeps the slug, never renumbers or rewords an existing AC (new ACs append),
-   appends `- iter_log: <ts> amended by /dream (<seed>) — <what changed>`, and
-   gets a dream-log entry. Once `/build` has taken any step (status `building`,
-   `in_progress`, `blocked`, or any dispatch iter_log), the file is a contract
-   under construction — receipts and claims cite its AC numbers — so draft a
-   successor instead; `/build` moves finished ones; humans park. Never delete.
-   (Relaxed 2026-09-15, Joe: a queued PRD the loop deferred for an incomplete
-   requirement cost a v2 plus a park where one amend would have done.)
-   **Narrow exception (2026-09-18, decision 36622292):** a `building`,
-   `blocked`, or `parked` predecessor may still be amended in place, but
-   only to add `Superseded-by:` and/or `transferred_acs:` — the keys that
-   change who owns its remaining ACs, not the contract text any receipt
-   cites. No AC text, number, or any other key may change under this
-   exception. Same commit shape as above (append the `iter_log` line, no
-   renumbering). Run
-   `skills/dream/scripts/amend-key-gate.sh <status> <has-dispatch-iter-log>
-   <keys>` before writing; `allow` (exit 0) proceeds, `deny: <reason>`
-   (exit 2) refuses with that reason. See PRD-build-prd-superseded-by
-   requirement 9 / AC13.
-3. **Cite the research.** Every "Why" references Phase 1 evidence.
-4. **Visions are durable.** Update; never replace silently.
-5. **Logs are append-only.**
-6. **Don't dream past the research.**
-7. **Enterprise features come in pairs** — capability + control plane; say so in
-   Non-Goals if one ships without the other.
-8. **No credentials or internal identifiers in PRDs.** Env-var names only.
-9. **Queue what you draft.** `Status: queued` in `build-queue/` is the whole step.
-10. **Discovery over assumption.** Re-run Phase −1 every invocation.
-11. **Wiki publication is opt-in per run.**
-12. **The writing standard governs all prose.** Understandability outranks
-    everything.
-13. **Write to the build contract in force.** Targets, keys, AC line format, and
-    directories come from the installed `/build`'s `build-contract.md`, never from
-    memory of some other build.
-14. **Lineage before greenfield.** A vision states extend / fork / greenfield with
-    evidence; PRDs that extend carry `build_into`.
-15. **Failure check on every seed; five whys before dreaming a fix.** Every seed gets the one-line failure check. A failure-derived seed without an
-    evidence-backed why-chain is not researched; PRDs target the deepest
-    actionable level.
-16. **Loop-ready means harness-first.** No feature PRD ahead of the harness PRD in a
-    loop-ready fleet; every feature PRD names the metric it moves.
-
-17. **What would have to be true before decomposing.** Every vision carries the
-    condition chain and names its weakest link; the first PRD or the first open
-    question addresses that link. Five whys looks back at a failure; this looks
-    forward at the end-state. Both end at something observable.
-18. **Five whys, then rhyme.** Never deepen one chain past five; when two or more
-    chains exist in a vision within seven days, run the rhyme check (Phase 1) and
-    let its deepest level become a rule or a structural PRD.
+1. Every PRD follows the PRD standard and names its `Seed:`.
+2. Amend only through the amend hook or gate; otherwise draft a successor. Never delete.
+3. Cite the research; an assertion without evidence is fiction.
+4. Visions and logs are append-only.
+5. Write to the build contract in force, never to memory of another build.
+6. Grounded by default; creative only on an explicit ask, with `Falsifier:` and
+   `Premise:`.
+7. Lineage before greenfield.
+8. Failure check on every seed; five whys before a fix; rhyme when chains pile up.
+9. What would have to be true before decomposing; the weakest link goes first.
+10. Loop-ready means harness-first.
+11. A PRD leaves the drafter only with its lint hook clean.
+12. No credentials or internal identifiers in PRDs; env-var names only.
+13. The writing standard governs all prose.
