@@ -217,8 +217,9 @@ reads, manifest, git) goes to the cheapest capable model.
 
 **Review:** one review turn per batch of at most 4 PRDs, with one verdict line per PRD;
 approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one that
-touches more than one repo or surface, is reviewed alone. Record each verdict where the
-persist hook can read it.
+touches more than one repo or surface, is reviewed alone and persists in a batch of
+one. Write each verdict as `<slug> APPROVE|FIX|REJECT <reviewer>`, one line per PRD, to a
+review file.
 
 ## Amend (`/dream amend <slug>`)
 
@@ -236,8 +237,9 @@ when it denies.
 
 ## Phase 4 — Persist
 
-With `dream.persist` live: call it per batch of at most 4 PRDs. It regenerates the
-manifest, guards the diff, commits, pushes, and checks each PRD is eligible to build.
+With `dream.persist` live: call it per batch of at most 4 PRDs, passing the review file
+through the contract's args (`--review <file>`). It regenerates the manifest, guards the
+diff, commits, pushes, and checks each PRD is eligible to build.
 An ineligible PRD fails the batch; fix it and re-run.
 
 Without it:
