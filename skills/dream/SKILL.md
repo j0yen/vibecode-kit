@@ -3,9 +3,9 @@ name: dream
 description: >
   Product-PRD dreaming that feeds a build loop. Takes a seed (a failure family, real
   traffic, a note, a project profile, a ticket, or an explicit ask), gathers evidence,
-  synthesizes a vision, then writes buildable PRDs to whatever /build is installed. It
+  synthesizes a vision, then writes buildable PRDs for whatever builder is installed. It
   reads that build's contract at run start, including the contract's hook scripts, so
-  the same skill drives any /build without edits. Use when the user says /dream,
+  the same skill drives any builder without edits. Use when the user says /dream,
   /dream <topic>, /dream project <name>, /dream loop <name>, /dream amend <slug>, or
   asks to "draft PRDs for X" or "turn these notes into product docs."
 ---
@@ -27,11 +27,11 @@ them (`lint:<id>`); a rule tagged `judgment` has no check. Why each rule exists:
 State one short line per item. Never assume a path exists.
 
 **PRD home** (`$PRD_DIR`), first match: `$DREAM_PRD_DIR`; `~/Documents/PRDs/`;
-`./PRDs/` (create). Layout: `build-queue/` (the only dir /build scans), `built-prds/`,
+`./PRDs/` (create). Layout: `build-queue/` (the only dir the builder scans), `built-prds/`,
 `parked/`, `visions/`, `projects/`, `notes/dream-log.md`, `MANIFEST.md` (derived).
 Dream writes only `build-queue/`, `visions/`, `notes/`, `MANIFEST.md`.
 
-**Build contract.** Find the installed `/build` skill's `build-contract.md` and read it.
+**Build contract.** Find `build-contract.md` in the installed build skill's directory (the builder reads the same file) and read it.
 It defines targets, frontmatter keys, the AC line format, caps, and directories. No
 contract: kit default (`build_target` ∈ `python-cli | python-lib | python-agent |
 product`, numbered ACs, cap 8). Say which contract is in force. A PRD that misses the
@@ -213,8 +213,12 @@ Fix the PRD, never the check. A finding you believe is wrong goes to the user as
 line; the PRD waits.
 
 **Drafting model:** the most capable tier in the session; mechanical work (collation,
-reads, manifest, git) goes to the cheapest capable model. Review follows the operator's
-standing review policy.
+reads, manifest, git) goes to the cheapest capable model.
+
+**Review:** one review turn per batch of at most 4 PRDs, with one verdict line per PRD;
+approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one that
+touches more than one repo or surface, is reviewed alone. Record each verdict where the
+persist hook can read it.
 
 ## Amend (`/dream amend <slug>`)
 
