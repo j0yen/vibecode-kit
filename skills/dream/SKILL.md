@@ -8,6 +8,8 @@ description: >
   the same skill drives any builder without edits. Use when the user says /dream,
   /dream <topic>, /dream project <name>, /dream loop <name>, /dream amend <slug>, or
   asks to "draft PRDs for X" or "turn these notes into product docs."
+model: fable
+effort: max
 ---
 
 # /dream — a seed into buildable PRDs
@@ -212,7 +214,8 @@ hedging, too big, cargo-cult features, an engineering spec posing as a PRD.
 Fix the PRD, never the check. A finding you believe is wrong goes to the user as one
 line; the PRD waits.
 
-**Drafting model:** the most capable tier in the session; mechanical work (collation,
+**Drafting model:** Fable at max effort, pinned in the frontmatter (Joe 2026-10-24
+"make /dream use Fable Max"; the pin holds for the invoking turn only); mechanical work (collation,
 reads, manifest, git) goes to the cheapest capable model.
 
 **Review:** one review turn per batch of at most 4 PRDs, with one verdict line per PRD;
