@@ -10,6 +10,7 @@ description: >
   asks to "draft PRDs for X" or "turn these notes into product docs."
 model: fable
 effort: max
+fable-spawn: true
 ---
 
 # /dream — a seed into buildable PRDs
@@ -130,7 +131,9 @@ Write or extend `visions/<slug>.md` (never replace): TL;DR · Problem statement
 (Customer Pain Test: who, what, why they can't, quantified cost; no solution) ·
 Lineage · End-state · **What would have to be true** (the end-state run forward, three
 to seven leaves marked `known | testable | assumed`, name the weakest link — it becomes
-the first PRD or the first open question) · Cross-chain whys (when due) · Components
+the first PRD or the first open question; when the `/wwhtbt` skill is installed, run it
+and cite its `decisions/*-wwhtbt.md` page here instead of re-deriving, and when the seed
+is a failure, cite its `/5whysandrhyme` page) · Cross-chain whys (when due) · Components
 (one line each) · Order · Loop contract (loop-ready only) · Open questions with owners.
 
 ## Loop-ready fleets (`/dream loop <name>` or a profile `Loop:` line)
