@@ -36,6 +36,16 @@ fi
 
 dirty_n=$(git -C "$repo" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 if [ "${dirty_n:-0}" -gt 0 ]; then
+  # A dirty tree still reports how far behind origin/main it is, so a /dream
+  # that cites a dirty clone also sees that the clone is stale (A540, 11-01).
+  timeout 10 git -C "$repo" fetch --quiet origin >/dev/null 2>&1 || true
+  if git -C "$repo" rev-parse -q --verify origin/main >/dev/null 2>&1; then
+    dirty_behind=$(git -C "$repo" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
+    if [ "${dirty_behind:-0}" -gt 0 ]; then
+      echo "dirty $dirty_n behind $dirty_behind"
+      exit 2
+    fi
+  fi
   echo "dirty $dirty_n"
   exit 2
 fi
