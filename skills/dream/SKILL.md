@@ -8,8 +8,6 @@ description: >
   the same skill drives any builder without edits. Use when the user says /dream,
   /dream <topic>, /dream project <name>, /dream loop <name>, /dream amend <slug>, or
   asks to "draft PRDs for X" or "turn these notes into product docs."
-model: fable
-effort: max
 fable-spawn: true
 ---
 
@@ -217,9 +215,14 @@ hedging, too big, cargo-cult features, an engineering spec posing as a PRD.
 Fix the PRD, never the check. A finding you believe is wrong goes to the user as one
 line; the PRD waits.
 
-**Drafting model:** Fable at max effort, pinned in the frontmatter (Joe 2026-10-24
-"make /dream use Fable Max"; the pin holds for the invoking turn only); mechanical work (collation,
-reads, manifest, git) goes to the cheapest capable model.
+**Phase routing:** each phase runs the model the shared policy resolves, never an inherited
+dream model (`.config/skill-routing/policy.json`, skill `dream`, launched through
+`fable-launch.sh --route-request` with `decision_class` = the phase). Deterministic code:
+discovery, contract, duplicates, lint, manifest, persistence. Haiku: extraction, inventory,
+classification. Sonnet medium: narrow amendments, drafting an approved vision. Fable high:
+new vision, prioritization, difficult decomposition (evidence refs required). Fable xhigh:
+evidence-linked consequential uncertainty. Max only as an exception recorded in the ledger first.
+Nested skills (wwhtbt, 5whysandrhyme) resolve their own route.
 
 **Review:** one review turn per batch of at most 4 PRDs, with one verdict line per PRD;
 approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one that
