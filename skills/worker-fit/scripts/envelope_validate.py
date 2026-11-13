@@ -244,7 +244,7 @@ def keep(kind, v):
     if not isinstance(v, str):
         return v
     ok = _KINDS[kind](v)
-    if kind != "sha" and ok == v and not _trusted_pieces(v):
+    if kind != "sha" and ok == v and not _trusted_pieces(v, max_ids=2 if kind == "path" else 1):
         return v
     return v if ok is None or ok != v else _MARK_OPEN + v + _MARK_CLOSE
 
@@ -260,35 +260,23 @@ def show(label, v, kind="ident"):
 
 
 _OPQ_REF = re.compile(r"\[opaque [a-z-]{1,12} [0-9a-f]{8}\]")
-_STRICT_SHORT = 5
-
-
-def _strict_piece(seg, words):
-    """A piece a queue row field may print: a vocabulary word (the tool's closed vocabulary or the caller's), a bounded
-    number, a compact date, or a short plain piece. Nothing else: no hex id, no long run, no unlisted word."""
-    low = seg.lower()
-    stripped = low.rstrip("0123456789")
-    return (low in _ID_WORDS or low in words or (stripped and (stripped in _ID_WORDS or stripped in words) and len(low) - len(stripped) <= 6)
-            or (seg.isdigit() and len(seg) <= _MAX_DIGITS) or bool(_DATE_PIECE.fullmatch(seg))
-            or (len(seg) <= _STRICT_SHORT and seg.isalnum() and not _cred_name(seg)))
-
-
 def show_row(label, v, words=frozenset()):
-    """What a queue-row field prints (a row id, owner, wait, status or claim): the STRICT gate. Row fields are not
-    identities the tool can validate, so each whitespace-separated token must pass the credential layers and consist only of
-    closed-vocabulary pieces (see _strict_piece); otherwise the whole value is an opaque keyed ref. A non-string value is
-    an opaque ref (an integer of at most ten digits prints as the number), a placeholder stays as it is."""
+    """What a queue-row field prints (a row id, owner, wait, status or claim): the SAME trust gate as every identity
+    (_gate_values: closed vocabulary, bounded numbers, exact id grammars, a small budget of unlisted characters). Each
+    whitespace-separated token must also pass the credential layers; the whole value shares one budget, so any number of
+    short pieces is bounded. Otherwise the whole value is an opaque keyed ref. A non-string value is an opaque ref (an
+    integer of at most seven digits prints as the number), a placeholder stays as it is."""
     if isinstance(v, bool) or not isinstance(v, (str, int)):
         return opaque(label, v)
     if isinstance(v, int):
-        return str(v) if abs(v) < 10 ** _MAX_DIGITS else opaque(label, v)
+        return str(v) if abs(v) < 10 ** _MAX_DIGIT_PIECE else opaque(label, v)
     if is_unknown(v) or _OPQ_REF.fullmatch(v):
         return v
     s = unicodedata.normalize("NFKC", v).strip()
     toks = s.split()
     if (s == v.strip() and toks and len(s) <= 256 and all(
-            redact_credentials(t) == t and not _cred_marked([x for x in _SPLIT.split(t) if x])
-            and all(_strict_piece(x, words) for x in _SPLIT.split(t) if x) for t in toks)):
+            redact_credentials(t) == t and not _cred_marked([x for x in _SPLIT.split(t) if x]) for t in toks)
+            and _gate_values(toks, words, 0)):  # a queue row carries no hex id, uuid or ULID
         return v
     return opaque(label, v)
 
@@ -681,103 +669,234 @@ _ID_WORDS = frozenset(("task tasks sess inv invocation run runs build builds wm 
                        "syn synthorg mcphost wintermute prd dream gate golden fixture fixtures sample demo example sandbox stage staging prod "
                        "production dev canary shadow backup snapshot snap checkpoint ckpt metrics stats status state github gh remote origin "
                        "upstream tmux pane window screen term pty shell bash sh py python rs rust node npm yarn proc process thread tid name label "
-                       "spec specs plan plans diff patch fix fixes test tests suite case cases shift clock").split())
-_VOCAB_PREFIX = tuple(sorted((w for w in _ID_WORDS if len(w) >= 3 and not _cred_name(w)), key=len, reverse=True))
-_HEX_RUN = re.compile(r"[0-9a-fA-F]{9,64}")
-_HEX_GLUED = re.compile(r"(?P<w>[A-Za-z]{1,12}?)(?P<h>[0-9a-f]{9,64})")
+                       "spec specs plan plans diff patch fix fixes test tests suite case cases shift clock "
+                       "wfit impl implementation opus sonnet haiku fable root temp us eu ap west east north south central compute region zone cluster").split())
 _ULID_ANY = re.compile(r"[0-7][0-9A-HJKMNP-TV-Z]{25}|[0-7][0-9a-hjkmnp-tv-z]{25}")
-_SHORT_HEX = re.compile(r"[0-9a-fA-F]{1,8}")
+_SHORT_HEX = re.compile(r"[0-9a-fA-F]{1,4}")
+
+# THE ONE TRUST GATE (_gate_values). A piece of a value prints only when it is (a) a word of the CLOSED vocabulary
+# (_ID_WORDS, the caller's reviewed words, the DNS top-level labels: enumerated in this file), (b) a bounded number, (c) a
+# validated calendar timestamp or date, (d) one of the EXACT id grammars (a uuid 8-4-4-4-12, a hex id of 7-12, 32, 40 or 64
+# characters that mixes digits and letters, a ULID, an IP literal), or (e) a small amount of unlisted material: a piece of at
+# most five characters, or one unlisted token of at most three letters inside a vocabulary compound. Unlisted material has a
+# TOTAL budget per value (_MAX_UNLISTED characters), so no count of short pieces adds up to a credential, and an id grammar
+# is allowed once (twice in a path) so groups of hex do not concatenate into a key. Everything else is opaque.
+# No class of piece is trusted whatever its length, no denylist word decides anything here.
+_MAX_DIGIT_PIECE = 7  # the longest digit-only piece (a pid, a sequence number, a compact date)
+_MAX_DIGITS_TOTAL = 14  # the most digits outside timestamps and ids one value may carry
+_MAX_UNLISTED = 8  # the most characters of unlisted material one value may carry
+_MAX_SHORT = 5  # the longest unlisted piece
+_MAX_UNLISTED_WITH_ID = 0  # beside an id grammar nothing unlisted: a random id sits only beside closed-vocabulary pieces
+_MAX_PIECES = 40
+_UUID = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z])")
+_DATE_OK = r"20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])"
+_TS_ID = re.compile(_DATE_OK + r"T(?:[01]\d|2[0-3])[0-5]\d[0-5]\dZ?")
+_DATE_ID = re.compile(_DATE_OK)
+_DATE_TAIL = re.compile(r"\d{1,2}" + _DATE_OK)
+_GATE_SPLIT = re.compile(r"[\s\-_./+=:@%~?&#,\\]+")
+_HEX_LENS = frozenset(list(range(7, 13)) + [32, 40, 64])
+_DNS_WORDS = frozenset("net com org io dev local internal lan corp home arpa cloud app ai co".split())
+_NUMERIC_NAMES = frozenset("pid ppid tid uid gid port seq rev revision count n line lines size bytes exit attempt retry retries ms "
+                           "secs seconds epoch offset len length total num number version ver ttl age idx index rc returncode".split())
 
 
-def _vocab(seg):
+def _hex_id(seg, prev=""):
+    """An exact hex id: 7-12, 32, 40 or 64 hex characters (17 after an 'i', an instance id) in one case that mix digits and
+    letters. A digits-only run is a number, never an id."""
+    n = len(seg)
+    if not (n in _HEX_LENS or (n == 17 and prev.lower() == "i")) or not (seg.islower() or seg.isupper() or seg.isdigit()):
+        return False
+    return bool(re.fullmatch(r"[0-9a-fA-F]+", seg)) and any(c.isdigit() for c in seg) and any(c.isalpha() for c in seg)
+
+
+def _id_grammar(seg, prev=""):
+    """The id grammar a piece is, or ''. A word of the vocabulary glued to a hex id ('rbcca95bf8e2f', 'child' + hex) is one id."""
+    if _hex_id(seg, prev) or _ULID_ANY.fullmatch(seg):
+        return "id"
+    for k in range(1, min(12, len(seg) - 6)):
+        if (k >= 2 or seg[0] == "r") and seg[:k].lower() in _ID_WORDS and _hex_id(seg[k:]):  # one-letter prefix: only systemd's 'r'
+            return "id"
+    return ""
+
+
+def _word(low, words):
+    return (low in _ID_WORDS or low in words or low in _DNS_WORDS) and not _cred_name(low)
+
+
+def _segment(low, words):
+    """The number of vocabulary words (each at least two letters, at most four) a lower-case run splits into, or 0."""
+    if len(low) < 4 or len(low) > 40:
+        return 0
+    best = [None] * (len(low) + 1)
+    best[0] = 0
+    for i in range(1, len(low) + 1):
+        for j in range(max(0, i - 14), i - 1):
+            if best[j] is not None and _word(low[j:i], words) and (best[i] is None or best[j] + 1 < best[i]):
+                best[i] = best[j] + 1
+    return best[-1] if best[-1] and best[-1] <= 4 else 0
+
+
+def _compound(seg, words, st):
+    """A mixed piece that reads as vocabulary joined with numbers ('wmbuild1663impl2', 'WF1663Impl', 'r7wfitfix2'): every
+    alphabetic token is a vocabulary word (or splits into up to four of them), digits are bounded numbers, and at most ONE
+    unlisted token of at most three letters ('wfr6') is allowed, charged to the budget."""
+    toks = _TOKENS.findall(seg)
+    if not toks or "".join(toks) != seg:
+        return False
+    unl = cost = digits = 0
+    for t in toks:
+        if t.isdigit():
+            if _DATE_ID.fullmatch(t) or _DATE_TAIL.fullmatch(t):
+                continue  # a calendar date, or a version digit or two glued to one ('r7wfr7' + '20261113')
+            if len(t) > _MAX_DIGIT_PIECE:
+                return False
+            digits += len(t)
+            continue
+        low = t.lower()
+        if _word(low, st["words"]) or _segment(low, st["words"]):
+            continue
+        if len(t) <= 3 and not _cred_name(low):
+            unl += 1
+            cost += len(t)
+            continue
+        return False
+    if unl > 1:
+        return False
+    st["cost"] += cost
+    st["digits"] += digits
+    return True
+
+
+def _piece(seg, prev, st):
+    words = st["words"]
     low = seg.lower()
-    return low in _ID_WORDS or low.rstrip("0123456789") in _ID_WORDS and not _cred_name(low)
-
-
-def _random_piece(seg):
-    """(is_random, glued_word): the piece is a long hex id, a word glued to one, or a ULID."""
-    if seg.isdigit():
-        return False, ""  # a digit-only piece is bounded by length (_piece_trusted), it is not a random hex id
-    if _HEX_RUN.fullmatch(seg) or _ULID_ANY.fullmatch(seg):
-        return True, ""
-    m = _HEX_GLUED.fullmatch(seg)
-    if m and any(c.isdigit() for c in m.group("h")):
-        return True, m.group("w")
-    return False, ""
-
-
-_MAX_WORD = 12    # the longest letters-only piece that is not a vocabulary word and still reads as a name
-_MAX_CAMEL = 24   # the same for CamelCase or upper-case words
-_MAX_NAME_LETTERS = 22  # the most letters of unlisted words one identity may carry
-_LONG_WORD = 8  # an identity carries at most one unlisted word longer than this
-_MAX_DIGITS = 10  # the longest digit-only piece (a pid, a sequence number, an epoch second, a compact date)
-_CAMEL = re.compile(r"(?:[A-Z][a-z]+)+|[A-Z]+")
-
-
-def _piece_trusted(seg):
-    """One piece of an identity is trusted for printing when it is a vocabulary word, or a bounded plain piece (digits, a
-    name of letters, a short id), or a shape of the field grammar. Every class of piece has a length bound: no class of
-    piece is trusted whatever its length, so a long random run of any alphabet is opaque."""
-    if _vocab(seg):
+    if _word(low, words):
+        return True
+    if _TS_ID.fullmatch(seg) or _DATE_ID.fullmatch(seg):
         return True
     if seg.isdigit():
-        return len(seg) <= _MAX_DIGITS
-    if seg.isalpha():
-        return len(seg) <= (_MAX_CAMEL if _CAMEL.fullmatch(seg) else _MAX_WORD)
-    low = seg.lower()
-    if seg.isalnum() and any(low.startswith(w) and 0 < len(low) - len(w) <= 8 for w in _VOCAB_PREFIX):
-        return True  # a vocabulary word with a short suffix ('tail9z8y7'): a machine-generated name
-    return _piece_ok(seg)
+        if len(seg) > _MAX_DIGIT_PIECE:
+            return False
+        st["digits"] += len(seg)
+        return True
+    if _id_grammar(seg, prev):
+        st["ids"] += 1
+        return True
+    if not (seg.isascii() and seg.isalnum()):
+        return False
+    if _compound(seg, words, st):
+        return True
+    for w in sorted((x for x in set(_ID_WORDS) | set(words) if len(x) >= 3 and not _cred_name(x)), key=len, reverse=True):
+        rest = seg[len(w):]
+        if low.startswith(w) and 0 < len(rest) <= _MAX_SHORT and not _cred_name(rest):
+            st["cost"] += len(rest)  # a vocabulary word with a short generated suffix ('tail1a2b3')
+            return True
+    if len(seg) <= _MAX_SHORT and not _cred_name(low):
+        st["cost"] += len(seg)
+        return True
+    return False
 
 
 def _name_value_ok(s):
     """An identity that carries `name=value` chunks ('pid=77'): the name is made of vocabulary words and the value of
-    trusted plain pieces (digits, dates, a short hex id, vocabulary words). 'pswd=hunter2x' is a pair, not an identity."""
-    for m in re.finditer(r"([^=&?,#]*)=([^=&?,#]*)", s):
-        name = [x for x in _SPLIT.split(m.group(1)) if x]
-        val = [x for x in _SPLIT.split(m.group(2)) if x]
+    trusted plain pieces (digits, dates, a very short hex group, vocabulary words). 'pswd=hunter2x' is a pair, not an identity."""
+    chunks = re.findall(r"([^=&?,#]*)=([^=&?,#]*)", s)
+    if len(chunks) > 3:
+        return False
+    for name_, val_ in chunks:
+        name = [x for x in _SPLIT.split(name_) if x]
+        val = [x for x in _SPLIT.split(val_) if x]
         if not name or not all(_vocab(x) for x in name):
             return False
-        if not all(_vocab(x) or (x.isdigit() and len(x) <= _MAX_DIGITS) or _DATE_PIECE.fullmatch(x) or _SHORT_HEX.fullmatch(x)
+        if not all(_vocab(x) or (x.isdigit() and len(x) <= _MAX_DIGIT_PIECE) or _DATE_ID.fullmatch(x) or _SHORT_HEX.fullmatch(x)
                    for x in val):
             return False
     return True
 
 
-def _trusted_pieces(s):
-    """True when every piece of a grammar-valid identity is trusted for printing (see TRUST LAYER). The host grammar is not
-    an exemption: a DNS label is a piece like any other."""
-    if "=" in s and not _name_value_ok(s):
+def _vocab(seg):
+    low = seg.lower()
+    return low in _ID_WORDS or (low.rstrip("0123456789") in _ID_WORDS and len(low) - len(low.rstrip("0123456789")) <= 4
+                                and not _cred_name(low))
+
+
+_IPV4 = re.compile(r"(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)")
+_MAX_IPV6_GROUPS = 4  # explicit groups of a compressed IPv6 literal (fe80::1, 2001:db8::1)
+_IPV6_GROUP = re.compile(r"[0-9A-Fa-f]{1,4}")
+
+
+def _ipv6(core):
+    """An IPv6 literal: eight groups of at most four hex digits, with one '::' standing for one or more zero groups, an
+    optional trailing IPv4."""
+    if core.count("::") > 1 or ":::" in core:
         return False
-    segs = [x for x in _SPLIT.split(s) if x]
-    unlisted = [x for x in segs if x.isalpha() and len(x) > 3 and not _vocab(x)]
-    if sum(map(len, unlisted)) > _MAX_NAME_LETTERS or sum(1 for x in unlisted if len(x) > _LONG_WORD) > 1:
-        return False  # a run of random letters cut by separators is still a run
-    rnd = [_random_piece(x) for x in segs]
-    for seg, (r, _) in zip(segs, rnd):
-        if not r and not _piece_trusted(seg):
-            return False
-    for seg in segs:
-        low = seg.lower()
-        if _cred_name(seg) and any(len(o) >= 9 and o != seg and not o.isdigit() for o in segs):
-            return False  # a credential word beside a long piece
-        for w in _GLUE_PREFIXES:
-            if low.startswith(w) and len(low) - len(w) >= 10 and low[len(w):].isalpha():
-                return False  # a credential word glued to a long run of letters
-    if not any(r for r, _ in rnd):
-        return True
-    for i, (seg, (r, glued)) in enumerate(zip(segs, rnd)):
-        if r:
-            if glued and glued.lower() != "r" and not _vocab(glued):
+    head, _, tail = core.partition("::")
+    parts = [x for x in head.split(":") if x != ""] if head else []
+    tail_parts = [x for x in tail.split(":") if x != ""] if tail else []
+    if "::" not in core and (core.startswith(":") or core.endswith(":")):
+        return False
+    groups = parts + tail_parts
+    n = 0
+    for i, g in enumerate(groups):
+        if i == len(groups) - 1 and "." in g:
+            if not _IPV4.fullmatch(g):
                 return False
-        elif not (seg.isdigit() or _SHORT_HEX.fullmatch(seg) or _DATE_PIECE.fullmatch(seg) or _vocab(seg)
-                  or (len(seg) == 1 and 0 < i < len(segs) - 1 and not rnd[i - 1][0] and not rnd[i + 1][0]
-                      and any(c.isdigit() for c in segs[i - 1]) and any(c.isdigit() for c in segs[i + 1]))):
+            n += 2
+        elif _IPV6_GROUP.fullmatch(g):
+            n += 1
+        else:
             return False
-    return True
+    return "::" in core and len(groups) <= _MAX_IPV6_GROUPS and n <= 7  # a full eight-group form is the shape of a 128-bit key
 
 
-_GLUE_PREFIXES = tuple(sorted((w for w in _CRED_WORDS if len(w) >= 2 and w not in ("session", "sessions", "sid", "api", "pin", "key", "keys")), key=len, reverse=True)) + ("key", "keys")
+def _ip_literal(s):
+    """An IP literal (IPv4 with an optional :port, or IPv6; an optional %zone of at most eight letters and digits; an
+    optional user@): the exact grammar, so no free piece rides on it."""
+    core = s.rsplit("@", 1)[-1]
+    if "%" in core:
+        core, zone = core.split("%", 1)
+        if not re.fullmatch(r"[A-Za-z0-9]{1,8}", zone):
+            return False
+    if re.fullmatch(r"[0-9.]+:\d{1,5}", core):
+        core = core.rsplit(":", 1)[0]
+    return bool(_IPV4.fullmatch(core)) or (":" in core and _ipv6(core))
+
+
+def _gate_values(vals, words=frozenset(), max_ids=1):
+    """True when every piece of every value in `vals` is trusted and the values together stay inside the budgets (see THE ONE
+    TRUST GATE). The caller's `words` extend the closed vocabulary for one field."""
+    st = {"words": words, "cost": 0, "digits": 0, "ids": 0}
+    npieces = 0
+    for s in vals:
+        if not isinstance(s, str) or not s or len(s) > 512:
+            return False
+        if "=" in s and not _name_value_ok(s):
+            return False
+        if _ip_literal(s):
+            continue
+        st["ids"] += len(_UUID.findall(s))
+        s = _UUID.sub(".", s)
+        s = _ISO_TS.sub(".", s)
+        segs = [x for x in _GATE_SPLIT.split(s) if x]
+        npieces += len(segs)
+        prev = ""
+        for i, seg in enumerate(segs):
+            nxt = segs[i + 1] if i + 1 < len(segs) else ""
+            if len(seg) == 1 and seg.isalpha() and any(c.isdigit() for c in prev) and any(c.isdigit() for c in nxt):
+                prev = seg
+                continue  # a single letter between two numbered pieces ('r7-x-20261113')
+            if not _piece(seg, prev, st):
+                return False
+            prev = seg
+    return (npieces <= _MAX_PIECES and st["cost"] <= _MAX_UNLISTED and st["digits"] <= _MAX_DIGITS_TOTAL
+            and st["ids"] <= max_ids and not (st["ids"] and st["cost"] > _MAX_UNLISTED_WITH_ID))  # a random id sits beside closed-vocabulary pieces
+
+
+def _trusted_pieces(s, words=frozenset(), max_ids=1):
+    """True when a grammar-valid identity passes the one trust gate (see THE ONE TRUST GATE). The host grammar is not an
+    exemption: a DNS label is a piece like any other. No credential-name list decides here: a credential word is never a
+    vocabulary word, so it is unlisted material inside the budget, and the ident() layers that look for one only refuse more."""
+    return _gate_values([s], words, max_ids)
 
 
 def _plain_name(seg):
@@ -967,21 +1086,33 @@ def _free_words():
         for grp in (STATES, SHAPES, EFFECTS):
             for x in grp:
                 w.update(y for y in re.split(r"[^a-z0-9]+", x.lower()) if y)
-        w.update("unknown none null true false yes no ok text json system".split())
+        w.update("unknown none null true false yes no ok text json system fast slow normal quick full partial strict lenient debug "
+                 "verbose quiet auto manual dry live safe on off eth lo wlan root temp".split())
         _FREE_CACHE.append(frozenset(w))
     return _FREE_CACHE[0]
 
 
 _FREE_SPLIT = re.compile(r"[\s\-_./+=:@%~?&#,\\]+")
 _FLAG_TOKEN = re.compile(r"--?[A-Za-z][\w-]*")
-_FREE_DIGITS = 8  # the longest digit-only value that reads as a count, a pid or a number
+_FREE_DIGITS = 4  # the longest digit-only value that reads as a count, whatever its name
+_FREE_UNLISTED = 6  # the most characters of unlisted material (pieces of at most three characters) one free value may carry
+_FREE_SHORT = 3
+# Ordinary field names whose value is a short plain code or label, never a secret by the field's meaning: a letters-only
+# value of at most eight characters prints under them (re-review 7 positive `code=<8 letters>`). A closed list, not a gate on
+# the name for any other pair; digits and mixed pieces under it follow the ordinary rule (`code=12345678` is hidden).
+_CRED_NEXT_OK = frozenset("required missing unset empty rotated rotation expired expires invalid valid stored hidden masked changed "
+                          "present absent unknown none null true false ok ready set refresh refreshed service timer file path env "
+                          "variable store vault cache check reader fetch sync watch monitor mismatch rejected accepted denied "
+                          "granted failed not no yes the a an this that it all any each one two used left remaining count total".split())
+_PLAIN_VALUE_NAMES = frozenset(["code"])  # the whole name, never a qualified one (verify_code, invite_code)
 
 
-def _benign_value(raw):
-    """True for a value that reads as a plain closed-vocabulary value, so there is nothing to hide: a small number, a time,
-    a state or vocabulary word, a bracketed opaque ref, another flag, or ONE plain word (letters only, at most 8) beside
-    vocabulary words. Two or more unlisted words ('correct-horse-battery'), a long run, and any mixed letter+digit piece
-    longer than 4 ('hunter2x', 'a3f9c2e1') are not plain: they are hidden."""
+def _benign_value(raw, name="", cred_context=False):
+    """True for a value that reads as a plain closed-vocabulary value, so there is nothing to hide: a small number, a time, a
+    state or vocabulary word, a bracketed opaque ref, another flag. The gate is the closed vocabulary (_free_words) plus
+    bounded numbers (at most four digits; ten for a name in the closed list of numeric field names; two after a credential
+    word) and at most four characters of unlisted material in pieces of two characters. A plain word that is not in the
+    vocabulary ('sunshine', 'dragon'), a mixed piece, a long number and any unlisted run are hidden, whatever the NAME is."""
     if len(raw) > 128:
         return False  # a plain value is short
     v = raw.strip("\"'`").rstrip(".:")
@@ -991,26 +1122,30 @@ def _benign_value(raw):
         return v.startswith(("[opaque", "[REDACTED"))
     if _ISO_TS.fullmatch(v) or _CLOCK.fullmatch(v) or _FLAG_TOKEN.fullmatch(v):
         return True
-    plain_words = 0
+    if cred_context:  # right after a credential word only a state word may follow (the next-word check of _redact_cred_prose)
+        return all(x == "" or x.lower() in _CRED_NEXT_OK or (x.isdigit() and len(x) <= 2) for x in _FREE_SPLIT.split(v))
+    last = re.split(r"[^a-z0-9]+", name.lower())[-1] if name else ""
+    limit = 2 if cred_context else (10 if last in _NUMERIC_NAMES else _FREE_DIGITS)
+    cost = 0
     for x in _FREE_SPLIT.split(v):
         if not x:
             continue
         low = x.lower()
         stripped = low.rstrip("0123456789")
         if x.isdigit():
-            if len(x) > _FREE_DIGITS:
+            if len(x) > limit:
                 return False
-        elif low in _free_words() or (stripped in _free_words() and len(low) - len(stripped) <= 3) or _DATE_PIECE.fullmatch(x):
+        elif low in _free_words() or (stripped in _free_words() and 0 < len(low) - len(stripped) <= 3) or _DATE_ID.fullmatch(x):
             continue
-        elif len(x) <= 2 or (len(x) <= 4 and x.isalnum()):
+        elif _TS_ID.fullmatch(x):
             continue
-        elif x.isalpha() and len(x) <= 8:
-            plain_words += 1
-            if plain_words > 1:
-                return False
+        elif len(x) <= 2 or (len(x) <= _FREE_SHORT and x.isalnum()):
+            cost += len(x)
+        elif name.lower() in _PLAIN_VALUE_NAMES and x == v and x.isalpha() and len(x) <= 8 and not cred_context:
+            continue
         else:
             return False
-    return True
+    return cost <= _FREE_UNLISTED
 
 
 def _trusted_field_value(name, raw):
@@ -1018,7 +1153,7 @@ def _trusted_field_value(name, raw):
     kind = _FIELD_KIND.get(re.split(r"[.\-]", name)[-1].lower())
     core = raw.rstrip(".:")
     if kind == "hex":
-        return bool(re.fullmatch(r"[0-9a-fA-F]{4,64}", core))
+        return bool(re.fullmatch(r"[0-9a-fA-F]{4,64}", core)) and not core.isdigit()
     return bool(kind) and keep(kind, core) != core
 
 
@@ -1062,7 +1197,7 @@ def _redact_free_pairs(text, protect):
             continue
         raw = v.group(0)
         seen = v.end()  # a value is read once: separators inside it belong to it
-        if _benign_value(raw) and not (len(raw) >= 400 and v.end() < len(text) and text[v.end()] not in " \t\r\n,;&)\"']}"):
+        if _benign_value(raw, text[j:m.start()]) and not (len(raw) >= 400 and v.end() < len(text) and text[v.end()] not in " \t\r\n,;&)\"']}"):
             continue
         if raw[:1] not in ("\"", "'") and _trusted_field_value(text[j:m.start()], raw):
             out.append(text[pos:e] + protect(raw.rstrip(".:")))
@@ -1084,7 +1219,7 @@ def _redact_free_flags(text, protect):
         if v is None:
             continue
         seen = v.end()
-        if _benign_value(v.group(0)) and not (len(v.group(0)) >= 400 and v.end() < len(text) and text[v.end()] not in " \t\r\n"):
+        if _benign_value(v.group(0), m.group('flag')) and not (len(v.group(0)) >= 400 and v.end() < len(text) and text[v.end()] not in " \t\r\n"):
             continue
         out.append(text[pos:m.end()] + REDACTED)
         pos = v.end()
@@ -1128,8 +1263,27 @@ def _redact_composites(text):
     return _COMPOSITE.sub(repl, text)
 
 
+_CRED_PROSE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_.-])(?P<w>pass|passwd|password|passwords|passphrase|passcode|pwd|pw|pswd|pwrd|pin|otp|token|tokens|secret|"
+    r"secrets|credential|credentials|apikey|passkey)(?P<mid>(?:\s+(?:is|are|was|were|to|with|as|be|set|use|using|[:=]))*\s+)"
+    r"(?P<v>[^\s,;)\]}\"'\ue002\[]+)")
+
+
+def _redact_cred_prose(text):
+    """A credential word followed, in prose with no separator, by its value ('the password is sunshine', 'pass swordfish',
+    'my pin 482917'): the next word is hidden unless it is a closed-vocabulary word (no number longer than two digits)."""
+    if not _CRED_PROSE.search(text):
+        return text
+
+    def repl(m):
+        if _benign_value(m.group("v"), "", True):
+            return m.group(0)
+        return m.group("w") + m.group("mid") + REDACTED
+    return _CRED_PROSE.sub(repl, text)
+
+
 def _free_layers(protect):
-    return lambda t: _redact_composites(_redact_free_flags(_redact_free_pairs(t, protect), protect))
+    return lambda t: _redact_composites(_redact_cred_prose(_redact_free_flags(_redact_free_pairs(t, protect), protect)))
 
 
 def redact(text, keep_marks=False):

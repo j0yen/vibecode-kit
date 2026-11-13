@@ -74,33 +74,33 @@ scheduler, coordinator, task store or mutation CLI.
   `mysql -p`, `unzip -P`, `7z -p`, `--pw`, `--password`) hide their value. Credential pairs are
   also found inside JSON string escapes (`\"`, `\\`, `\uXXXX`, string-encoded JSON inside a string, up to four layers) and
   percent-escapes: the text is checked as written and as decoded, and the decoded view with the credential hidden is
-  printed. Identity fields are field-aware and opaque when untrusted: a host, unit, scope (`child`), session,
+  printed. Identity fields are field-aware and opaque by default: a host, unit, scope (`child`), session,
   invocation, account, model, effort, owner, task id, repo, branch, consumer, reviewer, artifact/event path, evidence
-  ref (one locator token) or `target.head` is printed only when it validates against its field grammar (plain words,
-  digits, hex ids, UUIDs, compact timestamps, ULIDs, word-like mixed alphanumerics such as `WF1663Impl` or
-  `r7wfr6review`; a host has no `user:password@` userinfo and any `user@` part is a plain name) and its pieces are TRUSTED. Trust is a
-  positive rule, not a denylist: a random-looking piece (a hex id of 9+ characters, a word glued to one, a ULID) prints only
-  beside pieces of a closed vocabulary of name words (`task`, `sess`, `wm`, `build`, `verifier`, `result`, `retained`, ...:
-  `_ID_WORDS`, which holds no credential word), digits, dates and short hex groups; any other word beside a random piece
-  (`jwt-<hex>`, `creds/<hex>`, `k<hex>`, `vault_<uuid>`, a word nobody listed) is opaque by default, and a credential word
-  joined to a long piece (`token-<hex>`, `pw9=<letters>`, `key<letters>`) is never trusted. The envelope itself is never a
-  trusted source: nothing prints because of where it came from, only because the field grammar and these pieces validate
-  (a host may also be a 3+ label DNS name under a known last label, `redbaron.tail9z8y7.ts.net`; the DNS grammar makes a
-  host VALID, it does not make it TRUSTED: every label passes the same piece gate, so a random base36/base32 label is
-  opaque). Every class of piece has a bound: a letters-only piece that is not a vocabulary word prints up to 12 letters
-  (CamelCase 24), an identity carries at most 22 letters of unlisted words and at most one of them longer than 8, a digit-only piece at most 10 digits, a
-  vocabulary word may carry a short suffix (`tail9z8y7`), and an identity that is itself a `name=value` pair needs a
-  vocabulary name and a plain value (`pid=77` prints, `pswd=hunter2x` does not). A grammar-valid id can hold a secret, so
-  validation alone is not proof; short names, a bare hex id of 9+ characters, a vocabulary word beside a hex id and a
-  letters-only value within the bounds are indistinguishable from names and ids and are the stated residual. Queue rows
-  (`queue_adapter.py`, `recommend.py --queue`) use the STRICT gate (`show_row`): row id, owner, wait, status, seq and claim
-  print only when every piece is a closed-vocabulary word, a bounded number, a date or a piece of at most 5 characters;
-  anything else is an opaque ref, and a non-string field is never printed. Free text is untrusted narrative: the value of any
-  `name=value`, `name: value`, `"name": "value"` or `--name value` pair is hidden unless it is a plain value (a number of
-  at most 8 digits, a time, a word of the tool's own vocabulary, ONE plain unlisted word of at most 8 letters, a bracketed
-  ref) or the name is a schema key whose value validates and is trusted; a credential word joined to a value in one token
-  (`token-<v>`, `secret_run_<v>`, `tokenArYYbbah`) is hidden. The credential-name list above is an extra layer that hides
-  more; it is never what lets a value print. Key names: only keys the schema defines print; any other key is an opaque
+  ref (one locator token) or `target.head` is printed only through ONE trust gate (`_gate_values` in `envelope_validate.py`),
+  which is the same gate for identities, queue-row fields and the values of free-text pairs. A piece prints only when it is
+  (a) a word of the CLOSED vocabulary (`_ID_WORDS`, the caller's reviewed words for one row field, the DNS top-level labels:
+  enumerated in the source, no credential word in it), (b) a bounded number (at most 7 digits; at most 14 digits in all), (c) a
+  calendar-valid date or compact UTC timestamp, (d) one EXACT id grammar (a uuid 8-4-4-4-12, a hex id of 7-12, 32, 40 or 64
+  characters mixing digits and letters, a ULID, a compressed IP literal of at most four groups; one id per identity, two in a
+  path, none in a queue row, and an id sits only beside closed-vocabulary pieces), or (e) a small amount of unlisted
+  material: pieces of at most five characters with a TOTAL budget of eight characters per value, so no count of short pieces
+  adds up to a credential. A vocabulary compound (`wmbuild1663impl2`, `WF1663Impl`, `r7wfitfix2`) is split into vocabulary
+  words and bounded numbers. Everything else (random letters, hex groups, digit groups, passphrases, a vocabulary word plus a
+  random piece) is an opaque ref, whatever the field. A field grammar (no `user:password@` userinfo, ids as characters) makes a
+  value VALID, never TRUSTED; the credential-name layers only refuse more and never let a value print. The envelope is never
+  a trusted source. An identity that is itself a `name=value` pair needs a vocabulary name and a plain value (`pid=77` prints,
+  `pswd=hunter2x` does not). A secret shorter than the budget (a few characters) and a bare hex id are indistinguishable from
+  names and ids and are the stated residual. Queue rows (`queue_adapter.py`, `recommend.py --queue`) pass the same gate
+  (`show_row`): row id, owner, wait, status, seq and claim print only when every token passes it; anything else is an opaque
+  ref, and a non-string field is never printed. Free text is untrusted narrative: the value of any `name=value`,
+  `name: value`, `"name": "value"` or `--name value` pair is hidden unless it is closed vocabulary (a word of the tool's own
+  vocabulary, a time, a bracketed ref, a number of at most 4 digits, or up to 10 under a closed list of numeric names such as
+  `pid` and `seq`, and at most six characters of two-to-three-character pieces) or the name is a schema key whose value is a hex
+  id; whatever the NAME is, a plain word or number under a name nobody listed is hidden (`sessionkey=sunshine`, `code=12345678`).
+  A credential word followed in prose by its value without a separator (`the password is sunshine`, `pass swordfish`, `my pin
+  482917`) hides the next word unless it is a state word (`required`, `missing`, `expired`, ...). A credential word joined to
+  a value in one token (`token-<v>`, `secret_run_<v>`, `tokenArYYbbah`) is hidden. The credential-name list above is an extra
+  layer that hides more; it is never what lets a value print. Key names: only keys the schema defines print; any other key is an opaque
   `[opaque key <8 hex>]`, whatever it looks like. A value that does not validate is
   printed as an opaque keyed reference `[opaque <field> <8 hex>]` (a per-process keyed digest of the field name and the
   value: equal values give equal refs inside one run, nothing is recoverable, not stable across runs), never as the
