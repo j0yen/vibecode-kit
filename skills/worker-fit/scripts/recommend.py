@@ -2,6 +2,7 @@
 """worker-fit recommender: one recommendation per task, with the evidence it used.
 
 Usage: recommend.py [--queue] [--observed-at TS] [--now TS|system] [--format text|json] FILE
+  Exactly one FILE: a second file (or an unknown option) is a usage error, exit 2, never silently dropped.
   FILE = envelope(s) JSON, or with --queue a canonical-queue rows JSON (converted by queue_adapter.py).
 Read-only, standard library only, no network. It launches, claims, kills, installs and writes nothing,
 and a recommendation grants no action authority. A source-only or fixture result does not prove
@@ -115,7 +116,7 @@ def recommend_one(d, findings):
         else:
             alt = ev.ident(cons["alternate"])
             alt_ok = alt is not None and (distinct or ev_norm(alt) not in own)
-            ref_ok = not ev.is_unknown(cons.get("alternate_authorization_ref"))
+            ref_ok = ev.ref_like(cons.get("alternate_authorization_ref"))
             if alt_ok and cons["alternate_authorized"] and ref_ok:
                 later.append(alt)
                 tail = "an authorized alternate (later_consumers) may consume; its authorization reference is recorded in evidence_used"
@@ -207,29 +208,43 @@ def render_text(recs):
     return "\n".join(blocks) + "\n" + FOOTER + "\n"
 
 
+def _usage_error(msg):
+    ev.emit(ev.redact("UNREADABLE usage: %s" % msg))
+    return 2
+
+
 def main(argv):
-    queue, observed, fmt, path, now = False, queue_adapter.UNKNOWN, "text", None, None
+    queue, observed, fmt, paths, now = False, queue_adapter.UNKNOWN, "text", [], None
     it = iter(argv)
     try:
         for a in it:
             if a == "--queue":
                 queue = True
             elif a == "--observed-at":
-                observed = next(it, UNKNOWN)
+                observed = next(it, None)
+                if observed is None:
+                    return _usage_error("--observed-at needs a value")
             elif a == "--format":
-                fmt = next(it, "text")
+                fmt = next(it, None)
+                if fmt not in ("text", "json"):
+                    return _usage_error("--format must be text or json")
             elif a == "--now":
                 v = next(it, None)
                 if v is None:
                     raise ValueError("--now needs a timestamp or 'system'")
                 now = ev.host_now() if v == "system" else ev.as_now(v)
+            elif a.startswith("--"):
+                return _usage_error("unknown option %s" % a)
             else:
-                path = a
+                paths.append(a)
     except ValueError as e:
-        print(ev.redact("UNREADABLE --now: %s" % e))
+        ev.emit(ev.redact("UNREADABLE --now: %s" % e))
         return 2
+    if len(paths) > 1:
+        return _usage_error("recommend.py takes exactly one FILE; extra argument(s) not evaluated: %s" % ", ".join(paths[1:]))
+    path = paths[0] if paths else None
     if path is None:
-        print(__doc__)
+        ev.emit(__doc__)
         return 2
     try:
         obj = ev.load_json_file(path)
@@ -238,10 +253,10 @@ def main(argv):
         elif isinstance(obj, dict) and "envelopes" in obj and not isinstance(obj["envelopes"], list):
             raise ValueError("envelopes must be a list")
     except (OSError, ValueError) as e:
-        print(ev.redact("UNREADABLE %s: %s" % (path, e)))
+        ev.emit(ev.redact("UNREADABLE %s: %s" % (path, e)))
         return 2
     recs = recommend_set(obj, now)
-    print(json.dumps(recs, indent=1) if fmt == "json" else render_text(recs), end="")
+    ev.emit(json.dumps(recs, indent=1) if fmt == "json" else render_text(recs), end="")
     return 0
 
 

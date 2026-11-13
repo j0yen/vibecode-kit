@@ -65,15 +65,15 @@ def rows_to_envelopes(rows, observed_at=UNKNOWN):
 
 def main(argv):
     if not argv:
-        print("usage: queue_adapter.py ROWS.json [OBSERVED_AT]")
+        ev.emit("usage: queue_adapter.py ROWS.json [OBSERVED_AT]")
         return 2
     try:
         obj = ev.load_json_file(argv[0])
         envs = rows_to_envelopes(obj, argv[1] if len(argv) > 1 else UNKNOWN)
     except (OSError, ValueError) as e:
-        print(ev.redact("UNREADABLE %s: %s" % (argv[0], e)))
+        ev.emit(ev.redact("UNREADABLE %s: %s" % (argv[0], e)))
         return 2
-    print(json.dumps(ev.scrub({"envelopes": envs}), indent=1))
+    ev.emit(json.dumps(ev.scrub({"envelopes": envs}), indent=1))
     return 0
 
 

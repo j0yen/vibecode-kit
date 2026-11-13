@@ -31,10 +31,17 @@ scheduler, coordinator, task store or mutation CLI.
   UNKNOWN-equivalent placeholder counts as UNKNOWN wherever evidence is required (worker host/unit/child, artifact,
   ACK evidence, consumer, authorization reference, reviewer, target head, account): one shared normalizer applies NFKC,
   drops zero-width/format characters, collapses any whitespace, strips edge punctuation, brackets and quotes, and
-  compares case-insensitively against `unknown unk ? tbd tba todo - -- n/a n.a na none null nil undefined
-  "not available" "not applicable" unspecified missing empty`; a value with no letter or digit left is a placeholder too.
-  Where a field has a format it is validated positively: host/unit/child/consumer/reviewer are identifiers (no spaces),
-  `target.head` is a hex sha of at least 7 characters when a record is declared complete.
+  compares case-insensitively against `unknown unk ? tbd tba tbc todo - -- n/a n.a na none null nil undefined pending
+  unavailable unset unassigned unsure "not available" "not applicable" "not set" "not known" "not provided" unspecified
+  missing empty`, and also with every non-alphanumeric character removed, so `N / A`, `n\a`, `n/a/`, `unknown-`,
+  `Not-Set` and a trailing `.`/`!`/`?` are the same placeholder (a longer real name such as `unknown-host-7` is not); a
+  value with no letter or digit left is a placeholder too. A bare assertion word (`yes no true false ok self me same own
+  authorized approved accepted confirmed verified done ack`) names nobody and cites nothing: it is never an identity
+  and never a reference. Where a field has a format it is validated positively: host/unit/child/consumer/reviewer are
+  identifiers (ASCII letters, digits and `. _ : @ / + % = -`, so `pid=77`, `%12`, `tmux:%12` pass; no spaces, not a placeholder, not an assertion word); an authorization reference and ACK evidence are
+  references (not a placeholder or assertion word, and carrying a locator: a digit, or one of `: / # @`);
+  `target.head` is a hex sha of at least 7 characters when a record is declared complete. A RUNNING record whose
+  evidence refs are all placeholders has no evidence. A placeholder `task_id` names no task and is refused.
   Unsupported authority is refusal or UNKNOWN. A named alternate consumer gains no authority from its label
   or from a bare `alternate_authorized: true`: it counts as authorized only with
   `consumer.alternate_authorization_ref` naming the authorization evidence.
@@ -43,9 +50,16 @@ scheduler, coordinator, task store or mutation CLI.
   metadata counts are not reviewed tasks.
 - Never print or copy credential-shaped lines (token=, sk-ant, password, bearer, key headers, api keys).
   The scripts redact credential-shaped values from everything they print (recommendation JSON and text, validator
-  lines, adapter output, UNREADABLE messages): `name=value` / `name: "quoted value"` pairs whose name holds
+  lines, adapter output, UNREADABLE messages): `name=value` / `name: "quoted value"` pairs (also `=>`, `->` and full-width `＝` `：` separators, and `--password VALUE`
+  command-line flags) whose name holds
   token/key/password/secret/credential, `Authorization:` values (Basic/Bearer/...), `bearer <x>`, `sk-...` keys,
-  GitHub/Slack/AWS/Google token prefixes, JWTs, PEM private-key blocks and URL userinfo (`scheme://user:pw@host`).
+  provider token prefixes as a class (AWS key ids `AKIA/ASIA/AGPA/AIDA/AROA/...`; Slack `xox?-`, `xoxe.`, `xapp-` and
+  webhook URLs; Google `ya29.`, `AIza`, `GOCSPX-`, refresh tokens; npm `npm_`; GitLab `glpat-` and siblings; GitHub
+  `ghp_/gho_/ghu_/ghs_/ghr_/github_pat_`; Anthropic/OpenAI `sk-...`; Stripe, SendGrid, Hugging Face, PyPI, Docker,
+  Shopify, DigitalOcean), JWTs, PEM private-key blocks and URL userinfo (`scheme://user:pw@host`, the password may
+  itself hold `@` or `/`; everything up to the last `@` of the unbroken run is redacted). Output that the terminal
+  encoding cannot carry (a lone surrogate, any unencodable character) is written as a backslash escape, never an
+  exception.
   The recommendation's `action` sentence is built only from tool-owned text: no envelope string (consumer, session,
   unit, owner, task id, authorization reference, `next_action`) is echoed into it; validated consumer identifiers appear
   in `next_consumer` / `later_consumers` and the redacted raw fields in `evidence_used`.
@@ -58,7 +72,10 @@ scheduler, coordinator, task store or mutation CLI.
   observation time that is UNKNOWN (envelope always; worker for RUNNING; result for DONE; every evidence entry unless
   DONE) is unverifiable and refused (`UNKNOWN_TIMESTAMP`), never skipped (a state-UNKNOWN record can only yield an
   UNKNOWN disposition anyway). A record that cannot be evaluated (extreme
-  timestamp, absurd nesting) is refused for that record only; the rest of the set is still evaluated.
+  timestamp, nesting deep enough to exhaust the recursion limit during validation) is refused for that record only
+  (`MALFORMED`); the rest of the set is still evaluated. JSON nested beyond the JSON parser's recursion limit (tens of
+  thousands of levels in CPython; the exact depth is interpreter-dependent) never reaches validation: the result is
+  whole-file UNREADABLE (exit 2) and no record in it is evaluated. Both fail closed, with no traceback.
   Defaults: window 24 h, future skew 5 min, clock = host clock.
   Evidence may carry `head`, `repo`, `branch`; evidence naming a head or repo/branch different from the target is
   refused as WRONG_TASK. A head is recognised in its `head` field and in any commit-like name in its ref
@@ -86,7 +103,9 @@ scheduler, coordinator, task store or mutation CLI.
    ACK, replay of an applied/UNKNOWN effect, duplicate tasks, conflicting live targets, and declared-complete
    with UNKNOWN or listed gaps.
 4. `python3 -I scripts/recommend.py [--now TS] ENVELOPES.json` (or `--queue ROWS.json`): one recommendation per task
-   (`templates/recommendation-report.md`). A refusal is reported as a recommendation of UNKNOWN with its codes.
+   (`templates/recommendation-report.md`). recommend.py takes exactly one FILE: a second file or an unknown option is
+   a usage error (exit 2) that names the extra arguments, and nothing is evaluated; run it once per file (the
+   validator accepts several files). A refusal is reported as a recommendation of UNKNOWN with its codes.
 5. Hand the recommendation to the owning row; do not act on it from here.
 
 ## Decision rules (as implemented in recommend.py)

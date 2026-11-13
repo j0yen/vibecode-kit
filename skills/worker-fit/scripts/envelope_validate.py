@@ -19,8 +19,17 @@ UNKNOWN = "UNKNOWN"
 # values that stand for "nothing observed", compared after norm_text(): NFKC, format/control characters dropped,
 # whitespace collapsed, edge punctuation/brackets/quotes stripped, lower-cased. A value with no letter or digit left
 # (e.g. '?', '-', '--', '...') is a placeholder as well.
-PLACEHOLDERS = {"unknown", "unk", "?", "tbd", "tba", "todo", "-", "--", "n/a", "n.a", "na", "none", "null", "nil",
-                "undefined", "not available", "not applicable", "unspecified", "missing", "empty", ""}
+PLACEHOLDERS = {"unknown", "unk", "?", "tbd", "tba", "tbc", "todo", "-", "--", "n/a", "n.a", "na", "none", "null", "nil",
+                "undefined", "not available", "not applicable", "unspecified", "missing", "empty", "pending", "unavailable",
+                "unset", "not set", "unassigned", "unsure", "not known", "not provided", "not given", "no data", ""}
+# the same words compared with every non-alphanumeric character removed, so spacing, slashes, backslashes, dots,
+# hyphens, underscores and trailing punctuation never change the meaning: 'N / A', 'n\\a', 'n/a/', 'unknown-', 'Not-Set'.
+_COMPACT_PLACEHOLDERS = {re.sub(r"[\W_]+", "", w) for w in PLACEHOLDERS if re.search(r"\w", w)}
+# bare assertions that are neither an identity nor a reference: 'yes' / 'self' / 'authorized' as a consumer, reviewer,
+# worker id or authorization/ACK evidence names nobody and cites nothing.
+_NON_IDENTITY = {"yes", "no", "true", "false", "ok", "okay", "y", "n", "self", "me", "same", "own", "authorized",
+                 "unauthorized", "approved", "accepted", "confirmed", "verified", "reviewed", "done", "ack", "acked",
+                 "acknowledged", "granted", "noted", "agreed"}
 _EDGE = "<>[](){}\"'`.,;:!*_~|\\ "
 STATES = ["NOT_STARTED", "RUNNING", "DONE", "BLOCKED", "UNKNOWN"]
 SHAPES = ["implementation", "review", "decision", "deterministic", "UNKNOWN"]
@@ -69,17 +78,35 @@ def is_unknown(v):
     if not isinstance(v, str):
         return False
     s = norm_text(v)
-    return s in PLACEHOLDERS or not any(c.isalnum() for c in s)
+    return s in PLACEHOLDERS or not any(c.isalnum() for c in s) or _compact(s) in _COMPACT_PLACEHOLDERS
 
 
-_IDENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}")
+def _compact(s):
+    return re.sub(r"[\W_]+", "", s)
+
+
+def is_assertion_word(v):
+    """True for a bare yes/no/true/ok/self/authorized-style word (after norm_text, any punctuation or spacing)."""
+    return isinstance(v, str) and _compact(norm_text(v)) in _NON_IDENTITY
+
+
+def ref_like(v):
+    """Positive validation for a reference (authorization reference, ACK evidence): a string that is not a placeholder
+    or a bare assertion word and carries a locator: a digit (id, number, date) or one of : / # @ (url, path, handle)."""
+    if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v):
+        return False
+    s = unicodedata.normalize("NFKC", v)
+    return any(c.isdigit() for c in s) or any(c in s for c in ":/#@")
+
+
+_IDENT = re.compile(r"[A-Za-z0-9%][A-Za-z0-9._:@/+%=-]{0,127}")  # %12 (tmux pane), pid=77, fe80::1%eth0
 _SHA = re.compile(r"[0-9a-fA-F]{7,64}")
 
 
 def ident(v):
     """The value as an identifier (ASCII word characters and . _ : @ / + -, no spaces), or None when it is not one
     or is a placeholder. Used wherever a value names a host, unit, child, consumer or reviewer."""
-    if not isinstance(v, str) or is_unknown(v):
+    if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v):
         return None
     s = unicodedata.normalize("NFKC", v).strip()
     return s if _IDENT.fullmatch(s) else None
@@ -108,34 +135,72 @@ REDACTED = "[REDACTED]"
 # the name starts at its secret word and may run on for a bounded stretch (keeps matching linear on hostile input)
 _NAME = r"(?:token|key|password|passwd|pwd|secret|credential|authorization)[\w.-]{0,200}"
 _NOT_DONE = r"(?!\[REDACTED\])"
+# name/value separators: = : => -> and their full-width / small-form look-alikes
+_SEP = r"(?:=>|->|[:=\uff1a\uff1d\ufe55\ufe66\u2236])"
 _QUOTED_OR_WORD = r"""(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s,;&)"'\]}]+)"""
 _REDACTIONS = [
     # PEM private/secret key blocks (a missing END line redacts to the end of the text)
     (re.compile(r"-----BEGIN [A-Z0-9 ]*(?:PRIVATE|SECRET)[A-Z0-9 ]*-----.*?(?:-----END [A-Z0-9 ]*-----|\Z)", re.S), REDACTED),
-    # URL userinfo: scheme://user:pass@host and scheme://token@host
-    (re.compile(r"(?i)(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://)[^\s/@:]*(?::[^\s/@]*)?@"), r"\1" + REDACTED + "@"),
+    # URL userinfo with a password: scheme://user:pass@host, the password may itself hold @ or / (everything up to the
+    # last @ of the unbroken run is redacted; both runs are length-bounded to keep matching linear on hostile input)
+    (re.compile(r"(?i)(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://)[^\s/@:\"'<>]{0,128}:[^\s\"'<>]{0,512}@"), r"\1" + REDACTED + "@"),
+    # URL userinfo without a password: scheme://token@host
+    (re.compile(r"(?i)(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://)[^\s/@:]{0,256}@"), r"\1" + REDACTED + "@"),
     # Authorization header value (Basic/Bearer/Digest/Token scheme plus credential)
-    (re.compile(r"(?i)(\bauthorization[\"']?\s*[:=]\s*[\"']?)" + _NOT_DONE +
+    (re.compile(r"(?i)(\bauthorization[\"']?\s*" + _SEP + r"\s*[\"']?)" + _NOT_DONE +
                 r"(?:(?:basic|bearer|digest|token|negotiate)\s+)?[^\s\"',;)]+"), r"\1" + REDACTED),
-    (re.compile(r"(?i)\b(bearer)\s+" + _NOT_DONE + r"[^\s\"',;)]+"), r"\1 " + REDACTED),
+    (re.compile(r"(?i)\b(bearer)(?:\s*" + _SEP + r"\s*|\s+)" + _NOT_DONE + r"[^\s\"',;)]+"), r"\1 " + REDACTED),
     # name = value / name: value, value may be quoted (with spaces); the name contains a secret word
-    (re.compile(r"(?i)(" + _NAME + r"[\"']?\s*[:=]\s*)" + _NOT_DONE + _QUOTED_OR_WORD), r"\1" + REDACTED),
+    (re.compile(r"(?i)(" + _NAME + r"[\"']?\s*" + _SEP + r"\s*)" + _NOT_DONE + _QUOTED_OR_WORD), r"\1" + REDACTED),
+    # command-line flag whose name holds a secret word, value as the next word: --password VALUE, -token VALUE
+    (re.compile(r"(?i)((?<![\w-])--?[a-z0-9-]{0,40}(?:token|key|password|passwd|pwd|secret|credential)[a-z0-9_-]{0,100}[ \t]+)"
+                + _NOT_DONE + _QUOTED_OR_WORD), r"\1" + REDACTED),
     (re.compile(r"(?<![A-Za-z0-9_])sk-[A-Za-z0-9_-]{3,}"), REDACTED),
-    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|xox[abprs]-[A-Za-z0-9-]{8,}|AKIA[0-9A-Z]{12,}"
-                r"|AIza[0-9A-Za-z_-]{20,})"), REDACTED),
-    (re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*"), REDACTED),
+    (re.compile(r"sk-(?:ant|proj|svcacct|admin|or)-[A-Za-z0-9_-]{8,}"), REDACTED),  # vendor-tagged keys, even glued to a word
+    # provider token prefixes, as a class (each needs a long enough body, so ordinary words are left alone)
+    (re.compile(r"(?:"
+                r"(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ABIA|ACCA)[0-9A-Z]{12,}"            # AWS key ids
+                r"|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}"                           # GitHub
+                r"|xox[a-z]-[A-Za-z0-9-]{8,}|xoxe\.xox[a-z]-[A-Za-z0-9-]{8,}|xapp-[A-Za-z0-9-]{8,}"  # Slack
+                r"|ya29\.[A-Za-z0-9._-]{8,}|AIza[0-9A-Za-z_-]{20,}|GOCSPX-[A-Za-z0-9_-]{8,}"        # Google
+                r"|npm_[A-Za-z0-9]{8,}"                                                             # npm
+                r"|gl(?:pat|ptt|rt|dt|oas|ft|imt|agent|cbt|soat|ffct)-[A-Za-z0-9_-]{8,}"           # GitLab
+                r"|(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{8,}|whsec_[A-Za-z0-9]{8,}"               # Stripe
+                r"|SG\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|hf_[A-Za-z0-9]{16,}|pypi-[A-Za-z0-9_-]{16,}"
+                r"|dckr_pat_[A-Za-z0-9_-]{8,}|shp(?:at|ca|pa|ss)_[A-Za-z0-9]{8,}|dop_v1_[A-Za-z0-9]{8,}"
+                r")"), REDACTED),
+    (re.compile(r"(?<![/:])1//0[A-Za-z0-9_-]{20,}"), REDACTED),                          # Google refresh token
+    # webhook URLs carry their secret in the path
+    (re.compile(r"(?i)hooks\.slack\.com/services/[A-Za-z0-9/_-]{8,}|discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]{8,}"), REDACTED),
+    (re.compile(r"eyJ(?:(?!eyJ)[A-Za-z0-9_-]){4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*"), REDACTED),
 ]
 
 
 def redact(text):
     """Replace credential-shaped values in any output string: PEM key blocks, URL userinfo, Authorization/Bearer values,
     name=value pairs whose name holds token/key/password/secret/credential (quoted values with spaces included),
-    sk-... keys, GitHub/Slack/AWS/Google token prefixes and JWTs."""
+    sk-... keys, provider token prefixes (AWS, GitHub, Slack, Google, npm, GitLab, Stripe, ...), webhook URLs and JWTs."""
     if not isinstance(text, str):
         return text
     for rx, rep in _REDACTIONS:
         text = rx.sub(rep, text)
     return text
+
+
+def safe_text(text, encoding="utf-8"):
+    """text that the given encoding can always carry: a lone surrogate or any unencodable character is written as a
+    backslash escape (\\ud800), never an exception."""
+    return text.encode(encoding, "backslashreplace").decode(encoding)
+
+
+def emit(text="", end="\n"):
+    """print() that never raises on unencodable text: the one writer for every script output line."""
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        "".encode(enc)
+    except LookupError:
+        enc = "utf-8"
+    sys.stdout.write(safe_text(text, enc) + end)
 
 
 def scrub(v):
@@ -224,6 +289,8 @@ def _shape(d):
                     ("next_action", "s"), ("declared_complete", "b"), ("owner_reachable", "tri")):
         if k in d and not _kind_ok(kind, d[k]):
             out.append(finding("SCHEMA_TYPE", k, "wrong type or empty"))
+    if isinstance(d.get("task_id"), str) and is_unknown(d["task_id"]):
+        out.append(finding("SCHEMA_TYPE", "task_id", "task id is a placeholder: no task is named"))
     if isinstance(d.get("revision"), int) and not isinstance(d.get("revision"), bool) and d["revision"] < 0:
         out.append(finding("SCHEMA_TYPE", "revision", "negative"))
     if "state" in d and d["state"] not in STATES:
@@ -424,6 +491,8 @@ def _validate(d, ref_now):
                                ",".join(missing + (["observed_at.worker"] if d["observed_at"]["worker"] == UNKNOWN else []))))
         if not d["evidence"]:
             out.append(finding("RUNNING_NO_EVIDENCE", "evidence", "RUNNING needs at least one evidence entry; the list is empty"))
+        elif all(is_unknown(e["ref"]) for e in d["evidence"]):
+            out.append(finding("RUNNING_NO_EVIDENCE", "evidence", "RUNNING needs an evidence entry that names what was read; every ref is a placeholder"))
     if st == "NOT_STARTED" and not (is_unknown(w["unit"]) and is_unknown(w["child"])):
         out.append(finding("NOT_STARTED_WITH_WORKER", "worker",
                            "NOT_STARTED carries an observed unit or child: contradictory; a started worker is not an unowned slice"))
@@ -434,7 +503,7 @@ def _validate(d, ref_now):
             out.append(finding("RESULT_UNBOUND", "result", "result does not state which task and revision it answers"))
     if d["effect"]["state"] in ("applied", "UNKNOWN") and not d["effect"]["no_replay"]:
         out.append(finding("NO_REPLAY_POLICY", "effect.no_replay", "an applied or UNKNOWN effect must carry no_replay=true"))
-    if d["ack"]["accepted"] and is_unknown(d["ack"]["evidence"]):
+    if d["ack"]["accepted"] and not ref_like(d["ack"]["evidence"]):
         out.append(finding("INVENTED_ACK", "ack", "accepted=true without evidence of the consumer's ACK"))
     if d["declared_complete"]:
         req = {"current_owner": d["current_owner"], "owner_reachable": d["owner_reachable"],
@@ -586,30 +655,30 @@ def main(argv):
     try:
         argv, now = parse_args(argv)
     except ValueError as e:
-        print(redact("UNREADABLE --now: %s" % e))
+        emit(redact("UNREADABLE --now: %s" % e))
         return 2
     if not argv:
-        print(__doc__)
+        emit(__doc__)
         return 2
     rc = 0
     for path in argv:
         try:
             obj = load_json_file(path)
         except (OSError, ValueError) as e:
-            print(redact("UNREADABLE %s: %s" % (path, e)))
+            emit(redact("UNREADABLE %s: %s" % (path, e)))
             rc = max(rc, 2)
             continue
         res = validate_set(obj, now)
-        print(redact("%s: %d envelope(s) enumerated" % (path, res["derived_count"])))
+        emit(redact("%s: %d envelope(s) enumerated" % (path, res["derived_count"])))
         everything = [(i, f) for i, fs in enumerate(res["findings_by_index"]) for f in fs]
         everything += [(None, f) for f in res["set_findings"]
                        if not any(f is g for _, g in everything)]
         for i, f in everything:
-            print(redact("%s %s [%s] %s: %s" % (f["severity"], f["code"], "set" if i is None else i, f["path"], f["message"])))
+            emit(redact("%s %s [%s] %s: %s" % (f["severity"], f["code"], "set" if i is None else i, f["path"], f["message"])))
         if any(f["severity"] == "REFUSE" for _, f in everything):
             rc = max(rc, 1)
         elif not everything:
-            print("OK (shape and internal consistency only; not production evidence)")
+            emit("OK (shape and internal consistency only; not production evidence)")
     return rc
 
 
