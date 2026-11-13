@@ -1,0 +1,76 @@
+{
+ "schema": "worker-fit-envelope/1",
+ "label": "source-only fixture; does not prove production behavior; derived from plan.md A1572 rev42 terminal (head d8594fb6), captured 2026-11-12",
+ "parent": "A1296",
+ "task_id": "A1572",
+ "revision": 42,
+ "approved_ac_refs": [
+  "A1572/AC-bootstrap"
+ ],
+ "work_shape": "implementation",
+ "source": {
+  "owner": "ctl",
+  "identity": "A1572 rev42 terminal source result",
+  "identity_at": "2026-11-12T20:00:00Z",
+  "revision_at": "2026-11-12T20:00:00Z"
+ },
+ "current_owner": "ctl",
+ "owner_reachable": true,
+ "target": {
+  "repo": "wm-build",
+  "branch": "UNKNOWN",
+  "head": "d8594fb6de3cd72a6920fc8454aa96929f8ec892"
+ },
+ "worker": {
+  "host": "UNKNOWN",
+  "unit": "UNKNOWN",
+  "invocation": "UNKNOWN",
+  "child": "UNKNOWN",
+  "session": "UNKNOWN",
+  "account": "UNKNOWN",
+  "model": "UNKNOWN",
+  "effort": "UNKNOWN"
+ },
+ "state": "DONE",
+ "effect": {
+  "state": "applied",
+  "no_replay": true,
+  "policy": "never replay; resume or consume only"
+ },
+ "result": {
+  "artifact": "terminal source result @ d8594fb6",
+  "event": null,
+  "task_id": "A1572",
+  "revision": 42,
+  "reviewed": false
+ },
+ "consumer": {
+  "named": "ctl",
+  "alternate": "rb",
+  "alternate_authorized": false,
+  "available": false
+ },
+ "ack": {
+  "accepted": false,
+  "evidence": null
+ },
+ "next_action": "exact-head independent review of d8594fb6",
+ "observed_at": {
+  "envelope": "2026-11-12T22:00:00Z",
+  "worker": "UNKNOWN",
+  "result": "2026-11-12T22:00:00Z"
+ },
+ "evidence": [
+  {
+   "ref": "plan.md A1572 rev42",
+   "task_id": "A1572",
+   "revision": 42,
+   "observed_at": "2026-11-12T22:00:00Z"
+  }
+ ],
+ "coverage_gaps": [
+  "account UNKNOWN",
+  "installed acceptance not established"
+ ],
+ "declared_complete": false
+}

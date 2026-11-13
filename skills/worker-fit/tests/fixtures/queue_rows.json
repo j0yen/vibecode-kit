@@ -1,0 +1,62 @@
+{
+ "label": "source-only fixture; rows copied from live-rows.json (wm-asks query captured by r7 at launch, 2026-11-12); 'what'/'check' truncated; not live truth",
+ "rows": [
+  {
+   "accept_current": false,
+   "accept_result": null,
+   "ask_id": "A1572",
+   "asked": "2026-11-11T01:55",
+   "check": "wm-build origin/main contains 59d991c content AND installed 0.77.113 on rb+r7 AND a loaded-daemon private canary shows P",
+   "claim": null,
+   "due": "2026-11-11T12:00",
+   "key": "prio3-p0p1p2-merge-promote-adopt",
+   "owner": "ctl",
+   "ready": false,
+   "rev": 43,
+   "row_id": "d-20261111-015556-controller-dd8d",
+   "seq": 1168,
+   "status": "open",
+   "verdict_row": null,
+   "waits_on": [],
+   "what": "Parent A1296 W20-W22/W25. Owner rb (wm-build): open PR from branch prio3-p0p1p2 (head 59d991cb, rb clone /mnt/data/jsy/tmp/p5task/prio3/repo, independent CONFIRM + canary PASS in ~/Notes/prd-priority-selective-unpark-20261111.md), bump 0.77.113 + CHANGELOG, merge, promote, adopt on r7 and rb at a sa [truncated for fixture]"
+  },
+  {
+   "accept_current": false,
+   "accept_result": null,
+   "ask_id": "A1659",
+   "asked": "2026-11-12T21:45",
+   "check": "false",
+   "claim": "host:ryzen7:unit:r7-irv-a-221051@2026-11-12T22:11",
+   "due": "2026-11-12T21:45",
+   "key": "integration-review-fleet-20261112",
+   "owner": "r7",
+   "ready": false,
+   "rev": 8,
+   "row_id": "d-20261112-214539-r7-e2a2",
+   "seq": 1257,
+   "status": "open",
+   "verdict_row": null,
+   "waits_on": [],
+   "what": "Parent A1296 W20/W23. Joe Maxspeed: finish fleet-interface endpoint/caller/effective-version coverage and build/validate integration-review Claude skill. r7 isolated ryzen7 slice. Full scope/ACs in /home/jsy/wintermute-operations/feedback/integration-review-maxspeed-20261112.task.md. Preserve all58  [truncated for fixture]"
+  },
+  {
+   "accept_current": false,
+   "accept_result": null,
+   "ask_id": "A1663",
+   "asked": "2026-11-12T22:40",
+   "check": "false",
+   "claim": null,
+   "due": "2026-11-12T23:10",
+   "key": "worker-fit-dedicated-20261112",
+   "owner": "r7",
+   "ready": false,
+   "rev": 1,
+   "row_id": "d-20261112-224051-r7-3b84",
+   "seq": 1261,
+   "status": "open",
+   "verdict_row": null,
+   "waits_on": [],
+   "what": "Joe GO dedicated worker-fit implementation under A1296, distinct A1659. Owner r7 consume /home/jsy/wintermute-operations/feedback/worker-fit-dedicated-go-20261112.task.md; isolated Sonnet5.5medium supported builder worker, actual account/model/effort/child/unit proof+first source/test effect, indepe [truncated for fixture]"
+  }
+ ]
+}

@@ -1,0 +1,75 @@
+{
+ "schema": "worker-fit-envelope/1",
+ "label": "source-only fixture; does not prove production behavior; synthetic",
+ "parent": "SYN-0",
+ "task_id": "SYN-102",
+ "revision": 3,
+ "approved_ac_refs": [
+  "SYN-0/AC1"
+ ],
+ "work_shape": "implementation",
+ "source": {
+  "owner": "r7",
+  "identity": "synthetic row SYN-101 rev3",
+  "identity_at": "2026-11-13T06:00:00Z",
+  "revision_at": "2026-11-13T06:00:00Z"
+ },
+ "current_owner": "UNKNOWN",
+ "owner_reachable": "UNKNOWN",
+ "target": {
+  "repo": "synthetic/repo-a",
+  "branch": "syn/b1",
+  "head": "UNKNOWN"
+ },
+ "worker": {
+  "host": "UNKNOWN",
+  "unit": "UNKNOWN",
+  "invocation": "UNKNOWN",
+  "child": "UNKNOWN",
+  "session": "UNKNOWN",
+  "account": "UNKNOWN",
+  "model": "UNKNOWN",
+  "effort": "UNKNOWN"
+ },
+ "state": "NOT_STARTED",
+ "effect": {
+  "state": "none",
+  "no_replay": true,
+  "policy": "nothing started"
+ },
+ "result": {
+  "artifact": null,
+  "event": null,
+  "task_id": null,
+  "revision": null,
+  "reviewed": false
+ },
+ "consumer": {
+  "named": "r7",
+  "alternate": null,
+  "alternate_authorized": false,
+  "available": true
+ },
+ "ack": {
+  "accepted": false,
+  "evidence": null
+ },
+ "next_action": "r7 may launch through the supported launcher (recommendation only)",
+ "observed_at": {
+  "envelope": "2026-11-13T06:30:00Z",
+  "worker": "UNKNOWN",
+  "result": "UNKNOWN"
+ },
+ "evidence": [
+  {
+   "ref": "queue read SYN-102",
+   "task_id": "SYN-102",
+   "revision": 3,
+   "observed_at": "2026-11-13T06:29:00Z"
+  }
+ ],
+ "coverage_gaps": [
+  "account not observed"
+ ],
+ "declared_complete": false
+}

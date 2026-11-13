@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker-fit task envelope",
+  "description": "One task's placement evidence. A value is either a known string or the literal UNKNOWN; UNKNOWN is reported, never filled in. scripts/envelope_validate.py is the authority on cross-field rules (staleness, RUNNING/DONE evidence, false-complete, no-replay, ACK). A source-only envelope does not prove production behavior.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "parent", "task_id", "revision", "approved_ac_refs", "work_shape", "source", "current_owner", "owner_reachable", "target", "worker", "state", "effect", "result", "consumer", "ack", "next_action", "observed_at", "evidence", "coverage_gaps", "declared_complete"],
+  "properties": {
+    "schema": {"const": "worker-fit-envelope/1"},
+    "label": {"type": "string", "description": "free text, e.g. 'source-only fixture'"},
+    "parent": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 0},
+    "approved_ac_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "work_shape": {"enum": ["implementation", "review", "decision", "deterministic", "UNKNOWN"]},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner", "identity", "identity_at", "revision_at"],
+      "properties": {
+        "owner": {"type": "string"}, "identity": {"type": "string"},
+        "identity_at": {"$ref": "#/$defs/ts_or_unknown"}, "revision_at": {"$ref": "#/$defs/ts_or_unknown"},
+        "claim": {"type": "string", "description": "optional: claim string as read from the queue, verbatim"}
+      }
+    },
+    "current_owner": {"type": "string", "minLength": 1},
+    "owner_reachable": {"enum": [true, false, "UNKNOWN"]},
+    "target": {
+      "type": "object", "additionalProperties": false, "required": ["repo", "branch", "head"],
+      "properties": {"repo": {"type": "string"}, "branch": {"type": "string"}, "head": {"type": "string"}}
+    },
+    "worker": {
+      "type": "object", "additionalProperties": false,
+      "required": ["host", "unit", "invocation", "child", "session", "account", "model", "effort"],
+      "properties": {
+        "host": {"type": "string"}, "unit": {"type": "string"}, "invocation": {"type": "string"},
+        "child": {"type": "string"}, "session": {"type": "string"}, "account": {"type": "string"},
+        "model": {"type": "string"}, "effort": {"type": "string"}
+      }
+    },
+    "state": {"enum": ["NOT_STARTED", "RUNNING", "DONE", "BLOCKED", "UNKNOWN"]},
+    "effect": {
+      "type": "object", "additionalProperties": false, "required": ["state", "no_replay", "policy"],
+      "properties": {"state": {"enum": ["none", "applied", "UNKNOWN"]}, "no_replay": {"type": "boolean"}, "policy": {"type": "string"}}
+    },
+    "result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifact", "event", "task_id", "revision", "reviewed"],
+      "properties": {
+        "artifact": {"type": ["string", "null"]}, "event": {"type": ["string", "null"]},
+        "task_id": {"type": ["string", "null"]}, "revision": {"type": ["integer", "null"]},
+        "reviewed": {"enum": [true, false, "UNKNOWN"]}
+      }
+    },
+    "consumer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["named", "alternate", "alternate_authorized", "available"],
+      "properties": {
+        "named": {"type": "string"}, "alternate": {"type": ["string", "null"]},
+        "alternate_authorized": {"type": "boolean"}, "available": {"enum": [true, false, "UNKNOWN"]}
+      }
+    },
+    "ack": {
+      "type": "object", "additionalProperties": false, "required": ["accepted", "evidence"],
+      "properties": {"accepted": {"type": "boolean"}, "evidence": {"type": ["string", "null"]}}
+    },
+    "next_action": {"type": "string", "minLength": 1},
+    "observed_at": {
+      "type": "object", "additionalProperties": false, "required": ["envelope", "worker", "result"],
+      "properties": {
+        "envelope": {"$ref": "#/$defs/ts_or_unknown"}, "worker": {"$ref": "#/$defs/ts_or_unknown"},
+        "result": {"$ref": "#/$defs/ts_or_unknown"}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["ref", "task_id", "revision", "observed_at"],
+        "properties": {
+          "ref": {"type": "string"}, "task_id": {"type": "string"}, "revision": {"type": "integer"},
+          "observed_at": {"$ref": "#/$defs/ts_or_unknown"}
+        }
+      }
+    },
+    "coverage_gaps": {"type": "array", "items": {"type": "string"}},
+    "declared_complete": {"type": "boolean"}
+  },
+  "$defs": {
+    "ts_or_unknown": {"description": "ISO-8601 timestamp with offset or Z, or the literal UNKNOWN", "type": "string"}
+  }
+}
