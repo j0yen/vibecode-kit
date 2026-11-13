@@ -44,7 +44,8 @@ def _load_norm():
     return m
 
 
-redact = _load_norm().redact
+_NORM = _load_norm()
+redact, redact_obj = _NORM.redact, _NORM.redact_obj
 
 ANNOTATIONS = {"format", "default", "examples", "example", "$comment", "$id", "id", "deprecated", "readOnly", "writeOnly",
                "contentEncoding", "contentMediaType"}
@@ -365,7 +366,7 @@ def main(argv):
     except (TypeError, AttributeError, LookupError, ValueError, RecursionError) as e:
         print(f"UNKNOWN: schema shape not comparable ({type(e).__name__}: {redact(e)})", file=sys.stderr)
         return 2
-    print(json.dumps(res, indent=2))
+    print(json.dumps(redact_obj(res), indent=2))      # property names, required names and enum values are data
     return 0 if res["compatible"] else 1
 
 

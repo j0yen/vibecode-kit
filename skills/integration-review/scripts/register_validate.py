@@ -245,6 +245,11 @@ def validate(reg, schema, now=None):
     for r in recs:
         rid = _rid(r)
         srcs = _sources(r)
+        fb = r.get("fusion_basis")
+        if isinstance(fb, str) and "heuristic" in fb.lower():
+            # a guess, not proof: reported under partial and complete alike (a warning, never an error)
+            findings.append({"code": "heuristic-fusion", "severity": "warn", "record": rid,
+                             "message": f"record is a heuristic fusion ({_safe(fb.strip())}), a guess and not proof that its sources are one component"})
         if ("sources" in r) == ("source_identity" in r):
             add("source-form", "a record needs exactly one of source_identity or sources", rid)
         if not _refs(r.get("evidence")):

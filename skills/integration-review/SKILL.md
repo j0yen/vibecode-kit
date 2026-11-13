@@ -111,7 +111,10 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    so the extractor's output always passes the validator's duplicate-record check. The old guess (paths rooted in their
    own repos, identities distinct) is a heuristic, off by default, enabled only by `--heuristic-fusion`; it is the one
    stated exception to the distinct-commits rule (its premise is distinct identities), it is a
-   guess and its records are labelled `same-name-and-repo-rooted-paths-heuristic`; raw identity and
+   guess and its records are labelled `same-name-and-repo-rooted-paths-heuristic`; `register_validate.py` reports every record
+   whose `fusion_basis` is a heuristic as `WARN heuristic-fusion [<record>]` naming the basis, under partial and complete alike: a
+   `complete` declaration WARNS and does not refuse (the fusion is opt-in and labelled, rc stays 0, but the guess is never an unmarked OK;
+   refusing would block a stated, opt-in choice the operator can read in the output); raw identity and
    evidence kept verbatim; an identity parses only when the whole string is
    `path+sha256:<path> <64 hex>` or `commit <40 hex>` (a trailing newline or `(dirty, unverified)` is UNKNOWN); input is split on newline only, must be UTF-8, and a duplicate JSON key
    rejects the row). Unreadable or wrong-shape input exits 2 in every script, never with a traceback;

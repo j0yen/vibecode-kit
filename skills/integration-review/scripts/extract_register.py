@@ -258,25 +258,30 @@ def _positive_clusters(members):
             i = parent[i]
         return i
     basis = {}
+    sha = [{s["sha256"] for s in m["sources"] if "sha256" in s} for m in members]
+    repos = [{_repo_id(s["repo"]) for s in m["sources"] if s["repo"] != "UNKNOWN"} for m in members]
+    paths = [_path_id(m["key"][5]) for m in members]
+    # per cluster root: the distinct commit sets of its members that state commits. Two clusters hold
+    # distinct commits exactly when both are non-empty and they are not one and the same single set.
+    csets = [{frozenset(_commits(m))} if _commits(m) else set() for m in members]
     for i in range(len(members)):
         for j in range(i + 1, len(members)):
-            a, b = members[i], members[j]
             how = None
-            sa = {s["sha256"] for s in a["sources"] if "sha256" in s}
-            sb = {s["sha256"] for s in b["sources"] if "sha256" in s}
-            if sa & sb:
+            if sha[i] & sha[j]:
                 how = "same-content-sha256"
-            else:
-                ra = {_repo_id(s["repo"]) for s in a["sources"] if s["repo"] != "UNKNOWN"}
-                rb = {_repo_id(s["repo"]) for s in b["sources"] if s["repo"] != "UNKNOWN"}
-                pa, pb = _path_id(a["key"][5]), _path_id(b["key"][5])
-                if ra & rb and pa and pa == pb:
-                    how = "same-repo-identity-and-path"
-            if how and not any(_distinct_commits(members[x], members[y])
-                               for x in range(len(members)) if find(x) == find(i)
-                               for y in range(len(members)) if find(y) == find(j)):
-                parent[find(i)] = find(j)
-                basis[find(i)] = how
+            elif repos[i] & repos[j] and paths[i] and paths[i] == paths[j]:
+                how = "same-repo-identity-and-path"
+            if how:
+                ri, rj = find(i), find(j)
+                ca, cb = csets[ri], csets[rj]
+                if ri == rj:
+                    basis[ri] = how     # already one cluster: its members were checked when they were joined
+                    continue
+                if ca and cb and not (len(ca) == 1 and ca == cb):
+                    continue
+                parent[ri] = rj
+                csets[rj] = ca | cb
+                basis[rj] = how
     out = {}
     for i in range(len(members)):
         out.setdefault(find(i), []).append(i)

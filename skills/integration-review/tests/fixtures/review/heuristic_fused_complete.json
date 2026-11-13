@@ -1,0 +1,109 @@
+{
+ "coverage": {
+  "declared": "all-interfaces-complete",
+  "declared_counts": {
+   "records": 999
+  }
+ },
+ "families": [
+  {
+   "id": "IF001",
+   "registered_callers": [
+    "cli-a"
+   ]
+  }
+ ],
+ "records": [
+  {
+   "component": "svc-a",
+   "evidence": [
+    {
+     "observed_at": "2026-11-12T11:00:00Z",
+     "ref": "file:x#1"
+    }
+   ],
+   "family": "IF001",
+   "fusion_basis": "same-name-and-repo-rooted-paths-heuristic",
+   "host": "ryzen7",
+   "installed_state": "installed",
+   "interface_kind": "event",
+   "label": "positive-control",
+   "owner_row": null,
+   "record_id": "R1",
+   "role": "producer",
+   "sources": [
+    {
+     "available": true,
+     "captured_at": "2026-11-12T10:00:00Z",
+     "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "path": "bin/x",
+     "repo": "j0yen/x",
+     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "version": "1.0.0"
+    },
+    {
+     "available": true,
+     "captured_at": "2026-11-12T10:00:00Z",
+     "commit": "cccccccccccccccccccccccccccccccccccccccc",
+     "path": "bin/x",
+     "repo": "j0yen/y",
+     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "version": "1.0.0"
+    }
+   ]
+  },
+  {
+   "component": "svc-b",
+   "evidence": [
+    {
+     "observed_at": "2026-11-12T11:00:00Z",
+     "ref": "file:x#1"
+    }
+   ],
+   "family": "IF001",
+   "host": "ryzen7",
+   "installed_state": "installed",
+   "interface_kind": "event",
+   "label": "positive-control",
+   "owner_row": null,
+   "record_id": "R2",
+   "role": "consumer",
+   "source_identity": {
+    "available": true,
+    "captured_at": "2026-11-12T10:00:00Z",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "bin/x",
+    "repo": "j0yen/x",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": "1.0.0"
+   }
+  },
+  {
+   "component": "cli-a",
+   "evidence": [
+    {
+     "observed_at": "2026-11-12T11:00:00Z",
+     "ref": "file:x#1"
+    }
+   ],
+   "family": "IF001",
+   "host": "ryzen7",
+   "installed_state": "installed",
+   "interface_kind": "event",
+   "label": "positive-control",
+   "owner_row": null,
+   "record_id": "R3",
+   "role": "caller",
+   "source_identity": {
+    "available": true,
+    "captured_at": "2026-11-12T10:00:00Z",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "bin/x",
+    "repo": "j0yen/x",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": "1.0.0"
+   }
+  }
+ ],
+ "schema_version": 1
+}
