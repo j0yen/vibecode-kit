@@ -154,6 +154,11 @@ _NE_FILLER = frozenset(
     "available applicable set filled fill details detail info information more further soon todo "
     "decided insert here add lost gone record component endpoint interface vendor response reply us we our at time "
     "moment today update recorded captured supplied specified on by".split())
+# DESCRIPTOR words name an artifact (a stub, a mock, a dummy, a draft); STATE words say the fact is not known, missing or pending.
+# A date or count beside a STATE word is decoration ("unknown since 2026-11-12"); beside a descriptor it is a fact about the
+# artifact ("stub took 3 retries").
+_NE_DESCRIPTOR = frozenset("dummy fake stub mock lorem ipsum xxx draft placeholder provisional tentative".split())
+_NE_STATE = _NE_PLACEHOLDER - _NE_DESCRIPTOR
 _COMMIT_NOISE = frozenset("commit sha id rev revision hash oid git ref no number".split())
 # A label before a commit ("sha:", "sha1:", "sha-256:", "commit ", "rev ", "hash=", "git:" ...); only the sha forms may be
 # followed by "-" ("sha256-<hex>"): "git-2.40" and "rev-1" are names, not a label and a value.
@@ -200,9 +205,10 @@ _NULL_SHA = re.compile(r"0{7,64}")
 # placeholder word are decoration. Code tokens are classified by _token_kind().
 _WEAK = re.compile(r"[0-9\"'`=#]")
 _NUMBER = re.compile(r"[#v]?[0-9][0-9:.,/-]*")
-# A number anchors only as a LOCATION ("line 12", "page 4", "column 8": _LOCATION_NOUNS before it), an OBSERVED RESULT ("returned
+# A number anchors as a LOCATION ("line 12", "page 4", "column 8": _LOCATION_NOUNS before it), an OBSERVED RESULT ("returned
 # 404", "exit 1", "http 200": _RESULT_BEFORE before it) or a RESULT COUNT ("3 passed", "2 errors": _RESULT_AFTER after it). After
-# any other word it is a date, a count, a version or an ordinal ("since 2026-11-12", "after 3 retries", "sprint 14").
+# any other word it is a date, a count, a version or an ordinal ("since 2026-11-12", "after 3 retries", "sprint 14") beside a
+# STATE word (unknown, pending, tbd ...), and a fact about the artifact beside a descriptor word only ("stub took 3 retries").
 _LOCATION_NOUNS = frozenset("line lines row rows col cols column columns page pages step steps offset position index char".split())
 _RESULT_BEFORE = frozenset("returns returned return got exit code http https errno rc".split())
 _RESULT_AFTER = frozenset("passed passing failed failing fail fails errors error warnings warning tests test assertions ok "
@@ -354,7 +360,9 @@ def _anchored(t):
     token, see _token_kind: status(), a.status, Status::Unknown, check_null()) is a location unless all its words are placeholder
     words (unknown(), null::nil). Beside plain prose words a code token anchors only when it is precise (a call, ::, URL,
     name@version, a file, a path; never a bare dotted name or two-part slash name, an abbreviation, a mention or an alternative) and holds a word
-    of 2+ letters that is neither a placeholder nor a filler word (src/unknown/x.py). A number anchors only as a location, an observed result or a result count (_LOCATION_NOUNS, _RESULT_BEFORE, _RESULT_AFTER), never after another word."""
+    of 2+ letters that is neither a placeholder nor a filler word (src/unknown/x.py). A number anchors as a location, an observed result or a result count (_LOCATION_NOUNS, _RESULT_BEFORE, _RESULT_AFTER); after
+    any other content word it anchors only in a ref with no STATE word (_NE_STATE: "stub took 3 retries"), never beside one
+    ("unknown after 3 retries")."""
     toks = t.split()
     kinds = [(tok, _token_kind(tok)) for tok in toks]
     lone = any(k for _, k in kinds) and not any(k is None and re.search(r"[a-z]", tok) for tok, k in kinds)
@@ -369,10 +377,13 @@ def _anchored(t):
                                                   for w in ws):
             return True
     prev = None
+    stated = bool(_PH_PHRASE.search(t)) or any(w in _NE_STATE for w in re.findall(r"[a-z]+", t))
     for i, tok in enumerate(toks):
         core = tok.strip(_EDGE + "?-")
         if _NUMBER.fullmatch(core) and (prev in _LOCATION_NOUNS or prev in _RESULT_BEFORE
-                                        or (i + 1 < len(toks) and (re.findall(r"[a-z]+", toks[i + 1]) or [""])[0] in _RESULT_AFTER)):
+                                        or (i + 1 < len(toks) and (re.findall(r"[a-z]+", toks[i + 1]) or [""])[0] in _RESULT_AFTER)
+                                        or (not stated and prev is not None and prev not in _NE_PLACEHOLDER
+                                            and prev not in _NE_FILLER and len(prev) > 1)):
             return True
         m = re.findall(r"[a-z]+", core)
         if m:

@@ -174,6 +174,17 @@ class TestX4NumberAnchorsOnlyAfterALocationNoun(unittest.TestCase):
         for r in FX["number_with_anchor_evidence"]:
             self.assertFalse(ir_norm.non_evidence(r), r)
 
+    def test_a_descriptor_word_is_not_a_statement_of_not_knowing(self):
+        """stub / mock / dummy / fake / draft / placeholder describe an artifact: a number after any content word in such a
+        ref is a fact about it ("stub took 3 retries"), as before D5; only the state words (unknown, pending, tbd, null,
+        missing, awaiting ...) make a date or count decoration."""
+        for r in FX["descriptor_number_evidence"]:
+            self.assertFalse(ir_norm.non_evidence(r), r)
+
+    def test_a_state_word_makes_a_number_after_a_content_word_decoration(self):
+        for r in FX["state_number_non_evidence"]:
+            self.assertTrue(ir_norm.non_evidence(r), r)
+
     def test_no_placeholder_no_change(self):
         for r in ("status 200", "ran 12 tests", "4 passed", "since 2026-11-12 the build is green", "after 3 retries it passed"):
             self.assertFalse(ir_norm.non_evidence(r), r)

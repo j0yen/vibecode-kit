@@ -383,5 +383,33 @@
   "unknown row 3",
   "unknown page 4",
   "unknown step 4"
+ ],
+ "descriptor_number_evidence": [
+  "mock listens on port 8080",
+  "stub returns 404 for GET",
+  "mock server answered with 200",
+  "stub handler called 3 times",
+  "dummy fixture has 12 rows",
+  "stub emits 4 events per call",
+  "draft spec section 4 approved",
+  "mock server pid 4242 running",
+  "stub took 3 retries",
+  "placeholder removed in commit 3",
+  "mock covers 5 cases",
+  "fake clock frozen 2026-11-12",
+  "stub exit code 1",
+  "dummy account created 2026-11-12",
+  "mock waited 3 seconds"
+ ],
+ "state_number_non_evidence": [
+  "pending PR 12 merged",
+  "null case covered by test 12",
+  "tbd resolved: see ticket 1234",
+  "pending migration 0042 applied",
+  "unknown owner sprint 14",
+  "unknown since 2026-11-12",
+  "missing stub 3 times",
+  "stub pending 3 days",
+  "fake data unknown since 12"
  ]
 }
