@@ -295,7 +295,10 @@ class DefC_MismatchEchoesAreOpaque(unittest.TestCase):
         self.assertIn("UNKNOWN_KEY", out)
         ok = running()
         ok["extra_note"] = 1
-        self.assertIn("extra_note", json.dumps(ev.validate(ok, now=FIXTURE_NOW)))
+        # re-review 7 DEF-3: the schema is known, so an unknown key is an opaque ref even when it is an ordinary word
+        out_ok = json.dumps(ev.validate(ok, now=FIXTURE_NOW))
+        self.assertNotIn("extra_note", out_ok)
+        self.assertIn("[opaque key ", out_ok)
 
     def test_duplicate_key_path_does_not_echo_a_random_key(self):
         k = b62(24)

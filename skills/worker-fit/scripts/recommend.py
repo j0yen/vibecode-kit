@@ -136,8 +136,8 @@ def _recommend_one(d, findings):
         # validated consumer identifiers in next_consumer / later_consumers.
         named = ev.ident(cons["named"])
         named_ok = named is not None and (distinct or ev_norm(named) not in own)
-        later = [ev.keep("ident", named)] if named_ok else []
-        r["next_consumer"] = ev.keep("ident", named) if named_ok else UNKNOWN
+        later = [ev.show("consumer", named)] if named_ok else []
+        r["next_consumer"] = ev.show("consumer", named) if named_ok else UNKNOWN
         what = "accept/install owner decides next" if distinct else "exact-head independent review of the terminal result"
         if named_ok and cons["available"] is True:
             r["action"] = "The named consumer (next_consumer) consumes the retained terminal (%s); no new coder." % what
@@ -146,7 +146,7 @@ def _recommend_one(d, findings):
             alt_ok = alt is not None and (distinct or ev_norm(alt) not in own)
             ref_ok = ev.ref_like(cons.get("alternate_authorization_ref"))
             if alt_ok and cons["alternate_authorized"] and ref_ok:
-                later.append(ev.keep("ident", alt))
+                later.append(ev.show("consumer", alt))
                 tail = "an authorized alternate (later_consumers) may consume; its authorization reference is recorded in evidence_used"
             elif alt_ok and cons["alternate_authorized"]:
                 tail = "the alternate is marked authorized with no authorization evidence reference: no authority; not used"

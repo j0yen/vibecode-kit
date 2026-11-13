@@ -361,7 +361,11 @@ class D03_DeepQueueRowsNeverTraceback(unittest.TestCase):
             deep = [deep]
         self.assertEqual(ev.find_dups(deep), [])
         d = ev.load_json_text('{"a": {"b": 1, "b": 2}, "c": [{"x": 1, "x": 2}], "d": 1, "d": 2}')
-        self.assertEqual(sorted(ev.find_dups(d)), sorted(["$ (d)", "$.a (b)", "$.c[0] (x)"]))
+        # re-review 7 DEF-3: a key outside the schema is an opaque ref in every path; the structure of the paths is unchanged
+        sk = ev.safe_key
+        self.assertEqual(sorted(ev.find_dups(d)), sorted(["$ (%s)" % sk("d"), "$.%s (%s)" % (sk("a"), sk("b")),
+                                                          "$.%s[0] (%s)" % (sk("c"), sk("x"))]))
+        self.assertNotIn("(d)", " ".join(ev.find_dups(d)))
 
     def test_deep_envelope_record_inside_a_set_still_refused_alone(self):
         for n in (900, 1100, 5000):

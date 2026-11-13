@@ -176,6 +176,17 @@ _HOST_PORT = re.compile(r"[^:]+:\d{1,5}")
 _IPV6 = re.compile(r"[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%[A-Za-z0-9_.-]{1,32})?")
 
 
+_DNS_HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?){2,6}")
+_DNS_TLDS = frozenset("net com org io dev local internal lan corp home arpa cloud app ai co".split())
+
+
+def _dns_host(s):
+    """A multi-label DNS name (3+ lower-case labels of at most 20 characters, a well-known last label), whose labels are
+    machine-generated names that read as random ('tail9z8y7'): the DNS grammar is the field's grammar. A credential
+    word in any label still marks it."""
+    return bool(_DNS_HOST.fullmatch(s)) and s.rsplit(".", 1)[-1] in _DNS_TLDS and not _cred_marked([x for x in _SPLIT.split(s) if x])
+
+
 def ident(v, kind=None):
     """The value as an identifier (ASCII word characters and . _ : @ / + -, no spaces), or None when it is not one, is a
     placeholder, or is not a trusted identity: its pieces must read as ids (_id_pieces_ok), no credential word may be
@@ -186,7 +197,7 @@ def ident(v, kind=None):
     if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v):
         return None
     s = unicodedata.normalize("NFKC", v).strip()
-    if not (_IDENT.fullmatch(s) and _id_pieces_ok(s) and redact_credentials(s) == s):
+    if not (((_IDENT.fullmatch(s) and _id_pieces_ok(s)) or (kind == "host" and _dns_host(s))) and redact_credentials(s) == s):
         return None
     if kind == "host" and ":" in s and not (_IPV6.fullmatch(s) or _HOST_PORT.fullmatch(s.rsplit("@", 1)[-1] if "@" in s else s)):
         return None
@@ -233,6 +244,8 @@ def keep(kind, v):
     if not isinstance(v, str):
         return v
     ok = _KINDS[kind](v)
+    if kind != "sha" and ok == v and not _trusted_pieces(v):
+        return v
     return v if ok is None or ok != v else _MARK_OPEN + v + _MARK_CLOSE
 
 
@@ -299,7 +312,9 @@ _CRED_WORDS = {"pass", "pwd", "auth", "authn", "authz", "key", "keys", "sig", "a
                "session", "sessions", "sid", "cred", "creds", "jwt", "otp", "cookie", "cookies", "bearer", "token",
                "tokens", "secret", "secrets", "credential", "credentials", "private", "passphrase", "password", "passwd",
                # abbreviations of the same names (re-review 5 DEF-2)
-               "pw", "pat", "pin", "ak", "sk", "seed", "salt", "hmac", "mnemonic", "passcode", "privkey", "prikey", "prvkey", "csrf", "xsrf", "cvv", "ssn", "unseal", "kubeconfig"}
+               "pw", "pat", "pin", "ak", "sk", "seed", "salt", "hmac", "mnemonic", "passcode", "privkey", "prikey", "prvkey", "csrf", "xsrf", "cvv", "ssn", "unseal", "kubeconfig",
+               # re-review 7: short forms and the rest of the family
+               "tok", "tkn", "apikey", "apikeys", "passwords", "authkey", "accesskey", "secretkey", "sshkey", "oauth"}
 _CRED_STEMS = ("token", "secret", "passw", "passphrase", "passcode", "credential", "cookie", "signature", "bearer",
                "authorization", "authorisation", "sessionid", "privatekey")
 _KEY_COMPOUND = re.compile(r"(?:api|access|account|secret|private|ssh|auth|signing|encryption|master|shared|hmac|license|"
@@ -310,12 +325,33 @@ _CRED_COMPOUNDS = ("oauth_verifier", "code_verifier", "recovery_code", "recovery
                    "unlock_code", "unlock_key", "sas")
 
 
+_LEET = str.maketrans("013457$@", "oleastsa")
+_ALPHA_RUNS = re.compile(r"[a-z]+")
+_GLUE_KEY = re.compile(r"(?:api|access|account|secret|private|priv|pri|prv|ssh|auth|signing|encryption|master|shared|hmac|license|app|"
+                       r"client|consumer|service|storage|public|my|aws|gcp|db|admin|user|root)key")
+
+
+def _seg_cred(seg):
+    """A name segment (lower case, no separators) that is a credential word, holds a credential stem, is a
+    '<qualifier>key' compound, or carries one of those with digits or letters glued on (key9, pw9, mykey3, apikeyv2,
+    t0ken): the digit-free runs and the leet-folded form are looked at too."""
+    if seg in _CRED_WORDS or any(w in seg for w in _CRED_STEMS) or _KEY_COMPOUND.fullmatch(seg):
+        return True
+    if seg.isalpha() or not any(c.isdigit() for c in seg):
+        return False
+    for run in _ALPHA_RUNS.findall(seg):
+        if run in _CRED_WORDS or any(w in run for w in _CRED_STEMS) or _GLUE_KEY.search(run):
+            return True
+    folded = seg.translate(_LEET)
+    return folded != seg and any(w in folded for w in _CRED_STEMS)
+
+
 def _cred_name(name):
     flat = "_" + re.sub(r"[^a-z0-9]+", "_", re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()).strip("_") + "_"
     if any("_" + c + "_" in flat for c in _CRED_COMPOUNDS):
         return True
     for seg in re.split(r"[^A-Za-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name).lower()):
-        if seg and (seg in _CRED_WORDS or any(w in seg for w in _CRED_STEMS) or _KEY_COMPOUND.fullmatch(seg)):
+        if seg and _seg_cred(seg):
             return True
     return False
 
@@ -330,10 +366,25 @@ _RUN = re.compile(r"(?<![A-Za-z0-9_\-+/.])[A-Za-z0-9_\-+/.]{20,}=*(?![A-Za-z0-9_
 _DIGEST_FIELD = re.compile(r"(?i)(?:head|sha\d*|digest|commit|rev(?:ision)?|oid|hash)\W{0,3}$")
 
 
+_DIGIT = re.compile(r"\d")
+
+
+def _keyish(val):
+    """True for a value that reads as a key and not as a name: a piece of 6+ characters that mixes letters and digits and
+    is neither a plain id piece, a hex or date id, nor a word-like name ('Zq9Xk3Lm' is, 'WF1663Impl', 'r7wfr7review',
+    'abc123def456' are not). The name before it does not matter: this layer needs no credential word."""
+    v = val.strip("\"'`")
+    for seg in re.split(r"[-_./+=:,;@%~?&#]+", v):
+        if (len(seg) >= 6 and seg.isascii() and seg.isalnum() and any(c.isdigit() for c in seg) and any(c.isalpha() for c in seg)
+                and not _piece_ok(seg)):
+            return True
+    return False
+
+
 def _redact_named_values(text):
     """name = value / name: value / "name": "value" / ?name=value where the name (the run of name characters before the
-    separator) holds a credential word: the value is hidden. Linear: each separator is looked at once, a value is read
-    only for a credential name and then skipped."""
+    separator) holds a credential word: the value is hidden, and so is a key-shaped value under any other name (the name
+    is not trusted). Linear: each separator is looked at once, a value is read (bounded) and a hidden one is skipped."""
     out, pos = [], 0
     for m in _SEP_AT.finditer(text):
         if m.start() < pos:
@@ -341,10 +392,16 @@ def _redact_named_values(text):
         j = m.start()
         while j > pos and text[j - 1] in _NAME_CHARS:
             j -= 1
-        if j == m.start() or not _cred_name(text[j:m.start()]):
+        if j == m.start():
             continue
         if text.startswith(REDACTED, m.end()):
             continue
+        if not _cred_name(text[j:m.start()]):
+            if not _DIGIT.search(text, m.end(), m.end() + 80):
+                continue  # a key-shaped value mixes in a digit: nothing to read otherwise
+            v = _VALUE.match(text, m.end(), m.end() + 200)  # any name: a key-shaped value is hidden; bounded read
+            if v is None or not _keyish(v.group(0)):
+                continue
         sep_end = m.end()
         while text[sep_end - 1].isspace():
             sep_end -= 1
@@ -410,10 +467,13 @@ def _redact_flag_values(text):
     """--flag VALUE / -flag VALUE where the flag name holds a credential word."""
     out, pos = [], 0
     for m in _FLAG_AT.finditer(text):
-        if m.start() < pos or not _cred_name(m.group("flag")):
+        if m.start() < pos:
             continue
-        v = _VALUE.match(text, m.end())
-        if v is None:
+        cred = _cred_name(m.group("flag"))
+        if not cred and not _DIGIT.search(text, m.end(), m.end() + 80):
+            continue
+        v = _VALUE.match(text, m.end()) if cred else _VALUE.match(text, m.end(), m.end() + 200)
+        if v is None or not (cred or _keyish(v.group(0))):
             continue
         out.append(text[pos:m.end()] + REDACTED)
         pos = v.end()
@@ -485,7 +545,7 @@ def _plain_piece(seg):
 # hex suffix (tail1a2b3, r<hex32>), a compact UTC timestamp, a ULID, and a "word-like" mixed alphanumeric name
 # (WF1663Impl, r7wfr6review, wmbuild1663impl2). A long piece that is none of these (a base62 key) is not an identifier by
 # field format, whatever field it sits in.
-_ID_PIECE = re.compile(r"[0-9a-fA-F]{9,64}|[a-z]{1,12}[0-9a-f]{1,64}|\d{8}T\d{6}Z?|[0-9A-HJKMNP-TV-Z]{26}")
+_ID_PIECE = re.compile(r"[0-9a-fA-F]{9,64}|[a-z]{1,12}[0-9a-f]{1,64}|\d{8}T\d{6}Z?|[0-7][0-9A-HJKMNP-TV-Z]{25}|[0-7][0-9a-hjkmnp-tv-z]{25}")
 _TOKENS = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
 _STRONG_WORDS = {"token", "tokens", "secret", "secrets", "password", "passwd", "pass", "pwd", "pw", "pat", "bearer",
                  "credential", "credentials", "apikey", "privkey", "passphrase", "passcode"}
@@ -554,6 +614,72 @@ def _cred_marked(segs):
         elif any(low.startswith(w) and re.fullmatch(r"(?=.*\d)[0-9a-f]{6,}", low[len(w):]) for w in _SHORT_STRONG):
             return True
     return bool(marks) and any(seg not in marks and not (_TINY.fullmatch(seg) or seg.lower() in _NAME_WORDS) for seg in segs)
+
+
+# TRUST LAYER. Validating an identity against its field grammar is not proof that it is not a credential: a grammar-valid
+# id can hold a secret. An identity prints only when its pieces are also trusted. A random-looking piece (a hex id of 9+
+# characters, a word glued to one, a ULID) is trusted only beside pieces from a CLOSED vocabulary of name words (a
+# positive list, never a list of credential words: a word this tool has not been told about is opaque by default), plus
+# digits, dates and short hex groups; and a credential word joined to a long piece is never trusted.
+_ID_WORDS = frozenset(("task tasks sess inv invocation run runs build builds wm wf unit units evt event events result "
+                       "results review reviews reviewer verifier verify child children coder codex claude exec worker "
+                       "workers service scope socket timer slice mount target path json log logs txt md out retained "
+                       "mnt ssd cargo tmp var home usr opt src scripts script evidence artifact artifacts report reports "
+                       "probe probes id pid ts tail host node pod vm i r w ryzen redbaron ryzen7 hermes ctl rb orch hub "
+                       "seat consumer producer owner queue row ask rev revision rev attempt step phase lane slot batch "
+                       "ci job jobs pipeline merge deploy release land lands head base main work tree wt clone repo "
+                       "branch commit pr hook hooks cron tick wake loop agent agents bus hub fleet kit vibecode skill "
+                       "fit trace span request req resp response msg message note notes doc docs journal acct account feat feature features hotfix bug "
+                       "syn synthorg mcphost wintermute prd dream gate golden fixture fixtures sample demo example sandbox stage staging prod "
+                       "production dev canary shadow backup snapshot snap checkpoint ckpt metrics stats status state github gh remote origin "
+                       "upstream tmux pane window screen term pty shell bash sh py python rs rust node npm yarn proc process thread tid name label "
+                       "spec specs plan plans diff patch fix fixes test tests suite case cases shift clock").split())
+_HEX_RUN = re.compile(r"[0-9a-fA-F]{9,64}")
+_HEX_GLUED = re.compile(r"(?P<w>[A-Za-z]{1,12}?)(?P<h>[0-9a-f]{9,64})")
+_ULID_ANY = re.compile(r"[0-7][0-9A-HJKMNP-TV-Z]{25}|[0-7][0-9a-hjkmnp-tv-z]{25}")
+_SHORT_HEX = re.compile(r"[0-9a-fA-F]{1,8}")
+
+
+def _vocab(seg):
+    low = seg.lower()
+    return low in _ID_WORDS or low.rstrip("0123456789") in _ID_WORDS and not _cred_name(low)
+
+
+def _random_piece(seg):
+    """(is_random, glued_word): the piece is a long hex id, a word glued to one, or a ULID."""
+    if _HEX_RUN.fullmatch(seg) or _ULID_ANY.fullmatch(seg):
+        return True, ""
+    m = _HEX_GLUED.fullmatch(seg)
+    if m and any(c.isdigit() for c in m.group("h")):
+        return True, m.group("w")
+    return False, ""
+
+
+def _trusted_pieces(s):
+    """True when every piece of a grammar-valid identity is trusted for printing (see TRUST LAYER)."""
+    segs = [x for x in _SPLIT.split(s) if x]
+    rnd = [_random_piece(x) for x in segs]
+    for seg in segs:
+        low = seg.lower()
+        if _cred_name(seg) and any(len(o) >= 9 and o != seg and not o.isdigit() for o in segs):
+            return False  # a credential word beside a long piece
+        for w in _GLUE_PREFIXES:
+            if low.startswith(w) and len(low) - len(w) >= 10 and low[len(w):].isalpha():
+                return False  # a credential word glued to a long run of letters
+    if not any(r for r, _ in rnd):
+        return True
+    for i, (seg, (r, glued)) in enumerate(zip(segs, rnd)):
+        if r:
+            if glued and glued.lower() != "r" and not _vocab(glued):
+                return False
+        elif not (seg.isdigit() or _SHORT_HEX.fullmatch(seg) or _DATE_PIECE.fullmatch(seg) or _vocab(seg)
+                  or (len(seg) == 1 and 0 < i < len(segs) - 1 and not rnd[i - 1][0] and not rnd[i + 1][0]
+                      and any(c.isdigit() for c in segs[i - 1]) and any(c.isdigit() for c in segs[i + 1]))):
+            return False
+    return True
+
+
+_GLUE_PREFIXES = tuple(sorted((w for w in _CRED_WORDS if len(w) >= 2 and w not in ("session", "sessions", "sid", "api", "pin", "key", "keys")), key=len, reverse=True)) + ("key", "keys")
 
 
 def _plain_name(seg):
@@ -773,13 +899,20 @@ def _render_path(link):
     return "".join(reversed(parts))
 
 
-_KEY_OK = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,40}")
+def _schema_keys():
+    """Every key name the schema defines (top level, sub-object fields, evidence fields): the only key names printed."""
+    keys = set(REQUIRED_TOP) | set(OPTIONAL_TOP) | set(SUB) | set(EVIDENCE_OPTIONAL) | {"ref", "task_id", "revision", "observed_at"}
+    for spec in SUB.values():
+        keys |= set(spec)
+    for opt in SUB_OPTIONAL.values():
+        keys |= set(opt)
+    return frozenset(keys)
 
 
 def safe_key(k):
-    """A JSON key as it may appear in a finding: a plain name that carries no credential word and no random piece prints,
-    any other key is an opaque ref. Key names come from the envelope and are not trusted."""
-    if isinstance(k, str) and _KEY_OK.fullmatch(k) and not _cred_name(k) and ident(k) == k:
+    """A JSON key as it may appear in a finding. The schema is known: a key it defines prints, every other key is an
+    opaque ref, whatever it looks like. Key names come from the envelope and are never trusted to print."""
+    if isinstance(k, str) and k in _schema_keys():
         return k
     return opaque("key", k)
 

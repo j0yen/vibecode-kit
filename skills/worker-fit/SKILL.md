@@ -62,8 +62,10 @@ scheduler, coordinator, task store or mutation CLI.
   (a) the value of any `key=value`, `key: value`, JSON `"key": "value"`, `--flag value`, `-u/--user user:pass`,
   `Authorization`/`Cookie`/`Set-Cookie` header or URL query parameter whose name holds a credential word (token, key,
   secret, pass/password/passphrase/pwd, auth, cookie, session, signature, sig, credential, bearer, api, private, dsn,
-  cert; split on separators and camelCase, so `passed`, `author` and `monkey` are not names) is hidden whatever the value
-  looks like (also `=>`, `->` and full-width `＝` `：` separators); (b) any run of 20 or more characters from
+  cert; split on separators and camelCase, so `passed`, `author` and `monkey` are not names; a credential word with digits
+  or letters glued on counts: `key9`, `pw9`, `mykey3`, `apikeyv2`, `t0ken`) is hidden whatever the value looks like, and a
+  key-shaped value (a piece of 6+ characters that mixes letters and digits and is no plain id, hex, date or word-like name,
+  `Zq9Xk3Lm`) is hidden under ANY name, so no credential-word list is the only gate in free text (also `=>`, `->` and full-width `＝` `：` separators); (b) any run of 20 or more characters from
   `A-Za-z0-9_-+/=.` that mixes letters and digits and is not a known-safe identifier (a 40/64-hex digest that follows
   head/sha/digest/commit/rev/oid/hash, a timestamp, a unit name, a path or branch made of short, lower-case or digit
   pieces) is hidden, a UUID included; (c) URL userinfo is hidden and so are the values of credential-named query
@@ -76,9 +78,17 @@ scheduler, coordinator, task store or mutation CLI.
   invocation, account, model, effort, owner, task id, repo, branch, consumer, reviewer, artifact/event path, evidence
   ref (one locator token) or `target.head` is printed only when it validates against its field grammar (plain words,
   digits, hex ids, UUIDs, compact timestamps, ULIDs, word-like mixed alphanumerics such as `WF1663Impl` or
-  `r7wfr6review`; a host has no `user:password@` userinfo and any `user@` part is a plain name) and nothing marks it as
-  a credential (a credential word joined to a non-trivial piece, `token-<hex>`, `Bearer-<hex>`, `pat_<hex>`,
-  `secret/<hex>`, a credential-named pair or query parameter, a provider shape). A value that does not validate is
+  `r7wfr6review`; a host has no `user:password@` userinfo and any `user@` part is a plain name) and its pieces are TRUSTED. Trust is a
+  positive rule, not a denylist: a random-looking piece (a hex id of 9+ characters, a word glued to one, a ULID) prints only
+  beside pieces of a closed vocabulary of name words (`task`, `sess`, `wm`, `build`, `verifier`, `result`, `retained`, ...:
+  `_ID_WORDS`, which holds no credential word), digits, dates and short hex groups; any other word beside a random piece
+  (`jwt-<hex>`, `creds/<hex>`, `k<hex>`, `vault_<uuid>`, a word nobody listed) is opaque by default, and a credential word
+  joined to a long piece (`token-<hex>`, `pw9=<letters>`, `key<letters>`) is never trusted. The envelope itself is never a
+  trusted source: nothing prints because of where it came from, only because the field grammar and these pieces validate
+  (a host may also be a 3+ label DNS name under a known last label, `redbaron.tail9z8y7.ts.net`). A grammar-valid id can
+  hold a secret, so validation alone is not proof; letters-only or bare-hex values are indistinguishable from names and ids
+  and are the stated residual. Key names: only keys the schema defines print; any other key is an opaque
+  `[opaque key <8 hex>]`, whatever it looks like. A value that does not validate is
   printed as an opaque keyed reference `[opaque <field> <8 hex>]` (a per-process keyed digest of the field name and the
   value: equal values give equal refs inside one run, nothing is recoverable, not stable across runs), never as the
   raw value; a placeholder stays UNKNOWN. A required identity (host, unit, child of a RUNNING record) that does not
