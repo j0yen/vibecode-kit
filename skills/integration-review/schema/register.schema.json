@@ -1,80 +1,268 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "integration-review register",
-  "description": "One record per enumerated endpoint. Coverage is derived from the records, never from a declared number.",
+  "description": "One record per enumerated endpoint. Coverage is derived from the records, never from a declared number. A record carries source_identity (one source) or sources (every stated source of a multi-repo component), never both. family UNASSIGNED is the explicit marker for a row no family claims: allowed under partial, refused under all-interfaces-complete.",
   "type": "object",
-  "required": ["schema_version", "coverage", "families", "records"],
+  "required": [
+    "schema_version",
+    "coverage",
+    "families",
+    "records"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"type": "integer"},
+    "schema_version": {
+      "type": "integer"
+    },
     "coverage": {
       "type": "object",
-      "required": ["declared"],
+      "required": [
+        "declared"
+      ],
       "additionalProperties": false,
       "properties": {
-        "declared": {"enum": ["all-interfaces-complete", "partial"]},
-        "declared_counts": {"type": "object"}
+        "declared": {
+          "enum": [
+            "all-interfaces-complete",
+            "partial"
+          ]
+        },
+        "declared_counts": {
+          "type": "object"
+        }
       }
     },
-    "families": {"type": "array", "items": {"$ref": "#/definitions/family"}},
-    "records": {"type": "array", "items": {"$ref": "#/definitions/record"}}
+    "families": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/family"
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/record"
+      }
+    }
   },
   "definitions": {
     "family": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": {"type": "string", "pattern": "^IF[0-9]{3}$"},
-        "title": {"type": "string"},
-        "registered_callers": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        "id": {
+          "type": "string",
+          "pattern": "^IF[0-9]{3}$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "registered_callers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       }
     },
     "source_identity": {
       "type": "object",
-      "required": ["repo", "version", "available"],
+      "required": [
+        "repo",
+        "version",
+        "available"
+      ],
       "additionalProperties": false,
       "properties": {
-        "repo": {"type": "string", "minLength": 1},
-        "commit": {"type": "string"},
-        "path": {"type": "string"},
-        "sha256": {"type": "string"},
-        "version": {"type": "string", "minLength": 1},
-        "captured_at": {"type": "string"},
-        "available": {"type": "boolean"}
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "captured_at": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "raw": {
+          "type": "string"
+        },
+        "path_or_command": {
+          "type": "string"
+        }
       }
     },
     "evidence": {
       "type": "object",
-      "required": ["ref"],
+      "required": [
+        "ref"
+      ],
       "additionalProperties": false,
       "properties": {
-        "ref": {"type": "string", "minLength": 1},
-        "observed_at": {"type": "string"}
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at": {
+          "type": "string"
+        }
       }
     },
     "record": {
       "type": "object",
-      "required": ["record_id", "family", "role", "host", "component", "interface_kind",
-                   "source_identity", "installed_state", "label", "evidence"],
+      "required": [
+        "record_id",
+        "family",
+        "role",
+        "host",
+        "component",
+        "interface_kind",
+        "installed_state",
+        "label",
+        "evidence"
+      ],
       "additionalProperties": false,
       "properties": {
-        "record_id": {"type": "string", "minLength": 1},
-        "family": {"type": "string", "pattern": "^IF[0-9]{3}$"},
-        "role": {"enum": ["producer", "consumer", "caller", "adapter", "UNKNOWN"]},
-        "host": {"type": "string", "minLength": 1},
-        "component": {"type": "string", "minLength": 1},
-        "interface_kind": {"enum": ["http", "cli", "exit-code", "filesystem", "event", "receipt",
-                                    "identity", "schema", "ordering", "retry", "trust", "rollback", "other"]},
-        "source_identity": {"$ref": "#/definitions/source_identity"},
-        "installed_state": {"enum": ["installed", "loaded", "source-only", "UNKNOWN"]},
-        "label": {"enum": ["observed-defect", "conditional-risk", "historical-evidence", "hypothesis",
-                           "positive-control", "unclassified"]},
-        "evidence": {"type": "array", "items": {"$ref": "#/definitions/evidence"}},
-        "owner_row": {"type": ["string", "null"]},
-        "effect_state": {"enum": ["observed", "UNKNOWN", "none"]},
-        "replay": {"enum": ["none", "retried"]},
-        "condition": {"enum": ["committed-publish-pending", "none"]}
+        "record_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "family": {
+          "type": "string",
+          "pattern": "^(IF[0-9]{3}|UNASSIGNED)$"
+        },
+        "role": {
+          "enum": [
+            "producer",
+            "consumer",
+            "caller",
+            "adapter",
+            "UNKNOWN"
+          ]
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "component": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interface_kind": {
+          "enum": [
+            "http",
+            "cli",
+            "exit-code",
+            "filesystem",
+            "event",
+            "receipt",
+            "identity",
+            "schema",
+            "ordering",
+            "retry",
+            "trust",
+            "rollback",
+            "other"
+          ]
+        },
+        "source_identity": {
+          "$ref": "#/definitions/source_identity"
+        },
+        "installed_state": {
+          "enum": [
+            "installed",
+            "loaded",
+            "source-only",
+            "UNKNOWN"
+          ]
+        },
+        "label": {
+          "enum": [
+            "observed-defect",
+            "conditional-risk",
+            "historical-evidence",
+            "hypothesis",
+            "positive-control",
+            "unclassified"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        },
+        "owner_row": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effect_state": {
+          "enum": [
+            "observed",
+            "UNKNOWN",
+            "none"
+          ]
+        },
+        "replay": {
+          "enum": [
+            "none",
+            "retried"
+          ]
+        },
+        "condition": {
+          "enum": [
+            "committed-publish-pending",
+            "none"
+          ]
+        },
+        "path_or_command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/source_identity"
+          }
+        },
+        "claimed_roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "claimed_installed_states": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_rows": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
       }
     }
   }

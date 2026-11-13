@@ -204,7 +204,9 @@ class SchemaCompat(unittest.TestCase):
         new = copy.deepcopy(self.OLD)
         new["properties"]["c"] = {"type": "string"}
         new["properties"]["a"]["enum"].append("z")
-        res = sc.compare(self.OLD, new)
+        # continuation: enum additions are classified by consumer handling (see test_compat_direction);
+        # this slice-1 control now names the tolerant-consumer case explicitly.
+        res = sc.compare(self.OLD, new, consumer="open")
         self.assertTrue(res["compatible"], res)
         self.assertTrue(res["additive"])
 

@@ -41,11 +41,20 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    `python3 -I scripts/discriminator_check.py FILE --line N --names a,b,c --sha256 HEX`.
    The file is parsed as text, never executed. A refused name is `conditional-risk` unless it is
    an intended refusal (`--expect-refuse`); it is not evidence that live messages are lost.
-4. Compare schemas with `scripts/schema_compat.py OLD NEW`: removed property/enum value, new
-   required field, type change or unknown keyword is breaking; an optional addition is compatible.
+4. Compare schemas with `scripts/schema_compat.py OLD NEW --direction producer-first|consumer-first|both
+   --consumer closed|open`. Changes are classified by who is on the new schema: an added enum value
+   a closed consumer will receive is incompatible; one only a new consumer accepts can be
+   compatible; a changed regex is UNDETERMINED, never compatible; unknown keywords are breaking.
 5. Record endpoints in a register (`schema/register.schema.json`) and run
    `python3 -I scripts/register_validate.py REGISTER.json`. It refuses `all-interfaces-complete`
-   while any role, endpoint, caller, installed state, version or label is UNKNOWN/unclassified.
+   while any role, endpoint, caller, installed state, version, label or evidence is UNKNOWN/missing or
+   any row is `family: UNASSIGNED` (kept under partial, counted, named by `record:code`).
+   `path_or_command` separates two endpoints on one component; `sources` carries every stated
+   source of a multi-repo component. To convert extraction rows run
+   `python3 -I scripts/extract_register.py ENDPOINTS.jsonl OUTDIR` (sides and `loaded` are never
+   invented; raw identity and evidence kept verbatim).
+5b. A "message lost" finding needs producer -> alias adapter -> installed waiter, each traced:
+   `python3 -I scripts/lost_message_check.py FINDING.json`. A missing link keeps it conditional-risk.
 6. Fill `templates/boundary-report.md`. Separate states: source change, tests, independent review,
    installed discovery, native Skill invocation, fleet coverage. State which are NOT done.
 
