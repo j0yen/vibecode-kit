@@ -85,9 +85,22 @@ scheduler, coordinator, task store or mutation CLI.
   (`jwt-<hex>`, `creds/<hex>`, `k<hex>`, `vault_<uuid>`, a word nobody listed) is opaque by default, and a credential word
   joined to a long piece (`token-<hex>`, `pw9=<letters>`, `key<letters>`) is never trusted. The envelope itself is never a
   trusted source: nothing prints because of where it came from, only because the field grammar and these pieces validate
-  (a host may also be a 3+ label DNS name under a known last label, `redbaron.tail9z8y7.ts.net`). A grammar-valid id can
-  hold a secret, so validation alone is not proof; letters-only or bare-hex values are indistinguishable from names and ids
-  and are the stated residual. Key names: only keys the schema defines print; any other key is an opaque
+  (a host may also be a 3+ label DNS name under a known last label, `redbaron.tail9z8y7.ts.net`; the DNS grammar makes a
+  host VALID, it does not make it TRUSTED: every label passes the same piece gate, so a random base36/base32 label is
+  opaque). Every class of piece has a bound: a letters-only piece that is not a vocabulary word prints up to 12 letters
+  (CamelCase 24), an identity carries at most 22 letters of unlisted words and at most one of them longer than 8, a digit-only piece at most 10 digits, a
+  vocabulary word may carry a short suffix (`tail9z8y7`), and an identity that is itself a `name=value` pair needs a
+  vocabulary name and a plain value (`pid=77` prints, `pswd=hunter2x` does not). A grammar-valid id can hold a secret, so
+  validation alone is not proof; short names, a bare hex id of 9+ characters, a vocabulary word beside a hex id and a
+  letters-only value within the bounds are indistinguishable from names and ids and are the stated residual. Queue rows
+  (`queue_adapter.py`, `recommend.py --queue`) use the STRICT gate (`show_row`): row id, owner, wait, status, seq and claim
+  print only when every piece is a closed-vocabulary word, a bounded number, a date or a piece of at most 5 characters;
+  anything else is an opaque ref, and a non-string field is never printed. Free text is untrusted narrative: the value of any
+  `name=value`, `name: value`, `"name": "value"` or `--name value` pair is hidden unless it is a plain value (a number of
+  at most 8 digits, a time, a word of the tool's own vocabulary, ONE plain unlisted word of at most 8 letters, a bracketed
+  ref) or the name is a schema key whose value validates and is trusted; a credential word joined to a value in one token
+  (`token-<v>`, `secret_run_<v>`, `tokenArYYbbah`) is hidden. The credential-name list above is an extra layer that hides
+  more; it is never what lets a value print. Key names: only keys the schema defines print; any other key is an opaque
   `[opaque key <8 hex>]`, whatever it looks like. A value that does not validate is
   printed as an opaque keyed reference `[opaque <field> <8 hex>]` (a per-process keyed digest of the field name and the
   value: equal values give equal refs inside one run, nothing is recoverable, not stable across runs), never as the

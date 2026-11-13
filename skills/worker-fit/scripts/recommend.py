@@ -91,7 +91,7 @@ def _evidence(d, marked=False):
         ev_used.append("result=%s reviewed=%s" % (show("result", d["result"]["artifact"] or d["result"]["event"], "path"), d["result"]["reviewed"]))
     ev_used += ["evidence %s (task %s rev %s at %s)" % (show_ref("evidence-ref", e["ref"]), show("task", e["task_id"]), e["revision"], e["observed_at"])
                 for e in d["evidence"]]
-    ev_used += ["coverage gap: " + g for g in d["coverage_gaps"]]
+    ev_used += ["coverage gap: " + (ev.redact(g, keep_marks=True) if marked else g) for g in d["coverage_gaps"]]
     return ev_used
 
 
@@ -258,7 +258,7 @@ def render_text(recs):
 
 
 def _usage_error(msg):
-    ev.emit(ev.redact("UNREADABLE usage: %s" % msg))
+    ev.emit(ev.redact_tool("UNREADABLE usage: %s" % msg))
     return 2
 
 
@@ -287,7 +287,7 @@ def main(argv):
             else:
                 paths.append(a)
     except ValueError as e:
-        ev.emit(ev.redact("UNREADABLE --now: %s" % e))
+        ev.emit(ev.redact_tool("UNREADABLE --now: %s" % e))
         return 2
     if len(paths) > 1:
         return _usage_error("recommend.py takes exactly one FILE; extra argument(s) not evaluated: %s" % ", ".join(paths[1:]))
@@ -302,7 +302,7 @@ def main(argv):
         elif isinstance(obj, dict) and "envelopes" in obj and not isinstance(obj["envelopes"], list):
             raise ValueError("envelopes must be a list")
     except (OSError, ValueError) as e:
-        ev.emit(ev.redact("UNREADABLE %s: %s" % (path, e)))
+        ev.emit(ev.redact_tool("UNREADABLE %s: %s" % (path, e)))
         return 2
     recs = recommend_set(obj, now)
     ev.emit(json.dumps(recs, indent=1) if fmt == "json" else render_text(recs), end="")

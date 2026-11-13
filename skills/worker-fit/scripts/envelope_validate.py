@@ -253,17 +253,53 @@ def show(label, v, kind="ident"):
     """What an identity field prints: the value when it validates against its field's grammar (marked, so the run rule
     skips it), a placeholder as it is (UNKNOWN stays UNKNOWN), and otherwise an opaque keyed reference, never the raw
     value."""
-    if not isinstance(v, str) or is_unknown(v):
+    if not isinstance(v, str) or is_unknown(v) or _OPQ_REF.fullmatch(v):
         return v
     k = keep(kind, v)
     return k if k != v else opaque(label, v)
 
 
+_OPQ_REF = re.compile(r"\[opaque [a-z-]{1,12} [0-9a-f]{8}\]")
+_STRICT_SHORT = 5
+
+
+def _strict_piece(seg, words):
+    """A piece a queue row field may print: a vocabulary word (the tool's closed vocabulary or the caller's), a bounded
+    number, a compact date, or a short plain piece. Nothing else: no hex id, no long run, no unlisted word."""
+    low = seg.lower()
+    stripped = low.rstrip("0123456789")
+    return (low in _ID_WORDS or low in words or (stripped and (stripped in _ID_WORDS or stripped in words) and len(low) - len(stripped) <= 6)
+            or (seg.isdigit() and len(seg) <= _MAX_DIGITS) or bool(_DATE_PIECE.fullmatch(seg))
+            or (len(seg) <= _STRICT_SHORT and seg.isalnum() and not _cred_name(seg)))
+
+
+def show_row(label, v, words=frozenset()):
+    """What a queue-row field prints (a row id, owner, wait, status or claim): the STRICT gate. Row fields are not
+    identities the tool can validate, so each whitespace-separated token must pass the credential layers and consist only of
+    closed-vocabulary pieces (see _strict_piece); otherwise the whole value is an opaque keyed ref. A non-string value is
+    an opaque ref (an integer of at most ten digits prints as the number), a placeholder stays as it is."""
+    if isinstance(v, bool) or not isinstance(v, (str, int)):
+        return opaque(label, v)
+    if isinstance(v, int):
+        return str(v) if abs(v) < 10 ** _MAX_DIGITS else opaque(label, v)
+    if is_unknown(v) or _OPQ_REF.fullmatch(v):
+        return v
+    s = unicodedata.normalize("NFKC", v).strip()
+    toks = s.split()
+    if (s == v.strip() and toks and len(s) <= 256 and all(
+            redact_credentials(t) == t and not _cred_marked([x for x in _SPLIT.split(t) if x])
+            and all(_strict_piece(x, words) for x in _SPLIT.split(t) if x) for t in toks)):
+        return v
+    return opaque(label, v)
+
+
 def show_ref(label, v):
     """A free-text reference (evidence ref): a single locator-shaped token prints when it validates and is otherwise an
     opaque ref; prose (whitespace) is narrative and goes through full redaction."""
-    if not isinstance(v, str) or is_unknown(v) or any(c.isspace() for c in v.strip()):
+    if not isinstance(v, str) or is_unknown(v):
         return v
+    if any(c.isspace() for c in v.strip()):
+        return redact(v, keep_marks=True)  # prose: the free-text trust gate
     return show(label, v, "path")
 
 
@@ -346,7 +382,19 @@ def _seg_cred(seg):
     return folded != seg and any(w in folded for w in _CRED_STEMS)
 
 
+_CRED_NAME_CACHE = {}
+
+
 def _cred_name(name):
+    hit = _CRED_NAME_CACHE.get(name)
+    if hit is None:
+        if len(_CRED_NAME_CACHE) > 8192:
+            _CRED_NAME_CACHE.clear()
+        hit = _CRED_NAME_CACHE[name] = _cred_name_uncached(name)
+    return hit
+
+
+def _cred_name_uncached(name):
     flat = "_" + re.sub(r"[^a-z0-9]+", "_", re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()).strip("_") + "_"
     if any("_" + c + "_" in flat for c in _CRED_COMPOUNDS):
         return True
@@ -634,6 +682,7 @@ _ID_WORDS = frozenset(("task tasks sess inv invocation run runs build builds wm 
                        "production dev canary shadow backup snapshot snap checkpoint ckpt metrics stats status state github gh remote origin "
                        "upstream tmux pane window screen term pty shell bash sh py python rs rust node npm yarn proc process thread tid name label "
                        "spec specs plan plans diff patch fix fixes test tests suite case cases shift clock").split())
+_VOCAB_PREFIX = tuple(sorted((w for w in _ID_WORDS if len(w) >= 3 and not _cred_name(w)), key=len, reverse=True))
 _HEX_RUN = re.compile(r"[0-9a-fA-F]{9,64}")
 _HEX_GLUED = re.compile(r"(?P<w>[A-Za-z]{1,12}?)(?P<h>[0-9a-f]{9,64})")
 _ULID_ANY = re.compile(r"[0-7][0-9A-HJKMNP-TV-Z]{25}|[0-7][0-9a-hjkmnp-tv-z]{25}")
@@ -647,6 +696,8 @@ def _vocab(seg):
 
 def _random_piece(seg):
     """(is_random, glued_word): the piece is a long hex id, a word glued to one, or a ULID."""
+    if seg.isdigit():
+        return False, ""  # a digit-only piece is bounded by length (_piece_trusted), it is not a random hex id
     if _HEX_RUN.fullmatch(seg) or _ULID_ANY.fullmatch(seg):
         return True, ""
     m = _HEX_GLUED.fullmatch(seg)
@@ -655,10 +706,57 @@ def _random_piece(seg):
     return False, ""
 
 
+_MAX_WORD = 12    # the longest letters-only piece that is not a vocabulary word and still reads as a name
+_MAX_CAMEL = 24   # the same for CamelCase or upper-case words
+_MAX_NAME_LETTERS = 22  # the most letters of unlisted words one identity may carry
+_LONG_WORD = 8  # an identity carries at most one unlisted word longer than this
+_MAX_DIGITS = 10  # the longest digit-only piece (a pid, a sequence number, an epoch second, a compact date)
+_CAMEL = re.compile(r"(?:[A-Z][a-z]+)+|[A-Z]+")
+
+
+def _piece_trusted(seg):
+    """One piece of an identity is trusted for printing when it is a vocabulary word, or a bounded plain piece (digits, a
+    name of letters, a short id), or a shape of the field grammar. Every class of piece has a length bound: no class of
+    piece is trusted whatever its length, so a long random run of any alphabet is opaque."""
+    if _vocab(seg):
+        return True
+    if seg.isdigit():
+        return len(seg) <= _MAX_DIGITS
+    if seg.isalpha():
+        return len(seg) <= (_MAX_CAMEL if _CAMEL.fullmatch(seg) else _MAX_WORD)
+    low = seg.lower()
+    if seg.isalnum() and any(low.startswith(w) and 0 < len(low) - len(w) <= 8 for w in _VOCAB_PREFIX):
+        return True  # a vocabulary word with a short suffix ('tail9z8y7'): a machine-generated name
+    return _piece_ok(seg)
+
+
+def _name_value_ok(s):
+    """An identity that carries `name=value` chunks ('pid=77'): the name is made of vocabulary words and the value of
+    trusted plain pieces (digits, dates, a short hex id, vocabulary words). 'pswd=hunter2x' is a pair, not an identity."""
+    for m in re.finditer(r"([^=&?,#]*)=([^=&?,#]*)", s):
+        name = [x for x in _SPLIT.split(m.group(1)) if x]
+        val = [x for x in _SPLIT.split(m.group(2)) if x]
+        if not name or not all(_vocab(x) for x in name):
+            return False
+        if not all(_vocab(x) or (x.isdigit() and len(x) <= _MAX_DIGITS) or _DATE_PIECE.fullmatch(x) or _SHORT_HEX.fullmatch(x)
+                   for x in val):
+            return False
+    return True
+
+
 def _trusted_pieces(s):
-    """True when every piece of a grammar-valid identity is trusted for printing (see TRUST LAYER)."""
+    """True when every piece of a grammar-valid identity is trusted for printing (see TRUST LAYER). The host grammar is not
+    an exemption: a DNS label is a piece like any other."""
+    if "=" in s and not _name_value_ok(s):
+        return False
     segs = [x for x in _SPLIT.split(s) if x]
+    unlisted = [x for x in segs if x.isalpha() and len(x) > 3 and not _vocab(x)]
+    if sum(map(len, unlisted)) > _MAX_NAME_LETTERS or sum(1 for x in unlisted if len(x) > _LONG_WORD) > 1:
+        return False  # a run of random letters cut by separators is still a run
     rnd = [_random_piece(x) for x in segs]
+    for seg, (r, _) in zip(segs, rnd):
+        if not r and not _piece_trusted(seg):
+            return False
     for seg in segs:
         low = seg.lower()
         if _cred_name(seg) and any(len(o) >= 9 and o != seg and not o.isdigit() for o in segs):
@@ -795,27 +893,246 @@ def _layers(text):
     return text
 
 
-def redact_credentials(text):
-    """The credential layers of redact(): everything except the random-token run rule. A value this leaves unchanged
-    carries no credential name, flag or known credential shape. The layers run on the text and on its decoded views (JSON
-    string escapes, then percent-escapes): when a decoded view shows a credential the text hides, the deepest decoded view
-    with its credential hidden is the result, so an escaped, \\u-encoded or string-encoded pair is hidden like a plain one."""
-    if not isinstance(text, str):
-        return text
-    best = _layers(text)
+def _via_views(text, layers):
+    """`layers` applied to the text and to its decoded views (JSON string escapes, then percent-escapes): when a decoded view
+    shows something the layers hide, the deepest decoded view with it hidden is the result."""
+    best = layers(text)
     view = text
     for dec in (_unescape, _pct_decode):
         d = dec(view)
         if d == view:
             continue
         view = d
-        r = _layers(view)
+        r = layers(view)
         if r != view:
             best = r
     return best
 
 
-def redact(text):
+def redact_credentials(text):
+    """The credential layers of redact(): everything except the random-token run rule and the free-text trust gate. A value
+    this leaves unchanged carries no credential name, flag or known credential shape. The layers run on the text and on
+    its decoded views (JSON string escapes, then percent-escapes): when a decoded view shows a credential the text hides,
+    the deepest decoded view with its credential hidden is the result, so an escaped, \\u-encoded or string-encoded pair is
+    hidden like a plain one."""
+    if not isinstance(text, str):
+        return text
+    return _via_views(text, _layers)
+
+
+# FREE-TEXT TRUST GATE. Free text is untrusted narrative. The value of any `name=value`, `name: value`, `"name": "value"`,
+# `?name=value` or `--name value` pair is hidden unless the value is a closed-vocabulary or plain value (a small number, a
+# time, a state word, a bracketed opaque ref) or the name is a schema key whose value validates as that field's identity
+# and is trusted (keep()). The decision never asks whether the NAME is a credential name: the credential-name layers above
+# remain, as an extra layer that hides more, and are not what lets a value print. A credential word joined to a value
+# without a separator ('token-<value>') is hidden as a composite.
+_FREE_CACHE = []
+_ISO_TS = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?")
+_CLOCK = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")
+_FIELD_KIND = {"host": "host", "unit": "ident", "child": "ident", "session": "ident", "invocation": "ident",
+               "account": "ident", "model": "ident", "effort": "ident", "named": "ident", "alternate": "ident",
+               "owner": "ident", "current_owner": "ident", "reviewed_by": "ident", "repo": "ident", "branch": "ident",
+               "task_id": "ident", "artifact": "path", "event": "path", "ref": "path", "target": "path",
+               "head": "hex", "sha": "hex", "sha1": "hex", "sha256": "hex", "digest": "hex", "commit": "hex", "rev": "hex",
+               "revision": "hex", "oid": "hex", "hash": "hex"}
+
+
+_SRC_STRING = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+_TRIPLE = re.compile(r'"""(?:.|\n)*?"""')
+
+
+def _tool_words():
+    """The words of the tool's own sentences (the double-quoted string literals of the three scripts, docstrings left out
+    and anything shaped like a pattern skipped): public by construction, read from the code so the set cannot drift. A value
+    that is a word the tool itself writes is plain vocabulary, never a secret."""
+    words = set()
+    here = os.path.dirname(os.path.abspath(__file__))
+    for fn in ("envelope_validate.py", "recommend.py", "queue_adapter.py"):
+        try:
+            with open(os.path.join(here, fn), encoding="utf-8") as fh:
+                src = fh.read()
+        except (OSError, ValueError):
+            continue
+        for lit in _SRC_STRING.findall(_TRIPLE.sub("", src)):
+            if not re.search(r"[\[\]\\^${}|]", lit):
+                words.update(re.findall(r"(?<![a-z])[a-z]{2,16}(?![a-z])", lit.lower()))
+    return words
+
+
+def _free_words():
+    if not _FREE_CACHE:
+        w = set(_ID_WORDS) | _tool_words()
+        for k in _schema_keys():
+            w.update(x for x in re.split(r"[^a-z0-9]+", k.lower()) if x)
+        for grp in (STATES, SHAPES, EFFECTS):
+            for x in grp:
+                w.update(y for y in re.split(r"[^a-z0-9]+", x.lower()) if y)
+        w.update("unknown none null true false yes no ok text json system".split())
+        _FREE_CACHE.append(frozenset(w))
+    return _FREE_CACHE[0]
+
+
+_FREE_SPLIT = re.compile(r"[\s\-_./+=:@%~?&#,\\]+")
+_FLAG_TOKEN = re.compile(r"--?[A-Za-z][\w-]*")
+_FREE_DIGITS = 8  # the longest digit-only value that reads as a count, a pid or a number
+
+
+def _benign_value(raw):
+    """True for a value that reads as a plain closed-vocabulary value, so there is nothing to hide: a small number, a time,
+    a state or vocabulary word, a bracketed opaque ref, another flag, or ONE plain word (letters only, at most 8) beside
+    vocabulary words. Two or more unlisted words ('correct-horse-battery'), a long run, and any mixed letter+digit piece
+    longer than 4 ('hunter2x', 'a3f9c2e1') are not plain: they are hidden."""
+    if len(raw) > 128:
+        return False  # a plain value is short
+    v = raw.strip("\"'`").rstrip(".:")
+    if not v or v.startswith("\ue002"):
+        return True
+    if v.startswith("["):
+        return v.startswith(("[opaque", "[REDACTED"))
+    if _ISO_TS.fullmatch(v) or _CLOCK.fullmatch(v) or _FLAG_TOKEN.fullmatch(v):
+        return True
+    plain_words = 0
+    for x in _FREE_SPLIT.split(v):
+        if not x:
+            continue
+        low = x.lower()
+        stripped = low.rstrip("0123456789")
+        if x.isdigit():
+            if len(x) > _FREE_DIGITS:
+                return False
+        elif low in _free_words() or (stripped in _free_words() and len(low) - len(stripped) <= 3) or _DATE_PIECE.fullmatch(x):
+            continue
+        elif len(x) <= 2 or (len(x) <= 4 and x.isalnum()):
+            continue
+        elif x.isalpha() and len(x) <= 8:
+            plain_words += 1
+            if plain_words > 1:
+                return False
+        else:
+            return False
+    return True
+
+
+def _trusted_field_value(name, raw):
+    """True when `name` is a schema key and `raw` validates as that field's identity and is trusted (see keep())."""
+    kind = _FIELD_KIND.get(re.split(r"[.\-]", name)[-1].lower())
+    core = raw.rstrip(".:")
+    if kind == "hex":
+        return bool(re.fullmatch(r"[0-9a-fA-F]{4,64}", core))
+    return bool(kind) and keep(kind, core) != core
+
+
+def _open_structure(text, e):
+    k = e
+    while k < len(text) and text[k] in " \t\r\n":
+        k += 1
+    return k if k < len(text) and text[k] in "[{" and not text.startswith(("[opaque", REDACTED), k) else None
+
+
+def _redact_free_pairs(text, protect):
+    """name SEP value in free text (see FREE-TEXT TRUST GATE). Linear: each separator is looked at once and a value is read
+    with a bound; a quoted value that does not close within the bound is hidden to the end of the line."""
+    out, pos, seen = [], 0, 0
+    for m in _SEP_AT.finditer(text):
+        if m.start() < max(pos, seen):
+            continue
+        j = m.start()
+        while j > pos and text[j - 1] in _NAME_CHARS:
+            j -= 1
+        if j == m.start():
+            continue
+        e = m.end()
+        if text.startswith(REDACTED, e) or text.startswith("\ue002", e):
+            continue
+        if m.group(0) == ":" and (text.startswith("//", e) or (text[m.start() - 1].isdigit() and text[e:e + 1].isdigit())):
+            continue  # a URL scheme, a clock time, a port or a ratio
+        k = _open_structure(text, e)
+        if k is not None:
+            end = _structure_end(text, e, j)
+            if end is not None:
+                out.append(text[pos:e] + REDACTED)
+                pos = end
+                continue
+        v = _VALUE.match(text, e, e + 400)
+        if v is None:
+            if text[e:e + 1] in ("\"", "'"):
+                nl = text.find("\n", e)
+                out.append(text[pos:e] + REDACTED)
+                pos = len(text) if nl == -1 else nl
+            continue
+        raw = v.group(0)
+        seen = v.end()  # a value is read once: separators inside it belong to it
+        if _benign_value(raw) and not (len(raw) >= 400 and v.end() < len(text) and text[v.end()] not in " \t\r\n,;&)\"']}"):
+            continue
+        if raw[:1] not in ("\"", "'") and _trusted_field_value(text[j:m.start()], raw):
+            out.append(text[pos:e] + protect(raw.rstrip(".:")))
+            pos = e + len(raw.rstrip(".:"))
+            continue
+        out.append(text[pos:e] + REDACTED)
+        pos = v.end()
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _redact_free_flags(text, protect):
+    """--flag VALUE in free text: the value is hidden unless it is a plain closed-vocabulary value, whatever the flag is."""
+    out, pos, seen = [], 0, 0
+    for m in _FLAG_AT.finditer(text):
+        if m.start() < max(pos, seen) or text.startswith("\ue002", m.end()):
+            continue
+        v = _VALUE.match(text, m.end(), m.end() + 400)
+        if v is None:
+            continue
+        seen = v.end()
+        if _benign_value(v.group(0)) and not (len(v.group(0)) >= 400 and v.end() < len(text) and text[v.end()] not in " \t\r\n"):
+            continue
+        out.append(text[pos:m.end()] + REDACTED)
+        pos = v.end()
+    out.append(text[pos:])
+    return "".join(out)
+
+
+_COMPOSITE = re.compile(r"(?<![A-Za-z0-9\ue002])[A-Za-z0-9][A-Za-z0-9._-]{3,200}")
+_GLUE_WORDS = ("tokens", "token", "secrets", "secret", "bearer", "apikey", "passwd", "password", "privkey", "passphrase",
+               "passcode", "credentials", "credential")
+
+
+def _glued_credential(segs):
+    """A credential word joined to a value in one token: beside a non-trivial piece ('token-<v>', 'secret_run_<v>'), glued to
+    a hex or digit tail, or glued to a long run that is not a word ('tokenArYYbbah')."""
+    if _cred_marked(segs):
+        return True
+    for seg in segs:
+        low = seg.lower()
+        for w in _GLUE_WORDS:
+            if low.startswith(w) and len(low) - len(w) >= 6:
+                rest = seg[len(w):]
+                if any(c.isdigit() for c in rest) or any(c.isupper() for c in rest) or (len(rest) >= 9 and not _vocab(rest)):
+                    return True
+    return False
+
+
+_GLUE_HINT = re.compile(r"(?i)tok|secret|pass|pw|pat|bearer|cred|apikey|privkey|api")
+
+
+def _redact_composites(text):
+    if not _GLUE_HINT.search(text):
+        return text  # no credential word anywhere: nothing can be glued to one
+
+    def repl(m):
+        tok = m.group(0)
+        core = tok.rstrip(".-_")
+        if _glued_credential([x for x in _SPLIT.split(core) if x]):
+            return REDACTED + tok[len(core):]
+        return tok
+    return _COMPOSITE.sub(repl, text)
+
+
+def _free_layers(protect):
+    return lambda t: _redact_composites(_redact_free_flags(_redact_free_pairs(t, protect), protect))
+
+
+def redact(text, keep_marks=False):
     """Replace credential-shaped values in any output string: PEM key blocks, URL userinfo, Cookie / Authorization /
     Bearer values, every name=value, name: value, "name": "value", --flag value, -u user:pass and query parameter whose
     name holds a credential word (token, key, secret, pass, auth, cookie, session, signature, sig, credential, api,
@@ -830,6 +1147,30 @@ def redact(text):
         held.append(m.group(1))
         return "\ue002%s%d\ue003" % (_NONCE, len(held) - 1)
     text = _MARK_RX.sub(hold, text)  # validated identity spans (see keep()) skip the run rule only
+    text = redact_credentials(text)
+
+    def protect(v):
+        held.append(v)
+        return "\ue002%s%d\ue003" % (_NONCE, len(held) - 1)
+    text = _via_views(text, _free_layers(protect))
+    text = _RUN.sub(_run_repl(text), text)
+    if keep_marks:  # a trusted span stays marked for the tool's own later redact_tool() pass, which strips the marks
+        return _HOLD_RX.sub(lambda m: _MARK_OPEN + held[int(m.group(1))] + _MARK_CLOSE if int(m.group(1)) < len(held) else "", text)
+    return _HOLD_RX.sub(lambda m: held[int(m.group(1))] if int(m.group(1)) < len(held) else "", text)
+
+
+def redact_tool(text):
+    """redact() for a line the tool composed itself ('CODE path: message', a usage line): every envelope value in it already
+    passed its field gate (show / opaque / safe_key), so the free-text trust gate, which reads 'path: message' as a pair, is
+    not applied; the credential layers and the run rule are."""
+    if not isinstance(text, str):
+        return text
+    held = []
+
+    def hold(m):
+        held.append(m.group(1))
+        return "\ue002%s%d\ue003" % (_NONCE, len(held) - 1)
+    text = _MARK_RX.sub(hold, text)
     text = redact_credentials(text)
     text = _RUN.sub(_run_repl(text), text)
     return _HOLD_RX.sub(lambda m: held[int(m.group(1))] if int(m.group(1)) < len(held) else "", text)
@@ -852,9 +1193,10 @@ def emit(text="", end="\n"):
 
 
 def scrub(v):
-    """redact() applied to every string inside a JSON-shaped value."""
+    """redact_tool() applied to every string inside a JSON-shaped value: envelope free text passes redact() (the trust gate)
+    where it enters the output, and every identity or row field passes show() or the adapter's field gate."""
     if isinstance(v, str):
-        return redact(v)
+        return redact_tool(v)
     if isinstance(v, list):
         return [scrub(x) for x in v]
     if isinstance(v, dict):
@@ -1346,7 +1688,7 @@ def main(argv):
     try:
         argv, now = parse_args(argv)
     except ValueError as e:
-        emit(redact("UNREADABLE --now: %s" % e))
+        emit(redact_tool("UNREADABLE --now: %s" % e))
         return 2
     if not argv:
         emit(__doc__)
@@ -1356,16 +1698,16 @@ def main(argv):
         try:
             obj = load_json_file(path)
         except (OSError, ValueError) as e:
-            emit(redact("UNREADABLE %s: %s" % (path, e)))
+            emit(redact_tool("UNREADABLE %s: %s" % (path, e)))
             rc = max(rc, 2)
             continue
         res = validate_set(obj, now)
-        emit(redact("%s: %d envelope(s) enumerated" % (path, res["derived_count"])))
+        emit(redact_tool("%s: %d envelope(s) enumerated" % (path, res["derived_count"])))
         everything = [(i, f) for i, fs in enumerate(res["findings_by_index"]) for f in fs]
         everything += [(None, f) for f in res["set_findings"]
                        if not any(f is g for _, g in everything)]
         for i, f in everything:
-            emit(redact("%s %s [%s] %s: %s" % (f["severity"], f["code"], "set" if i is None else i, f["path"], f["message"])))
+            emit(redact_tool("%s %s [%s] %s: %s" % (f["severity"], f["code"], "set" if i is None else i, f["path"], f["message"])))
         if any(f["severity"] == "REFUSE" for _, f in everything):
             rc = max(rc, 1)
         elif not everything:
