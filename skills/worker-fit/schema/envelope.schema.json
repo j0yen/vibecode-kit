@@ -49,7 +49,7 @@
         "artifact": {"type": ["string", "null"]}, "event": {"type": ["string", "null"]},
         "task_id": {"type": ["string", "null"]}, "revision": {"type": ["integer", "null"]},
         "reviewed": {"enum": [true, false, "UNKNOWN"]},
-        "reviewed_by": {"type": ["string", "null"], "description": "optional: identity of a reviewer distinct from the worker; reviewed=true without it does not drop independent verification"}
+        "reviewed_by": {"type": ["string", "null"], "description": "optional: actor or session identity of a reviewer distinct from the worker (not a subscription account); equal to the worker session, invocation, child, account name, current_owner or source.owner is the same author; reviewed=true without a distinct one does not drop independent verification"}
       }
     },
     "consumer": {

@@ -67,7 +67,14 @@ scheduler, coordinator, task store or mutation CLI.
   `A-Za-z0-9_-+/=.` that mixes letters and digits and is not a known-safe identifier (a 40/64-hex digest that follows
   head/sha/digest/commit/rev/oid/hash, a timestamp, a unit name, a path or branch made of short, lower-case or digit
   pieces) is hidden, a UUID included; (c) URL userinfo is hidden and so are the values of credential-named query
-  parameters. A consumer, host, unit or child whose text redaction would change is not an identifier. On top of that
+  parameters; (d) a credential-named key hides its whole value, scalar, array, object or YAML block (abbreviations
+  `pw pat pin ak sk seed salt hmac privkey ...` count), and the password flags of named commands (`sshpass -p`,
+  `mysql -p`, `unzip -P`, `7z -p`, `--pw`, `--password`) hide their value. Identity fields are validated by their own
+  format, apart from that free-text redaction: a host, unit, scope (`child`), session, invocation, consumer, reviewer
+  or artifact path whose pieces are plain words, digits, hex ids, UUIDs, compact timestamps or ULIDs, and that carries
+  no credential name, flag or provider shape, is printed as given (a hex or UUID unit name stays usable); a long
+  base62 / key-shaped piece, a credential-named pair or a provider shape in such a field is not an identifier and is
+  hidden. A `target.head` that is a 7-64 hex sha prints. The run rule (b) applies to free text only. On top of that
   the named shapes stay: `Authorization:` values (Basic/Bearer/...), `bearer <x>`, `sk-...` keys,
   provider token prefixes as a class (AWS key ids `AKIA/ASIA/AGPA/AIDA/AROA/...`; Slack `xox?-`, `xoxe.`, `xapp-` and
   webhook URLs; Google `ya29.`, `AIza`, `GOCSPX-`, refresh tokens; npm `npm_`; GitLab `glpat-` and siblings; GitHub
@@ -135,7 +142,11 @@ scheduler, coordinator, task store or mutation CLI.
 - DONE with a durable result not yet reviewed -> `consume-completed-terminal` + `independent-verification`;
   never a new coder. The consumer for independent verification is never the worker's own session or
   invocation, and `result.reviewed: true` drops independent verification only with a distinct
-  `result.reviewed_by` identity (not the worker's own); the flag alone is the author's word. If the consumer is busy or unavailable the terminal stays durable, the named later
+  `result.reviewed_by` identity; the flag alone is the author's word. Independence contract: `reviewed_by` is an actor or
+  session identity, not a subscription account. A `reviewed_by` equal (after case, spacing and NFKC normalisation) to the
+  worker's own session, invocation, child, actor (`worker.account` name), `current_owner` or `source.owner` is the
+  same-author case and is refused (independent verification kept); any other valid identifier is a distinct reviewer.
+  No signing or account boundary is demanded, and the reviewer need not run on a different subscription account. If the consumer is busy or unavailable the terminal stays durable, the named later
   consumer (and an *authorized* alternate, if any) is reported, and no ACK is recorded.
 - Duplicate task (task ids compared after normalisation), or a second live task on the same repo+branch -> refusal
   for the newcomer. The decision is state-aware, never positional: the RUNNING record of a task id is the original and

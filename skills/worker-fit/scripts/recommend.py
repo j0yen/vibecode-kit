@@ -55,20 +55,34 @@ def ev_norm(v):
     return ev.norm_text(v)
 
 
+def _author_identities(d):
+    """Every identity the worker's own side holds: its actor (account name), session, invocation, child, and the
+    current / source owner. reviewed_by is an actor or session identity, never a subscription account: an equal
+    identity is the same author. No signing or account boundary is demanded."""
+    w = d["worker"]
+    vals = [w[k] for k in ("session", "invocation", "account", "child")]
+    vals += [d.get("current_owner"), d["source"].get("owner")]
+    return {ev_norm(v) for v in vals if isinstance(v, str) and not ev.is_unknown(v)}
+
+
 def _distinct_reviewer(d):
     res = d["result"]
     by = res.get("reviewed_by")
-    return res["reviewed"] is True and ev.ident(by) is not None and ev_norm(by) not in _own_identities(d)
+    return res["reviewed"] is True and ev.ident(by) is not None and ev_norm(by) not in _author_identities(d)
 
 
-def _evidence(d):
+def _evidence(d, marked=False):
     ev_used = ["state=%s" % d["state"], "work_shape=%s" % d["work_shape"], "owner=%s reachable=%s" % (d["current_owner"], d["owner_reachable"]),
                "effect=%s no_replay=%s" % (d["effect"]["state"], d["effect"]["no_replay"])]
     # the label "sess-id" (not "session"): a credential word in a label would make redaction hide the session id itself
-    ev_used += ["worker.%s=%s" % ("sess-id" if k == "session" else k, v) for k, v in d["worker"].items()]
-    ev_used.append("target=%s@%s head=%s" % (d["target"]["repo"], d["target"]["branch"], d["target"]["head"]))
+    # identity fields print by their own format validation (ev.keep); every other value goes through full redaction
+    keep = ev.keep if marked else (lambda kind, v: v)
+    kind = {"host": "ident", "unit": "ident", "child": "ident", "session": "ident", "invocation": "ident"}
+    ev_used += ["worker.%s=%s" % ("sess-id" if k == "session" else k, keep(kind[k], v) if k in kind else v)
+                for k, v in d["worker"].items()]
+    ev_used.append("target=%s@%s head=%s" % (d["target"]["repo"], d["target"]["branch"], keep("sha", d["target"]["head"])))
     if d["result"]["artifact"] or d["result"]["event"]:
-        ev_used.append("result=%s reviewed=%s" % (d["result"]["artifact"] or d["result"]["event"], d["result"]["reviewed"]))
+        ev_used.append("result=%s reviewed=%s" % (keep("path", d["result"]["artifact"] or d["result"]["event"]), d["result"]["reviewed"]))
     ev_used += ["evidence %s (task %s rev %s at %s)" % (e["ref"], e["task_id"], e["revision"], e["observed_at"]) for e in d["evidence"]]
     ev_used += ["coverage gap: " + g for g in d["coverage_gaps"]]
     return ev_used
@@ -93,7 +107,7 @@ def recommend_one(d, findings):
         if isinstance(d, dict) and isinstance(d.get("effect"), dict):
             r["no_replay"] = True
         return r
-    r["evidence_used"], r["unknown_fields"] = _evidence(d), _unknown_fields(d)
+    r["evidence_used"], r["unknown_fields"] = _evidence(d, marked=True), _unknown_fields(d)
     st, eff, cons, res = d["state"], d["effect"]["state"], d["consumer"], d["result"]
     shape_role = ROLE_OF_SHAPE[d["work_shape"]]
     if st == "DONE":
@@ -110,8 +124,8 @@ def recommend_one(d, findings):
         # validated consumer identifiers in next_consumer / later_consumers.
         named = ev.ident(cons["named"])
         named_ok = named is not None and (distinct or ev_norm(named) not in own)
-        later = [named] if named_ok else []
-        r["next_consumer"] = named if named_ok else UNKNOWN
+        later = [ev.keep("ident", named)] if named_ok else []
+        r["next_consumer"] = ev.keep("ident", named) if named_ok else UNKNOWN
         what = "accept/install owner decides next" if distinct else "exact-head independent review of the terminal result"
         if named_ok and cons["available"] is True:
             r["action"] = "The named consumer (next_consumer) consumes the retained terminal (%s); no new coder." % what
@@ -120,7 +134,7 @@ def recommend_one(d, findings):
             alt_ok = alt is not None and (distinct or ev_norm(alt) not in own)
             ref_ok = ev.ref_like(cons.get("alternate_authorization_ref"))
             if alt_ok and cons["alternate_authorized"] and ref_ok:
-                later.append(alt)
+                later.append(ev.keep("ident", alt))
                 tail = "an authorized alternate (later_consumers) may consume; its authorization reference is recorded in evidence_used"
             elif alt_ok and cons["alternate_authorized"]:
                 tail = "the alternate is marked authorized with no authorization evidence reference: no authority; not used"

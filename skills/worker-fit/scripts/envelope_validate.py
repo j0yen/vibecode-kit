@@ -10,6 +10,7 @@ Counts are derived from the enumerated records; a declared total is only compare
 A pass is a statement about the envelope's shape and internal consistency, not about production.
 """
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -173,12 +174,45 @@ _SHA = re.compile(r"[0-9a-fA-F]{7,64}")
 
 def ident(v):
     """The value as an identifier (ASCII word characters and . _ : @ / + -, no spaces), or None when it is not one,
-    is a placeholder, or looks like a credential (redact() would change it). Used wherever a value names a host, unit, child, consumer or reviewer."""
+    is a placeholder, or carries a credential (a credential-named pair, a credential flag, a known credential shape: the
+    credential layers of redact() would change it). The random-token run rule does not apply here: a hex or uuid piece is
+    a normal part of a unit, scope, session, invocation or consumer name, validated by this field format.
+    Used wherever a value names a host, unit, child, consumer or reviewer."""
     if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v):
         return None
     s = unicodedata.normalize("NFKC", v).strip()
-    # an identifier that redaction would alter (a credential-named pair, a secret-shaped run) is not an identifier
-    return s if _IDENT.fullmatch(s) and redact(s) == s else None
+    return s if _IDENT.fullmatch(s) and _id_pieces_ok(s) and redact_credentials(s) == s else None
+
+
+_PATH = re.compile(r"[A-Za-z0-9._/+:@%=~-]{1,512}")
+
+
+def path_ident(v):
+    """The value as an artifact / event locator (a path or id with no whitespace), or None: placeholder, assertion word,
+    or carrying a credential (credential-named pair or query parameter, provider shape)."""
+    if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v):
+        return None
+    s = unicodedata.normalize("NFKC", v).strip()
+    return s if _PATH.fullmatch(s) and _id_pieces_ok(s) and redact_credentials(s) == s else None
+
+
+# A validated identity value is carried through output as a marked span: redaction hides credentials everywhere but does
+# not apply the random-token run rule to a span an identity field's own validation accepted. The marks hold a
+# per-process random nonce, so no envelope text can forge one.
+_NONCE = os.urandom(6).hex()
+_MARK_OPEN, _MARK_CLOSE = "\ue000" + _NONCE + "\ue001", "\ue001" + _NONCE + "\ue000"
+_MARK_RX = re.compile(re.escape(_MARK_OPEN) + r"(.{0,600}?)" + re.escape(_MARK_CLOSE), re.S)
+_HOLD_RX = re.compile("\ue002" + _NONCE + r"(\d+)\ue003")
+
+
+def keep(kind, v):
+    """The value to print for an identity field: marked when the field's own format validation accepts it (kind
+    ident | path | sha), else the raw value, which then goes through full redaction. The printed text is the value as
+    given; only the validated, credential-free form skips the run rule."""
+    if not isinstance(v, str):
+        return v
+    ok = {"ident": ident, "path": path_ident, "sha": lambda x: x.strip() if is_sha(x) else None}[kind](v)
+    return v if ok is None or ok != v else _MARK_OPEN + v + _MARK_CLOSE
 
 
 def is_sha(v):
@@ -213,7 +247,9 @@ _QUOTED_OR_WORD = r"""(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s,;&)"'\]}]+)"""
 # a '<qualifier>key' compound (apikey, accountkey, ...), marks a credential-carrying name
 _CRED_WORDS = {"pass", "pwd", "auth", "authn", "authz", "key", "keys", "sig", "api", "dsn", "cert", "certs", "certificate",
                "session", "sessions", "sid", "cred", "creds", "jwt", "otp", "cookie", "cookies", "bearer", "token",
-               "tokens", "secret", "secrets", "credential", "credentials", "private", "passphrase", "password", "passwd"}
+               "tokens", "secret", "secrets", "credential", "credentials", "private", "passphrase", "password", "passwd",
+               # abbreviations of the same names (re-review 5 DEF-2)
+               "pw", "pat", "pin", "ak", "sk", "seed", "salt", "hmac", "mnemonic", "passcode", "privkey", "prikey", "prvkey", "csrf", "xsrf", "cvv", "ssn", "unseal", "kubeconfig"}
 _CRED_STEMS = ("token", "secret", "passw", "passphrase", "passcode", "credential", "cookie", "signature", "bearer",
                "authorization", "authorisation", "sessionid", "privatekey")
 _KEY_COMPOUND = re.compile(r"(?:api|access|account|secret|private|ssh|auth|signing|encryption|master|shared|hmac|license|"
@@ -252,13 +288,65 @@ def _redact_named_values(text):
             continue
         if text.startswith(REDACTED, m.end()):
             continue
-        v = _VALUE.match(text, m.end())
-        if v is None:
-            continue
+        sep_end = m.end()
+        while text[sep_end - 1].isspace():
+            sep_end -= 1
+        end = _structure_end(text, sep_end, j)
+        if end is None:
+            v = _VALUE.match(text, m.end())
+            if v is None:
+                continue
+            end = v.end()
         out.append(text[pos:m.end()] + REDACTED)
-        pos = v.end()
+        pos = end
     out.append(text[pos:])
     return "".join(out)
+
+
+def _structure_end(text, i, name_start):
+    """End of a non-scalar value that starts at i (after the separator): a JSON/flow array or object (string-aware
+    bracket walk; an unclosed one runs to the end of the text, so a half-written secret fails closed) or a YAML block
+    (the indented or '- ' lines under the key). None when the value is a scalar."""
+    n = len(text)
+    k = i
+    while k < n and text[k] in " \t\r\n":
+        k += 1
+    if k < n and text[k] in "[{":
+        depth, q = 0, None
+        while k < n:
+            c = text[k]
+            if q:
+                if c == "\\":
+                    k += 1
+                elif c == q:
+                    q = None
+            elif c in "\"'":
+                q = c
+            elif c in "[{":
+                depth += 1
+            elif c in "]}":
+                depth -= 1
+                if depth <= 0:
+                    return k + 1
+            k += 1
+        return n
+    nl = text.find("\n", i)
+    if nl == -1 or text[i:nl].strip(" \t\r"):
+        return None
+    ls = text.rfind("\n", 0, name_start) + 1
+    indent = len(text[ls:name_start]) - len(text[ls:name_start].lstrip(" \t"))
+    end, pos = None, nl + 1
+    while pos < n:
+        e = text.find("\n", pos)
+        e = n if e == -1 else e
+        line = text[pos:e]
+        body = line.lstrip(" \t")
+        if body.strip() and not (len(line) - len(body) > indent or (len(line) - len(body) == indent and body.startswith("- "))):
+            break
+        if body.strip():
+            end = e
+        pos = e + 1
+    return end
 
 
 def _redact_flag_values(text):
@@ -276,6 +364,22 @@ def _redact_flag_values(text):
     return "".join(out)
 
 
+# short password flags whose meaning belongs to the command (-p is a port for ssh, a path switch for mkdir): keyed by command
+_CMD_PW_FLAGS = [
+    re.compile(r"(?<![\w-])(sshpass(?:\s+-[A-Za-z]\S*)*\s+-p[ \t]*)" + _NOT_DONE + _QUOTED_OR_WORD),
+    re.compile(r"(?<![\w-])((?:mysql|mysqldump|mysqladmin|mariadb)[^\n|;&]*?\s-p)" + _NOT_DONE + r"(?=\S)" + _QUOTED_OR_WORD),
+    re.compile(r"(?<![\w-])((?:mysql|mysqldump|mysqladmin|mariadb)[^\n|;&]*?\s-p[ \t]+)" + _NOT_DONE + _QUOTED_OR_WORD),
+    re.compile(r"(?<![\w-])((?:unzip|zip)[^\n|;&]*?\s-P[ \t]*)" + _NOT_DONE + _QUOTED_OR_WORD),
+    re.compile(r"(?<![\w-])((?:7z|7za|7zr)[^\n|;&]*?\s-p)" + _NOT_DONE + r"(?=\S)" + _QUOTED_OR_WORD),
+]
+
+
+def _redact_command_pw_flags(text):
+    for rx in _CMD_PW_FLAGS:
+        text = rx.sub(lambda m: m.group(1) + REDACTED, text)
+    return text
+
+
 def _user_flag(m):
     return m.group("flag") + m.group("mid") + REDACTED
 
@@ -284,12 +388,22 @@ def _random_looking(core):
     """True unless every piece of the run (split on - _ . / + =) is short (<= 8), digits, a lower-case word, a
     capitalised word, or a short word followed by digits: ids, branch names, unit names, paths and dates read that way,
     a key, a hash or a base64 blob does not."""
-    for seg in re.split(r"[-_./+=]+", core):
-        if (len(seg) <= 8 or seg.isdigit() or re.fullmatch(r"[a-z]+", seg) or re.fullmatch(r"(?:[A-Z][a-z]+)+|[A-Z]+", seg)
-                or re.fullmatch(r"[A-Za-z]{1,10}\d{1,10}", seg)):
-            continue
-        return True
-    return False
+    return any(not _plain_piece(seg) for seg in re.split(r"[-_./+=]+", core))
+
+
+def _plain_piece(seg):
+    return (len(seg) <= 8 or seg.isdigit() or re.fullmatch(r"[a-z]+", seg) is not None
+            or re.fullmatch(r"(?:[A-Z][a-z]+)+|[A-Z]+", seg) is not None or re.fullmatch(r"[A-Za-z]{1,10}\d{1,10}", seg) is not None)
+
+
+# Pieces an identity field may carry beyond the plain ones: a hex id (invocation, build, digest), a lower-case word with a
+# hex suffix (tail1a2b3, r<hex32>), a compact UTC timestamp, a ULID. A long piece that is none of these (a base62 key)
+# is not an identifier by field format, whatever field it sits in.
+_ID_PIECE = re.compile(r"[0-9a-fA-F]{9,64}|[a-z]{1,12}[0-9a-f]{1,64}|\d{8}T\d{6}Z?|[0-9A-HJKMNP-TV-Z]{26}")
+
+
+def _id_pieces_ok(s):
+    return all(_plain_piece(seg) or _ID_PIECE.fullmatch(seg) for seg in re.split(r"[-_./+=:@%~]+", s))
 
 
 def _run_repl(text):
@@ -328,6 +442,8 @@ _REDACTIONS = [
     (None, _redact_named_values),
     # command-line flag whose name holds a credential word, value as the next word: --password VALUE, -token VALUE
     (None, _redact_flag_values),
+    # password short flags that belong to a named command: sshpass -p, mysql -p, unzip -P, 7z -p
+    (None, _redact_command_pw_flags),
     (re.compile(r"(?<![A-Za-z0-9_])sk-[A-Za-z0-9_-]{3,}"), REDACTED),
     (re.compile(r"sk-(?:ant|proj|svcacct|admin|or)-[A-Za-z0-9_-]{8,}"), REDACTED),  # vendor-tagged keys, even glued to a word
     # provider token prefixes (each needs a long enough body, so ordinary words are left alone)
@@ -355,6 +471,16 @@ _REDACTIONS = [
 ]
 
 
+def redact_credentials(text):
+    """The credential layers of redact(): everything except the random-token run rule. A value this leaves unchanged
+    carries no credential name, flag or known credential shape."""
+    if not isinstance(text, str):
+        return text
+    for rx, rep in _REDACTIONS:
+        text = rep(text) if rx is None else rx.sub(rep, text)
+    return text
+
+
 def redact(text):
     """Replace credential-shaped values in any output string: PEM key blocks, URL userinfo, Cookie / Authorization /
     Bearer values, every name=value, name: value, "name": "value", --flag value, -u user:pass and query parameter whose
@@ -364,9 +490,15 @@ def redact(text):
     a timestamp, a unit name, a path, a branch)."""
     if not isinstance(text, str):
         return text
-    for rx, rep in _REDACTIONS:
-        text = rep(text) if rx is None else rx.sub(rep, text)
-    return _RUN.sub(_run_repl(text), text)
+    held = []
+
+    def hold(m):
+        held.append(m.group(1))
+        return "\ue002%s%d\ue003" % (_NONCE, len(held) - 1)
+    text = _MARK_RX.sub(hold, text)  # validated identity spans (see keep()) skip the run rule only
+    text = redact_credentials(text)
+    text = _RUN.sub(_run_repl(text), text)
+    return _HOLD_RX.sub(lambda m: held[int(m.group(1))] if int(m.group(1)) < len(held) else "", text)
 
 
 def safe_text(text, encoding="utf-8"):
@@ -392,7 +524,9 @@ def scrub(v):
     if isinstance(v, list):
         return [scrub(x) for x in v]
     if isinstance(v, dict):
-        return {k: scrub(x) for k, x in v.items()}
+        # a credential-named key hides its whole value, whatever structure it has (string, list, object, number)
+        return {k: (REDACTED if isinstance(x, (str, list, dict, int, float)) and not isinstance(x, bool)
+                    and isinstance(k, str) and _cred_name(k) else scrub(x)) for k, x in v.items()}
     return v
 
 
