@@ -8,7 +8,8 @@ Read-only, standard library only, no network. It launches, claims, kills, instal
 and a recommendation grants no action authority. A source-only or fixture result does not prove
 production behavior; a wrapper or queue entry is not a worker launch; UNKNOWN is reported, never filled.
 --now sets the reference clock for the observation window (default = the host clock, system = same; never the newest
-observation in the set, see envelope_validate.py). Credential-shaped values are redacted from all output.
+observation in the set, see envelope_validate.py). Every recommendation records its reference clock (reference_clock:
+now, source host|injected, live) in JSON and text, so a result made under an injected --now never reads as a live one. Credential-shaped values are redacted from all output.
 Exit 0 on output (a refusal is a recommendation), 2 on unreadable input (not JSON, duplicate-free structure
 broken such as {"envelopes": null} or {"rows": null}, bad --now).
 """
@@ -63,7 +64,8 @@ def _distinct_reviewer(d):
 def _evidence(d):
     ev_used = ["state=%s" % d["state"], "work_shape=%s" % d["work_shape"], "owner=%s reachable=%s" % (d["current_owner"], d["owner_reachable"]),
                "effect=%s no_replay=%s" % (d["effect"]["state"], d["effect"]["no_replay"])]
-    ev_used += ["worker.%s=%s" % (k, v) for k, v in d["worker"].items()]
+    # the label "sess-id" (not "session"): a credential word in a label would make redaction hide the session id itself
+    ev_used += ["worker.%s=%s" % ("sess-id" if k == "session" else k, v) for k, v in d["worker"].items()]
     ev_used.append("target=%s@%s head=%s" % (d["target"]["repo"], d["target"]["branch"], d["target"]["head"]))
     if d["result"]["artifact"] or d["result"]["event"]:
         ev_used.append("result=%s reviewed=%s" % (d["result"]["artifact"] or d["result"]["event"], d["result"]["reviewed"]))
@@ -76,7 +78,7 @@ def _base(task_id, revision):
     return {"task_id": task_id, "revision": revision, "role": UNKNOWN, "disposition": UNKNOWN, "refused": False,
             "reason_codes": [], "reasons": [], "no_takeover": True, "no_replay": True, "new_worker_recommended": False,
             "terminal_durable": False, "next_consumer": UNKNOWN, "later_consumers": [], "ack_recorded": False,
-            "grants_authority": False, "action": "", "evidence_used": [], "unknown_fields": []}
+            "grants_authority": False, "action": "", "evidence_used": [], "unknown_fields": [], "reference_clock": None}
 
 
 def recommend_one(d, findings):
@@ -125,11 +127,11 @@ def recommend_one(d, findings):
             elif alt_ok:
                 tail = "the alternate is a label with no authority; not used"
             elif alt is not None:
-                tail = "the alternate is the worker's own session: not independent; not used"
+                tail = "the alternate is the worker's own session, so it is not independent and is not used"
             else:
                 tail = "UNKNOWN alternate: none on record"
             if not ev.is_unknown(cons["named"]) and named is not None and not named_ok:
-                lead = "The named consumer is the worker's own session: not independent, not used for verification"
+                lead = "The named consumer is the worker's own session, so it is not independent and is not used for verification"
             elif named is None and not ev.is_unknown(cons["named"]):
                 lead = "The named consumer is not a valid identifier and is not used"
             else:
@@ -182,12 +184,33 @@ def _scrub(v):
     return ev.scrub(v)
 
 
+def clock_stamp(ref, injected):
+    """The reference clock a recommendation was made under: the time, whether it came from the host clock or from an
+    injected now (--now TS / now=), and `live`, true only for the host clock."""
+    return {"now": ref.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "source": "injected" if injected else "host", "live": not injected}
+
+
 def recommend_set(obj, now=None):
-    res = ev.validate_set(obj, now)
+    ref = ev.resolve_now(now)  # ValueError for a naive or out-of-range now, as before
+    stamp = clock_stamp(ref, now is not None)
+    res = ev.validate_set(obj, ref)
     recs, _ = ev._records(obj)
     if not isinstance(recs, list):  # structurally null/invalid wrapper: one refusal, never a crash
-        return [_scrub(recommend_one(None, res["set_findings"]))]
-    return [_scrub(recommend_one(d, res["findings_by_index"][i])) for i, d in enumerate(recs)]
+        out = [_scrub(recommend_one(None, res["set_findings"]))]
+    else:
+        out = [_scrub(recommend_one(d, res["findings_by_index"][i])) for i, d in enumerate(recs)]
+    for r in out:
+        r["reference_clock"] = dict(stamp)
+    return out
+
+
+def _clock_text(c):
+    if not c:
+        return "not recorded"
+    if c["live"]:
+        return "%s (host clock)" % c["now"]
+    return "%s (INJECTED --now: not a live result)" % c["now"]
 
 
 def render_text(recs):
@@ -202,7 +225,7 @@ def render_text(recs):
             no_takeover="yes" if r["no_takeover"] else "no", no_replay="yes" if r["no_replay"] else "no",
             next_consumer=r["next_consumer"], later=", ".join(r["later_consumers"]) or "none",
             terminal_durable="yes" if r["terminal_durable"] else "no", ack="none recorded",
-            action=r["action"], reasons="; ".join(r["reasons"]) or "-",
+            reference_clock=_clock_text(r["reference_clock"]), action=r["action"], reasons="; ".join(r["reasons"]) or "-",
             evidence="\n".join("  - " + e for e in r["evidence_used"]) or "  - (none: refused)",
             unknown=", ".join(r["unknown_fields"]) or "none"))
     return "\n".join(blocks) + "\n" + FOOTER + "\n"
@@ -232,7 +255,7 @@ def main(argv):
                 v = next(it, None)
                 if v is None:
                     raise ValueError("--now needs a timestamp or 'system'")
-                now = ev.host_now() if v == "system" else ev.as_now(v)
+                now = None if v == "system" else ev.as_now(v)  # None = the host clock (live); a TS is an injected clock
             elif a.startswith("--"):
                 return _usage_error("unknown option %s" % a)
             else:

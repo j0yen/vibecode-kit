@@ -6,6 +6,8 @@ field stays UNKNOWN. A claim string is carried verbatim in source.claim; it is a
 worker launch, and never fills worker.host/unit/child. Nothing is invented: a row with no ask_id or rev
 yields an empty identity that the validator refuses. Read-only; standard library only.
 Credential-shaped values are redacted from the printed envelopes (claim strings, owners).
+Usage: queue_adapter.py ROWS.json [OBSERVED_AT]; an extra argument or an unknown option is a usage error (exit 2) that
+names it, never silently dropped. A row nested too deep to read is refused alone (empty identity), never a traceback.
 Exit 0 on output, 2 (UNREADABLE) when the input is not JSON or not a list of rows.
 """
 import json
@@ -60,13 +62,34 @@ def rows_to_envelopes(rows, observed_at=UNKNOWN):
         rows = rows.get("rows", [])
     if not isinstance(rows, list):
         raise ValueError("rows must be a list")
-    return [row_to_envelope(r if isinstance(r, dict) else {}, observed_at) for r in rows]
+    return [_safe_row(r if isinstance(r, dict) else {}, observed_at) for r in rows]
+
+
+def _safe_row(row, observed_at):
+    """row_to_envelope, except that a row too deeply nested to render becomes an empty-identity envelope the validator
+    refuses (RecursionError is the interpreter's limit on nesting, not a property of the queue)."""
+    try:
+        return row_to_envelope(row, observed_at)
+    except RecursionError:
+        env = row_to_envelope({}, observed_at)
+        env["coverage_gaps"].append("queue row nested too deep to read; refused, no identity taken from it")
+        return env
+
+
+def _usage_error(msg):
+    ev.emit(ev.redact("UNREADABLE usage: %s" % msg))
+    return 2
 
 
 def main(argv):
     if not argv:
         ev.emit("usage: queue_adapter.py ROWS.json [OBSERVED_AT]")
         return 2
+    options = [a for a in argv if a.startswith("--")]
+    if options:
+        return _usage_error("unknown option %s; usage: queue_adapter.py ROWS.json [OBSERVED_AT]" % ", ".join(options))
+    if len(argv) > 2:
+        return _usage_error("queue_adapter.py takes ROWS.json [OBSERVED_AT]; extra argument(s) not used: %s" % ", ".join(argv[2:]))
     try:
         obj = ev.load_json_file(argv[0])
         envs = rows_to_envelopes(obj, argv[1] if len(argv) > 1 else UNKNOWN)

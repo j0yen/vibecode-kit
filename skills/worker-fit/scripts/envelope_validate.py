@@ -30,6 +30,26 @@ _COMPACT_PLACEHOLDERS = {re.sub(r"[\W_]+", "", w) for w in PLACEHOLDERS if re.se
 _NON_IDENTITY = {"yes", "no", "true", "false", "ok", "okay", "y", "n", "self", "me", "same", "own", "authorized",
                  "unauthorized", "approved", "accepted", "confirmed", "verified", "reviewed", "done", "ack", "acked",
                  "acknowledged", "granted", "noted", "agreed"}
+# the placeholder class is a vocabulary of words, not a closed list of whole values: a value is a placeholder when every
+# word in it (letters and digit groups, any separators) is a placeholder word, a negated evidence word ('not known',
+# 'no data', 'to be determined'), an 'un<evidence word>' negation ('unidentified', 'unverified', 'unobserved', ...), a
+# bare assertion or a stop word, and at least one word is a placeholder. 'unknown-host-7' and 'no-reply' are real names.
+_P_WORDS = {"unknown", "unk", "unknwn", "tbd", "tba", "tbc", "tbs", "todo", "na", "none", "null", "nil", "undefined", "unspecified",
+            "missing", "empty", "pending", "unavailable", "unset", "unassigned", "unsure", "unclear", "nobody", "nothing",
+            "noone", "blank", "void", "placeholder", "redacted", "later", "soon", "waiting", "someone", "somebody",
+            "something", "xxx", "dummy"}
+_UN_RX = re.compile(r"un(?:identified|determined|observed|verified|confirmed|reported|named|recorded|specified|assigned|"
+                    r"defined|resolved|checked|listed|disclosed|stated|supplied|provided|filled|populated|attested|"
+                    r"established|documented|acknowledged|approved|reviewed|validated|detected|captured|collected|"
+                    r"retrieved|queried|tracked|logged|noted|claimed|accepted|granted|authori[sz]ed|certified|signed|"
+                    r"sourced|cited|decided|given|found|seen|read|known|set|sure|clear|available|applicable)")
+_NEG = {"not", "no", "non", "never", "without", "be"}
+_EVID = {"known", "available", "applicable", "set", "provided", "given", "specified", "determined", "identified", "observed",
+         "recorded", "reported", "named", "assigned", "data", "value", "info", "information", "evidence", "one", "body",
+         "decided", "defined", "found", "listed", "stated", "supplied", "confirmed", "verified", "seen", "read", "checked",
+         "resolved", "disclosed", "filled", "yet", "relevant", "available"}
+_STOP = {"yet", "to", "a", "an", "the", "of", "is", "are", "as", "by", "for", "this", "that", "it", "see", "above", "below",
+         "per", "at", "on", "in", "with", "and", "or", "me", "trust", "here", "there"}
 _EDGE = "<>[](){}\"'`.,;:!*_~|\\ "
 STATES = ["NOT_STARTED", "RUNNING", "DONE", "BLOCKED", "UNKNOWN"]
 SHAPES = ["implementation", "review", "decision", "deterministic", "UNKNOWN"]
@@ -71,6 +91,52 @@ def norm_text(v):
     return " ".join(s.split()).strip(_EDGE).strip().lower()
 
 
+def _tokens(v):
+    """Words (letter runs) and digit groups of a value, lower-cased; 'n/a' reads as 'na', 'un-known' as 'unknown'."""
+    s = norm_text(v)
+    s = re.sub(r"(?<![^\W\d_])n\s*[/\\.]\s*a(?![^\W\d_])", "na", s)
+    s = re.sub(r"(?<![^\W\d_])un[\s_-]+(?=[^\W\d_])", "un", s)
+    return re.findall(r"[^\W\d_]+|\d+", s)
+
+
+def _placeholder_word(t, neg):
+    return t in _P_WORDS or bool(_UN_RX.fullmatch(t)) or (neg and t in _EVID)
+
+
+def _is_placeholder_phrase(v):
+    """True when the value is made only of placeholder words, negated evidence words, stop words and digit groups,
+    with at least one placeholder word: 'unidentified', 'TBA/TBD', 'N/A (unknown)', 'not yet known', 'pending 7'."""
+    saw, neg = False, False
+    for t in _tokens(v):
+        if t.isdigit() or t in _STOP and t not in _NEG:
+            continue
+        if t in _NEG:
+            neg = True
+            continue
+        if _placeholder_word(t, neg):
+            saw = True
+            continue
+        return False
+    return saw
+
+
+def _no_substance(v):
+    """True when no word of the value is substantive: only placeholder words, bare assertions (yes/ok/approved/...),
+    negations and stop words, however many digits or locators come with them ('yes 1', 'unknown:0', 'ok #1')."""
+    words = [t for t in _tokens(v) if not t.isdigit()]
+    if not words:
+        return False  # a bare number or locator ('12345', '#123') names no word at all
+    neg = False
+    for t in words:
+        if t in _NEG:
+            neg = True
+        elif t in _STOP or t in _NON_IDENTITY or _placeholder_word(t, neg):
+            continue
+        else:
+            return False
+    return True
+
+
 def is_unknown(v):
     """True for None and for any UNKNOWN-equivalent placeholder string, however spelled (see norm_text)."""
     if v is None:
@@ -78,7 +144,8 @@ def is_unknown(v):
     if not isinstance(v, str):
         return False
     s = norm_text(v)
-    return s in PLACEHOLDERS or not any(c.isalnum() for c in s) or _compact(s) in _COMPACT_PLACEHOLDERS
+    return (s in PLACEHOLDERS or not any(c.isalnum() for c in s) or _compact(s) in _COMPACT_PLACEHOLDERS
+            or _is_placeholder_phrase(s))
 
 
 def _compact(s):
@@ -92,8 +159,9 @@ def is_assertion_word(v):
 
 def ref_like(v):
     """Positive validation for a reference (authorization reference, ACK evidence): a string that is not a placeholder
-    or a bare assertion word and carries a locator: a digit (id, number, date) or one of : / # @ (url, path, handle)."""
-    if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v):
+    or a bare assertion word, has at least one substantive word unless it is a bare number or locator, and carries a
+    locator: a digit (id, number, date) or one of : / # @ (url, path, handle). 'yes 1', 'unknown:0', 'ok #1' fail."""
+    if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v) or _no_substance(v):
         return False
     s = unicodedata.normalize("NFKC", v)
     return any(c.isdigit() for c in s) or any(c in s for c in ":/#@")
@@ -104,12 +172,13 @@ _SHA = re.compile(r"[0-9a-fA-F]{7,64}")
 
 
 def ident(v):
-    """The value as an identifier (ASCII word characters and . _ : @ / + -, no spaces), or None when it is not one
-    or is a placeholder. Used wherever a value names a host, unit, child, consumer or reviewer."""
+    """The value as an identifier (ASCII word characters and . _ : @ / + -, no spaces), or None when it is not one,
+    is a placeholder, or looks like a credential (redact() would change it). Used wherever a value names a host, unit, child, consumer or reviewer."""
     if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v):
         return None
     s = unicodedata.normalize("NFKC", v).strip()
-    return s if _IDENT.fullmatch(s) else None
+    # an identifier that redaction would alter (a credential-named pair, a secret-shaped run) is not an identifier
+    return s if _IDENT.fullmatch(s) and redact(s) == s else None
 
 
 def is_sha(v):
@@ -132,12 +201,110 @@ def _pairs(pairs):
 
 
 REDACTED = "[REDACTED]"
-# the name starts at its secret word and may run on for a bounded stretch (keeps matching linear on hostile input)
-_NAME = r"(?:token|key|password|passwd|pwd|secret|credential|authorization)[\w.-]{0,200}"
+# Redaction is structural first and a list of provider shapes second. A value is hidden when (a) the key, flag or header
+# it belongs to has a credential word in its name, whatever the value looks like, (b) it is a long run of token
+# characters that mixes letters and digits and is not a known-safe identifier, or (c) it is URL userinfo or the value of
+# a credential-named query parameter. The named provider patterns remain as an extra layer.
 _NOT_DONE = r"(?!\[REDACTED\])"
 # name/value separators: = : => -> and their full-width / small-form look-alikes
 _SEP = r"(?:=>|->|[:=\uff1a\uff1d\ufe55\ufe66\u2236])"
 _QUOTED_OR_WORD = r"""(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s,;&)"'\]}]+)"""
+# name words: a segment (split on non-alphanumerics and camelCase) equal to one of these, or holding one of the stems, or
+# a '<qualifier>key' compound (apikey, accountkey, ...), marks a credential-carrying name
+_CRED_WORDS = {"pass", "pwd", "auth", "authn", "authz", "key", "keys", "sig", "api", "dsn", "cert", "certs", "certificate",
+               "session", "sessions", "sid", "cred", "creds", "jwt", "otp", "cookie", "cookies", "bearer", "token",
+               "tokens", "secret", "secrets", "credential", "credentials", "private", "passphrase", "password", "passwd"}
+_CRED_STEMS = ("token", "secret", "passw", "passphrase", "passcode", "credential", "cookie", "signature", "bearer",
+               "authorization", "authorisation", "sessionid", "privatekey")
+_KEY_COMPOUND = re.compile(r"(?:api|access|account|secret|private|ssh|auth|signing|encryption|master|shared|hmac|license|"
+                           r"app|client|consumer|service|storage|public)key")
+
+
+def _cred_name(name):
+    for seg in re.split(r"[^A-Za-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name).lower()):
+        if seg and (seg in _CRED_WORDS or any(w in seg for w in _CRED_STEMS) or _KEY_COMPOUND.fullmatch(seg)):
+            return True
+    return False
+
+
+_SEP_AT = re.compile(r"[\"']?\s{0,8}" + _SEP + r"\s{0,8}")
+_NAME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")
+_VALUE = re.compile(_QUOTED_OR_WORD)
+_FLAG_AT = re.compile(r"(?<![\w-])(?P<flag>--?[A-Za-z][\w-]{0,60})(?P<mid>[ \t]+)" + _NOT_DONE)
+_USER_FLAG = re.compile(r"(?<![\w-])(?P<flag>--?(?:u|user|proxy-user|U))(?P<mid>[ \t]+)" + _NOT_DONE +
+                        r"""(?P<val>(?:"[^"]*:[^"]*"|'[^']*:[^']*'|[^\s"']+:[^\s"']*))""")
+_RUN = re.compile(r"(?<![A-Za-z0-9_\-+/.])[A-Za-z0-9_\-+/.]{20,}=*(?![A-Za-z0-9_\-+/.])")
+_DIGEST_FIELD = re.compile(r"(?i)(?:head|sha\d*|digest|commit|rev(?:ision)?|oid|hash)\W{0,3}$")
+
+
+def _redact_named_values(text):
+    """name = value / name: value / "name": "value" / ?name=value where the name (the run of name characters before the
+    separator) holds a credential word: the value is hidden. Linear: each separator is looked at once, a value is read
+    only for a credential name and then skipped."""
+    out, pos = [], 0
+    for m in _SEP_AT.finditer(text):
+        if m.start() < pos:
+            continue
+        j = m.start()
+        while j > pos and text[j - 1] in _NAME_CHARS:
+            j -= 1
+        if j == m.start() or not _cred_name(text[j:m.start()]):
+            continue
+        if text.startswith(REDACTED, m.end()):
+            continue
+        v = _VALUE.match(text, m.end())
+        if v is None:
+            continue
+        out.append(text[pos:m.end()] + REDACTED)
+        pos = v.end()
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _redact_flag_values(text):
+    """--flag VALUE / -flag VALUE where the flag name holds a credential word."""
+    out, pos = [], 0
+    for m in _FLAG_AT.finditer(text):
+        if m.start() < pos or not _cred_name(m.group("flag")):
+            continue
+        v = _VALUE.match(text, m.end())
+        if v is None:
+            continue
+        out.append(text[pos:m.end()] + REDACTED)
+        pos = v.end()
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _user_flag(m):
+    return m.group("flag") + m.group("mid") + REDACTED
+
+
+def _random_looking(core):
+    """True unless every piece of the run (split on - _ . / + =) is short (<= 8), digits, a lower-case word, a
+    capitalised word, or a short word followed by digits: ids, branch names, unit names, paths and dates read that way,
+    a key, a hash or a base64 blob does not."""
+    for seg in re.split(r"[-_./+=]+", core):
+        if (len(seg) <= 8 or seg.isdigit() or re.fullmatch(r"[a-z]+", seg) or re.fullmatch(r"(?:[A-Z][a-z]+)+|[A-Z]+", seg)
+                or re.fullmatch(r"[A-Za-z]{1,10}\d{1,10}", seg)):
+            continue
+        return True
+    return False
+
+
+def _run_repl(text):
+    def repl(m):
+        run = m.group(0)
+        core = run.rstrip(".=")
+        tail = run[len(core):]
+        if not (any(c.isdigit() for c in core) and any(c.isalpha() for c in core)):
+            return run
+        if re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", core) and _DIGEST_FIELD.search(text[max(0, m.start() - 24):m.start()]):
+            return run  # a git or sha256 digest in a head/sha/digest field is an identifier, not a secret
+        return (REDACTED + tail) if _random_looking(core) else run
+    return repl
+
+
 _REDACTIONS = [
     # PEM private/secret key blocks (a missing END line redacts to the end of the text)
     (re.compile(r"-----BEGIN [A-Z0-9 ]*(?:PRIVATE|SECRET)[A-Z0-9 ]*-----.*?(?:-----END [A-Z0-9 ]*-----|\Z)", re.S), REDACTED),
@@ -146,18 +313,24 @@ _REDACTIONS = [
     (re.compile(r"(?i)(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://)[^\s/@:\"'<>]{0,128}:[^\s\"'<>]{0,512}@"), r"\1" + REDACTED + "@"),
     # URL userinfo without a password: scheme://token@host
     (re.compile(r"(?i)(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://)[^\s/@:]{0,256}@"), r"\1" + REDACTED + "@"),
+    # Cookie / Set-Cookie headers: the whole rest of the line is the credential
+    (re.compile(r"(?i)((?<![\w-])(?:set-)?cookie2?[\"']?\s*[:=]\s*)" + _NOT_DONE + r"[^\r\n]+"), r"\1" + REDACTED),
     # Authorization header value (Basic/Bearer/Digest/Token scheme plus credential)
     (re.compile(r"(?i)(\bauthorization[\"']?\s*" + _SEP + r"\s*[\"']?)" + _NOT_DONE +
                 r"(?:(?:basic|bearer|digest|token|negotiate)\s+)?[^\s\"',;)]+"), r"\1" + REDACTED),
+    # a multi-parameter scheme (Digest username=..., response=...) keeps no parameter
+    (re.compile(r"(?i)(\bauthorization[\"']?\s*" + _SEP + r"\s*[\"']?(?:digest|negotiate|oauth|hmac)\s+)" + _NOT_DONE + r"[^\r\n]+"),
+     r"\1" + REDACTED),
     (re.compile(r"(?i)\b(bearer)(?:\s*" + _SEP + r"\s*|\s+)" + _NOT_DONE + r"[^\s\"',;)]+"), r"\1 " + REDACTED),
-    # name = value / name: value, value may be quoted (with spaces); the name contains a secret word
-    (re.compile(r"(?i)(" + _NAME + r"[\"']?\s*" + _SEP + r"\s*)" + _NOT_DONE + _QUOTED_OR_WORD), r"\1" + REDACTED),
-    # command-line flag whose name holds a secret word, value as the next word: --password VALUE, -token VALUE
-    (re.compile(r"(?i)((?<![\w-])--?[a-z0-9-]{0,40}(?:token|key|password|passwd|pwd|secret|credential)[a-z0-9_-]{0,100}[ \t]+)"
-                + _NOT_DONE + _QUOTED_OR_WORD), r"\1" + REDACTED),
+    # curl -u / --user user:password
+    (_USER_FLAG, _user_flag),
+    # name = value / name: value (JSON, YAML, env, headers, query strings): the name holds a credential word
+    (None, _redact_named_values),
+    # command-line flag whose name holds a credential word, value as the next word: --password VALUE, -token VALUE
+    (None, _redact_flag_values),
     (re.compile(r"(?<![A-Za-z0-9_])sk-[A-Za-z0-9_-]{3,}"), REDACTED),
     (re.compile(r"sk-(?:ant|proj|svcacct|admin|or)-[A-Za-z0-9_-]{8,}"), REDACTED),  # vendor-tagged keys, even glued to a word
-    # provider token prefixes, as a class (each needs a long enough body, so ordinary words are left alone)
+    # provider token prefixes (each needs a long enough body, so ordinary words are left alone)
     (re.compile(r"(?:"
                 r"(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ABIA|ACCA)[0-9A-Z]{12,}"            # AWS key ids
                 r"|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}"                           # GitHub
@@ -168,6 +341,12 @@ _REDACTIONS = [
                 r"|(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{8,}|whsec_[A-Za-z0-9]{8,}"               # Stripe
                 r"|SG\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|hf_[A-Za-z0-9]{16,}|pypi-[A-Za-z0-9_-]{16,}"
                 r"|dckr_pat_[A-Za-z0-9_-]{8,}|shp(?:at|ca|pa|ss)_[A-Za-z0-9]{8,}|dop_v1_[A-Za-z0-9]{8,}"
+                r"|(?:SK|AC)[0-9a-f]{32}|key-[0-9a-f]{32}|dapi[0-9a-f]{32}"                         # Twilio, Mailgun, Databricks
+                r"|glsa_[A-Za-z0-9_]{16,}|hvs\.[A-Za-z0-9_-]{16,}|hv[bs]\.[A-Za-z0-9_-]{16,}"       # Grafana, Vault
+                r"|secret_[A-Za-z0-9]{16,}|ntn_[A-Za-z0-9]{16,}|lin_api_[A-Za-z0-9]{16,}"          # Notion, Linear
+                r"|sntrys_[A-Za-z0-9+/=_-]{16,}|PMAK-[A-Za-z0-9-]{16,}|sq0[a-z]{3}-[A-Za-z0-9_-]{16,}"  # Sentry, Postman, Square
+                r"|EAA[A-Za-z0-9]{20,}|AGE-SECRET-KEY-1[A-Z0-9]{16,}|fo1_[A-Za-z0-9_-]{16,}"       # Facebook, age, Fly
+                r"|\d{6,12}:AA[A-Za-z0-9_-]{20,}"                                                  # Telegram bot token
                 r")"), REDACTED),
     (re.compile(r"(?<![/:])1//0[A-Za-z0-9_-]{20,}"), REDACTED),                          # Google refresh token
     # webhook URLs carry their secret in the path
@@ -177,14 +356,17 @@ _REDACTIONS = [
 
 
 def redact(text):
-    """Replace credential-shaped values in any output string: PEM key blocks, URL userinfo, Authorization/Bearer values,
-    name=value pairs whose name holds token/key/password/secret/credential (quoted values with spaces included),
-    sk-... keys, provider token prefixes (AWS, GitHub, Slack, Google, npm, GitLab, Stripe, ...), webhook URLs and JWTs."""
+    """Replace credential-shaped values in any output string: PEM key blocks, URL userinfo, Cookie / Authorization /
+    Bearer values, every name=value, name: value, "name": "value", --flag value, -u user:pass and query parameter whose
+    name holds a credential word (token, key, secret, pass, auth, cookie, session, signature, sig, credential, api,
+    private, dsn, cert, ...), the named provider token shapes, webhook URLs, JWTs, and finally any >= 20 character run of
+    token characters that mixes letters and digits and is not a known-safe identifier (a digest in a sha/head field,
+    a timestamp, a unit name, a path, a branch)."""
     if not isinstance(text, str):
         return text
     for rx, rep in _REDACTIONS:
-        text = rx.sub(rep, text)
-    return text
+        text = rep(text) if rx is None else rx.sub(rep, text)
+    return _RUN.sub(_run_repl(text), text)
 
 
 def safe_text(text, encoding="utf-8"):
@@ -222,17 +404,30 @@ def load_json_text(txt):
 
 
 def find_dups(obj, path="$"):
-    """Paths of objects that carry a repeated key; such input is ambiguous and is refused."""
+    """Paths of objects that carry a repeated key; such input is ambiguous and is refused. Iterative (an explicit stack,
+    paths rendered only for a hit), so nesting depth never reaches the interpreter's recursion limit."""
     out = []
-    if isinstance(obj, dict):
-        if getattr(obj, "dups", ()):
-            out.append("%s (%s)" % (path, ",".join(obj.dups)))
-        for k, v in obj.items():
-            out += find_dups(v, "%s.%s" % (path, k))
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            out += find_dups(v, "%s[%d]" % (path, i))
+    stack = [(obj, (None, path))]
+    while stack:
+        node, link = stack.pop()
+        if isinstance(node, dict):
+            if getattr(node, "dups", ()):
+                out.append("%s (%s)" % (_render_path(link), ",".join(node.dups)))
+            kids = [(v, (link, ".%s" % k)) for k, v in node.items()]
+        elif isinstance(node, list):
+            kids = [(v, (link, "[%d]" % i)) for i, v in enumerate(node)]
+        else:
+            continue
+        stack.extend(reversed(kids))
     return out
+
+
+def _render_path(link):
+    parts = []
+    while link is not None:
+        parts.append(link[1])
+        link = link[0]
+    return "".join(reversed(parts))
 
 
 def load_json_file(path):
