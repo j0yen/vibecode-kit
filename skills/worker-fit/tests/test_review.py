@@ -2,23 +2,35 @@
 One test class per defect. Fixtures under fixtures/review/ are the reviewer's synthetic case files,
 copied verbatim (case id = file name). Source-only: they do not prove production behavior."""
 import copy
+import datetime
+from unittest import mock
 import json
 import pathlib
 import subprocess
 import sys
 import unittest
 
-from helpers import FIX, SKILL, codes
+from helpers import FIX, SKILL, codes, install_fixture_clock, remove_fixture_clock
 
 import envelope_validate as ev
 import queue_adapter as qa
 import recommend as rc
 
+REAL_HOST_NOW = ev.host_now  # captured at import, before the fixture clock is installed
 REV = FIX / "review"
 RECOMMEND = str(SKILL / "scripts" / "recommend.py")
 VALIDATE = str(SKILL / "scripts" / "envelope_validate.py")
 ADAPTER = str(SKILL / "scripts" / "queue_adapter.py")
 NOW = "2026-11-12T23:00:00Z"
+
+
+
+def setUpModule():
+    install_fixture_clock()
+
+
+def tearDownModule():
+    remove_fixture_clock()
 
 
 def case(cid):
@@ -128,22 +140,6 @@ class D05_ObservationWindow(unittest.TestCase):
         self.assertTrue(r["refused"])
         self.assertIn("FUTURE_TIMESTAMP", r["reason_codes"])
 
-    def test_default_now_is_newest_observation_in_set(self):
-        old = good()
-        old["task_id"] = "WF-9"
-        old["target"] = {"repo": "acme/other", "branch": "b", "head": old["target"]["head"]}
-        old["evidence"] = [dict(e, task_id="WF-9", revision=old["revision"]) for e in old["evidence"]]
-        new = copy.deepcopy(old)
-        new["task_id"] = "WF-8"
-        new["target"] = {"repo": "acme/third", "branch": "b", "head": old["target"]["head"]}
-        new["evidence"] = [dict(e, task_id="WF-8") for e in new["evidence"]]
-        for k in ("envelope", "worker"):
-            new["observed_at"][k] = "2099-01-01T00:00:00Z"
-        for e in new["evidence"]:
-            e["observed_at"] = "2099-01-01T00:00:00Z"
-        res = ev.validate_set([old, new])
-        self.assertIn("STALE_EVIDENCE", codes(res["findings_by_index"][0]))
-
     def test_cli_now_argument(self):
         r = cli(RECOMMEND, "--format", "json", "--now", NOW, str(REV / "N3_year_old_observation.json"))
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -153,6 +149,107 @@ class D05_ObservationWindow(unittest.TestCase):
         r = cli(RECOMMEND, "--now", "yesterday", str(REV / "N3_year_old_observation.json"))
         self.assertEqual(r.returncode, 2)
         self.assertNotIn("Traceback", r.stderr)
+
+
+class TestD05Default(unittest.TestCase):
+    """Live default: the reference clock is the trusted host clock; fixture dates are test clocks by injection."""
+
+    def setUp(self):  # the live default: undo the module's injected fixture clock
+        p = mock.patch.object(ev, "host_now", REAL_HOST_NOW)
+        p.start()
+        self.addCleanup(p.stop)
+
+    GREEN = {"reuse-active-worker", "consume-completed-terminal", "ready-unowned-slice", "independent-verification"}
+
+    def test_cli_default_refuses_stale_and_future(self):
+        for cid, code in (("N3_year_old_observation", "STALE_EVIDENCE"), ("N6_future_timestamp", "FUTURE_TIMESTAMP")):
+            r = cli(RECOMMEND, "--format", "json", str(REV / (cid + ".json")))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            rec = json.loads(r.stdout)[0]
+            self.assertTrue(rec["refused"], cid)
+            self.assertIn(code, rec["reason_codes"], cid)
+            self.assertNotIn(rec["disposition"], self.GREEN, cid)
+
+    def test_cli_validate_default_refuses(self):
+        for cid in ("N3_year_old_observation", "N6_future_timestamp"):
+            self.assertEqual(cli(VALIDATE, str(REV / (cid + ".json"))).returncode, 1, cid)
+
+    def test_library_default_refuses_stale_and_future(self):
+        for cid, code in (("N3_year_old_observation", "STALE_EVIDENCE"), ("N6_future_timestamp", "FUTURE_TIMESTAMP")):
+            r = rc.recommend_set(case(cid))[0]
+            self.assertTrue(r["refused"], cid)
+            self.assertIn(code, r["reason_codes"], cid)
+            self.assertNotIn(r["disposition"], self.GREEN, cid)
+            self.assertIn(code, codes(ev.validate(env0(cid))))
+
+    def test_fresh_envelope_greens_against_injected_clock(self):
+        d = good()
+        stamps = [d["observed_at"]["envelope"], d["observed_at"]["worker"]] + [e["observed_at"] for e in d["evidence"]]
+        newest = max(ev.parse_ts(t) for t in stamps if not ev.is_unknown(t))
+        clock = (newest + datetime.timedelta(minutes=5)).isoformat()
+        self.assertEqual(ev.validate(d, now=clock), [])
+        self.assertEqual(rc.recommend_set([d], now=clock)[0]["disposition"], "reuse-active-worker")
+        with mock.patch.object(ev, "host_now", lambda: ev.as_now(clock)):
+            self.assertEqual(ev.validate(d), [])
+            self.assertEqual(rc.recommend_set([d])[0]["disposition"], "reuse-active-worker")
+        r = cli(RECOMMEND, "--format", "json", "--now", clock, str(FIX / "good_running.json"))
+        self.assertEqual(json.loads(r.stdout)[0]["disposition"], "reuse-active-worker")
+
+    def test_fresh_against_real_host_clock_greens(self):
+        d = good()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+        d["observed_at"]["envelope"] = d["observed_at"]["worker"] = now
+        d["source"]["identity_at"] = d["source"]["revision_at"] = (
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=2)).replace(microsecond=0).isoformat()
+        for e in d["evidence"]:
+            e["observed_at"] = now
+        self.assertEqual(ev.validate(d), [])
+
+    def test_set_with_stale_newest_refused_without_now(self):
+        a = good()
+        b = copy.deepcopy(a)
+        b["task_id"] = "WF-8"
+        b["target"] = {"repo": "acme/third", "branch": "b", "head": a["target"]["head"]}
+        b["evidence"] = [dict(e, task_id="WF-8") for e in b["evidence"]]
+        for d in (a, b):
+            d["observed_at"]["envelope"] = d["observed_at"]["worker"] = "2025-01-01T00:00:00Z"
+            d["source"]["identity_at"] = d["source"]["revision_at"] = "2024-12-31T00:00:00Z"
+            for e in d["evidence"]:
+                e["observed_at"] = "2025-01-01T00:00:00Z"
+        res = ev.validate_set([a, b])
+        for i in (0, 1):
+            self.assertIn("STALE_EVIDENCE", codes(res["findings_by_index"][i]))
+        for r in rc.recommend_set([a, b]):
+            self.assertTrue(r["refused"])
+            self.assertNotIn(r["disposition"], self.GREEN)
+
+    def test_newest_in_set_is_never_the_reference(self):
+        old = good()
+        old["observed_at"]["envelope"] = old["observed_at"]["worker"] = "2025-01-01T00:00:00Z"
+        old["source"]["identity_at"] = old["source"]["revision_at"] = "2024-12-31T00:00:00Z"
+        for e in old["evidence"]:
+            e["observed_at"] = "2025-01-01T00:00:00Z"
+        new = copy.deepcopy(old)
+        new["task_id"] = "WF-8"
+        new["target"] = {"repo": "acme/third", "branch": "b", "head": old["target"]["head"]}
+        new["evidence"] = [dict(e, task_id="WF-8") for e in new["evidence"]]
+        for k in ("envelope", "worker"):
+            new["observed_at"][k] = "2099-01-01T00:00:00Z"
+        for e in new["evidence"]:
+            e["observed_at"] = "2099-01-01T00:00:00Z"
+        res = ev.validate_set([old, new])
+        self.assertIn("FUTURE_TIMESTAMP", codes(res["findings_by_index"][1]))
+        self.assertIn("STALE_EVIDENCE", codes(res["findings_by_index"][0]))
+
+    def test_system_alias_and_bad_now(self):
+        self.assertEqual(cli(RECOMMEND, "--now", "system", str(REV / "N3_year_old_observation.json")).returncode, 0)
+        self.assertEqual(cli(VALIDATE, "--now", "garbage", str(REV / "N3_year_old_observation.json")).returncode, 2)
+
+    def test_skill_documents_default_window_skew(self):
+        t = (SKILL / "SKILL.md").read_text()
+        for w in ("host clock", "24 h", "5 min"):
+            self.assertIn(w, t)
+        self.assertNotIn("newest observation in the set; a lone", t)
 
 
 class D06_FalseCompleteStateAndReview(unittest.TestCase):

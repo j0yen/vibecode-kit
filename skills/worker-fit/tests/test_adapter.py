@@ -1,13 +1,22 @@
 import json
 import unittest
 
-from helpers import FIX, codes
+from helpers import FIX, codes, install_fixture_clock, remove_fixture_clock
 
 import envelope_validate as ev
 import queue_adapter as qa
 import recommend as rc
 
 ROWS = json.loads((FIX / "queue_rows.json").read_text())["rows"]
+
+
+
+def setUpModule():
+    install_fixture_clock()
+
+
+def tearDownModule():
+    remove_fixture_clock()
 
 
 class QueueAdapter(unittest.TestCase):

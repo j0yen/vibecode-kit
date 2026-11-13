@@ -41,8 +41,10 @@ scheduler, coordinator, task store or mutation CLI.
   from everything they print; the envelope's free-text `next_action` is never relayed as the recommended action.
 - Observation window: an envelope, worker or evidence observation older than 24 h
   (`STALE_WINDOW_SECONDS`) before the reference now, or dated more than 5 min after it, is refused. The reference
-  now is `--now TS` (`--now system` = host clock) or, without it, the newest observation in the set; a lone
-  envelope with no `--now` is only checked against its own newest observation, so pass `--now` for live use.
+  now defaults to the trusted host clock (UTC now) for the CLI and the library alike; `--now TS` / `now=` inject
+  an explicit clock (tests, replay), and `--now system` is an alias for the default. The newest observation in the
+  set is never used as the reference, so stale or future input cannot green itself; a bad `--now` is UNREADABLE
+  (exit 2). Defaults: window 24 h, future skew 5 min, clock = host clock.
   Evidence may carry `head`, `repo`, `branch`; evidence naming a head (also `head=<sha>` inside its ref) or
   repo/branch different from the target is refused as WRONG_TASK.
 

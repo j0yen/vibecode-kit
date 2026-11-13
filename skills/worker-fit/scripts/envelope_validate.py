@@ -4,7 +4,7 @@
 Usage: envelope_validate.py [--now TS|system] FILE [FILE...]   (FILE = one envelope, a list, or {"envelopes": [...]})
 Exit 0 = no REFUSE finding, 1 = at least one REFUSE finding, 2 = unreadable input (not JSON, bad --now).
 Observation window: observations older than STALE_WINDOW_SECONDS before the reference now, or dated after it,
-are refused; the reference now is --now (system = host clock) or else the newest observation in the set.
+are refused; the reference now is --now TS or else the host clock (--now system is an explicit alias).
 Credential-shaped values are redacted from every printed line.
 Counts are derived from the enumerated records; a declared total is only compared, never used.
 A pass is a statement about the envelope's shape and internal consistency, not about production.
@@ -271,6 +271,16 @@ def as_now(now):
     return t
 
 
+def host_now():
+    """The trusted host clock (aware UTC). The one module-level clock: tests patch this, live code never overrides it."""
+    return datetime.now(timezone.utc)
+
+
+def resolve_now(now):
+    """The reference clock: an explicit `now` (datetime or ISO-8601 string) else the host clock. Never derived from the data."""
+    return as_now(now) if now is not None else host_now()
+
+
 def observation_times(d):
     """Every parseable observation time in one record (tolerant: used before validation to find the newest)."""
     out = []
@@ -290,7 +300,7 @@ def observation_times(d):
 
 def validate(d, now=None):
     """Findings for one envelope. Empty list = shape and internal consistency hold.
-    `now` is the reference clock for the observation window; None = the newest observation in this envelope."""
+    `now` is the reference clock for the observation window; None = the host clock (host_now())."""
     if not isinstance(d, dict):
         return [finding("SCHEMA_TYPE", "$", "envelope must be an object")]
     dups = find_dups(d)
@@ -310,7 +320,7 @@ def validate(d, now=None):
                 continue
             if t is not None and t < newest:
                 out.append(finding("STALE_EVIDENCE", p, "observed before the cited source identity/revision"))
-    ref_now = as_now(now) or max(observation_times(d), default=None)
+    ref_now = resolve_now(now)
     if ref_now is not None:
         checked = [("observed_at.envelope", True), ("observed_at.worker", d["state"] != "DONE"),
                    ("observed_at.result", False)]
@@ -384,7 +394,7 @@ def validate(d, now=None):
 
 # Observation window: an envelope / worker / evidence observation older than this before the reference "now",
 # or dated more than FUTURE_SKEW_SECONDS after it, is refused. The reference "now" is the caller's explicit
-# `now` (CLI: --now TS, or --now system for the host clock) or, when none is given, the newest observation in the set.
+# `now` (CLI: --now TS; --now system = host clock) or, when none is given, the host clock. Never the data.
 STALE_WINDOW_SECONDS = 24 * 3600
 FUTURE_SKEW_SECONDS = 300
 
@@ -435,9 +445,7 @@ def validate_set(obj, now=None):
     recs, declared = _records(obj)
     if not isinstance(recs, list):
         return {"derived_count": 0, "findings_by_index": [], "set_findings": [finding("SCHEMA_TYPE", "envelopes", "must be a list")]}
-    ref_now = as_now(now)
-    if ref_now is None:
-        ref_now = max((t for r in recs if isinstance(r, dict) for t in observation_times(r)), default=None)
+    ref_now = resolve_now(now)
     by_idx = [validate(r, ref_now) for r in recs]
     sets = []
     if isinstance(obj, dict) and getattr(obj, "dups", ()):

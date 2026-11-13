@@ -6,7 +6,7 @@ Usage: recommend.py [--queue] [--observed-at TS] [--now TS|system] [--format tex
 Read-only, standard library only, no network. It launches, claims, kills, installs and writes nothing,
 and a recommendation grants no action authority. A source-only or fixture result does not prove
 production behavior; a wrapper or queue entry is not a worker launch; UNKNOWN is reported, never filled.
---now sets the reference clock for the observation window (system = host clock; default = the newest
+--now sets the reference clock for the observation window (default = the host clock, system = same; never the newest
 observation in the set, see envelope_validate.py). Credential-shaped values are redacted from all output.
 Exit 0 on output (a refusal is a recommendation), 2 on unreadable input (not JSON, duplicate-free structure
 broken such as {"envelopes": null} or {"rows": null}, bad --now).
@@ -219,7 +219,7 @@ def main(argv):
                 v = next(it, None)
                 if v is None:
                     raise ValueError("--now needs a timestamp or 'system'")
-                now = datetime.now(timezone.utc) if v == "system" else ev.as_now(v)
+                now = ev.host_now() if v == "system" else ev.as_now(v)
             else:
                 path = a
     except ValueError as e:

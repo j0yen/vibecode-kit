@@ -2,9 +2,18 @@
 synthetic or derived fixtures and do not prove production behavior."""
 import unittest
 
-from helpers import codes, load
+from helpers import codes, load, install_fixture_clock, remove_fixture_clock
 
 import recommend as rc
+
+
+
+def setUpModule():
+    install_fixture_clock()
+
+
+def tearDownModule():
+    remove_fixture_clock()
 
 
 def one(name):

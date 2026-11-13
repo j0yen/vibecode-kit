@@ -1,9 +1,18 @@
 import json
 import unittest
 
-from helpers import SKILL, codes, load
+from helpers import SKILL, codes, load, install_fixture_clock, remove_fixture_clock
 
 import envelope_validate as ev
+
+
+
+def setUpModule():
+    install_fixture_clock()
+
+
+def tearDownModule():
+    remove_fixture_clock()
 
 
 class ValidatorPairs(unittest.TestCase):
