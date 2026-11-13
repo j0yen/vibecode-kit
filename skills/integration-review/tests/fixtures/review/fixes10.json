@@ -1,0 +1,139 @@
+{
+ "_note": "synthetic values; source-only fixture for re-review 10 D1/D2 (class closure), not production behaviour",
+ "hex": "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+ "other_hex": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807",
+ "unstated_commits": [
+  "unknown (pending)",
+  "tbc",
+  "TBC",
+  "pending",
+  "not recorded",
+  "unknown commit",
+  "commit unknown",
+  "missing",
+  "unresolved",
+  "unstated",
+  "no commit",
+  "not yet recorded",
+  "latest-unknown",
+  "commit: missing",
+  "sha: tbc",
+  "rev: pending",
+  "unknown@pending",
+  "commit ",
+  "(tbc)",
+  "[not recorded]",
+  "<unresolved>",
+  "to be confirmed",
+  "awaiting commit",
+  "redacted",
+  "withheld",
+  "fixme"
+ ],
+ "spelled_same": [
+  "0x3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+  "g3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+  "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2 (HEAD)",
+  "HEAD@{3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2}",
+  "commit 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2 main",
+  "git+ssh://x/y@3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+  "commit-3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+  "rev-3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+  "v1-0-g3f9c2b7d1e4a (3f9c2b7d1e4a)",
+  "hash: 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2 (tag v1)"
+ ],
+ "distinct_commits": [
+  [
+   "git-2.40",
+   "2.40"
+  ],
+  [
+   "rev-1",
+   "1"
+  ],
+  [
+   "git-2.40",
+   "git-2.41"
+  ],
+  [
+   "v1.0",
+   "v1.1"
+  ],
+  [
+   "HEAD",
+   "main"
+  ],
+  [
+   "main",
+   "master"
+  ],
+  [
+   "latest",
+   "HEAD"
+  ],
+  [
+   "release-7",
+   "release-8"
+  ],
+  [
+   "rev-2",
+   "rev-3"
+  ],
+  [
+   "sha:3f9c2b",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ]
+ ],
+ "non_evidence": [
+  "status=unknown",
+  "result = unknown",
+  "status: 'unknown'",
+  "evidence: \"null\"",
+  "value: `nil`",
+  "evidence: n.a.",
+  "status: unknown v1",
+  "unknown 2026",
+  "status: unknown (see #12)",
+  "evidence: unknown (2026-11-12)",
+  "status:unknown",
+  "status: u n k n o w n",
+  "result == \"none\"",
+  "value => 'tbd'",
+  "source: <unavailable>",
+  "evidence: \"n/a\" (2026)",
+  "owner=NULL",
+  "result: `nil` (v2)",
+  "status = pending #4",
+  "evidence: n.a",
+  "evidence: N.A. 2026",
+  "<evidence>",
+  "dunno",
+  "FIXME",
+  "tbc",
+  "redacted",
+  "withheld",
+  "evidence withheld",
+  "lost",
+  "gone",
+  "to be decided",
+  "insert evidence here",
+  "awaiting vendor response",
+  "waiting on owner",
+  "the evidence for this record is currently unknown to us",
+  "the owner of this component is unknown at this time",
+  "status: unknown at the moment, will update later today"
+ ],
+ "evidence": [
+  "a.py:12 emit()",
+  "status 200",
+  "4 passed",
+  "mock server config line 12",
+  "src/unknown/x.py",
+  "unknown.log line 3",
+  "checked the stub generator at gen/stub.py:7",
+  "curl returned 200",
+  "tests: 0 failed, 12 passed",
+  "reading the producer at p/pub.go:30 shows publish(topic)",
+  "status: unknown opcode handled in parse.rs:88"
+ ]
+}

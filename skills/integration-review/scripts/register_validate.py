@@ -361,12 +361,13 @@ def _prose_ref(ref):
 def _positive_refs(items):
     """Evidence refs that count as evidence: not UNKNOWN-equivalent and, when they are prose (see _prose_ref), neither
     negated ("not verified", "no test", "failed"), nor a doubt wording (ir_norm NEG_DOUBT: unchecked, skipped, pending,
-    TBD, waived, disproved, invalid, false ...), nor non-evidence (ir_norm.non_evidence: prose that only says the fact is
-    unknown, missing, null, nil, unavailable or pending, such as "status: unknown" or "needs review"). A zero count of
-    failures ("tests: 0 failed, 12 passed") is positive; "0 passed" is not. The word lists are vocabulary, not proof:
+    TBD, waived, disproved, invalid, false ...), nor non-evidence (ir_norm.non_evidence, judged on every ref whatever its shape: text that only says
+    the fact is unknown, missing, null, nil, unavailable or pending, such as "status: unknown", "status=unknown" or "needs
+    review"). A zero count of failures ("tests: 0 failed, 12 passed") is positive; "0 passed" is not. The word lists are vocabulary, not proof:
     UNKNOWN is never filled."""
-    return [(i, e) for i, e in _refs(items) if not (isinstance(e["ref"], str) and _prose_ref(e["ref"])
-                                                       and (_N.negated(e["ref"], doubt=True) or _N.non_evidence(e["ref"])))]
+    return [(i, e) for i, e in _refs(items)
+            if not (isinstance(e["ref"], str) and ((_prose_ref(e["ref"]) and _N.negated(e["ref"], doubt=True))
+                                                   or _N.non_evidence(e["ref"])))]
 
 
 def _adopted(items):

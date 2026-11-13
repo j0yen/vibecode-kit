@@ -136,55 +136,113 @@ def _is_unknown(v):
     return re.sub(r"[\s./_-]+", "", core) in _FAMILY
 
 
-# ---- commits and non-evidence prose (one definition each, shared by the scripts) -----------------------------
-_COMMIT_LABEL = re.compile(r"^(?:sha-?(?:1|256)?|commit(?:\s*id)?|rev(?:ision)?|hash|git|oid)[\s:=#-]+", re.I)
-
-
-def commit_id(c):
-    """Canonical spelling of a commit, or None when the commit is UNSTATED. A value that is not a string or is an
-    UNKNOWN-equivalent (is_unknown: UNKNOWN, TBD, n/a, null, empty ...) is unstated, as an unstated repo is. Otherwise
-    NFKC folding, removal of format/control characters and surrounding blanks, lower case, a leading label ("sha:",
-    "sha1:", "sha256:", "commit ", "rev ", "hash ", "git:" ...) and edge punctuation removed: "sha:<hex>", "commit <hex>"
-    and a zero-width-marked hex are the same commit as the bare hex."""
-    if not isinstance(c, str) or is_unknown(c):
-        return None
-    t = fold(c)
-    t = _COMMIT_LABEL.sub("", t).strip(_EDGE)
-    return None if is_unknown(t) else t
-
-
-# Non-evidence prose: a statement that only says the fact is not known, missing, unavailable, pending or still to be
-# done. NE_PLACEHOLDER words say so by themselves; NE_FILLER words only frame a statement (status, result, value, is,
-# see above, to be verified ...). A prose ref with no concrete anchor (a digit, a path or URL
-# separator, a dotted name, a hash mark, an at sign or a quote) is non-evidence when (A) every word is one of the two
-# lists, or (B) it holds a NE_PLACEHOLDER word and is short (<= 6 words): "status: unknown", "value is nil", "needs
-# review". "a.py:12", "status 200" and "src/unknown/x.py" have an anchor and are never judged by their words.
+# ---- placeholder vocabulary, commits and non-evidence prose (one definition each, shared by the scripts) ----------
+# NE_PLACEHOLDER words say by themselves that the fact is not known, missing, unavailable, pending or still to be done;
+# NE_FILLER words only frame a statement (status, result, value, is, see above, to be verified, this record ...). Both
+# lists are vocabulary, not proof: UNKNOWN is never filled. They serve two rules: non_evidence() for prose evidence refs
+# and commit_id() for a commit that says nothing.
 _NE_PLACEHOLDER = frozenset(
     "unknown unk unknowable unverifiable unverified undetermined undefined unspecified unstated unavailable unconfirmed "
-    "null nil none nothing nada na tbd tba todo missing absent empty blank vacant pending placeholder dummy fake stub "
-    "mock lorem ipsum xxx draft incomplete unfinished unnamed unset notset undone tentative provisional later "
-    "unclear inconclusive".split())
+    "unresolved null nil none nothing nada na tbd tba tbc todo fixme missing absent empty blank vacant pending placeholder "
+    "dummy fake stub mock lorem ipsum xxx draft incomplete unfinished unnamed unset notset undone tentative provisional "
+    "later unclear inconclusive dunno redacted withheld awaiting await waiting".split())
 _NE_FILLER = frozenset(
     "status result results evidence value values source owner output data answer check reviewer review reviewed "
     "is are was were be been being the a an of for to this that it its still yet currently now not "
     "see above below attached notes note ticket same as before earlier previous follow will verify verified confirm "
-    "confirmed confirmation verification needs need needed awaiting await in progress determined announced provided stated known "
-    "available applicable set filled fill details detail info information more further later soon todo".split())
-_NE_ANCHOR = re.compile(r"[0-9/\\#@\"'`=]|\w\.\w|::|\w\(\)")
+    "confirmed confirmation verification needs need needed in progress determined announced provided stated known "
+    "available applicable set filled fill details detail info information more further soon todo "
+    "decided insert here add lost gone record component endpoint interface vendor response reply us we our at time "
+    "moment today update recorded captured supplied specified on by".split())
+_COMMIT_NOISE = frozenset("commit sha id rev revision hash oid git ref no number".split())
+# A label before a commit ("sha:", "sha1:", "sha-256:", "commit ", "rev ", "hash=", "git:" ...); only the sha forms may be
+# followed by "-" ("sha256-<hex>"): "git-2.40" and "rev-1" are names, not a label and a value.
+_COMMIT_LABEL = re.compile(r"^(?:(?:sha-?(?:1|256)?)[\s:=#-]+|(?:commit(?:\s*id)?|rev(?:ision)?|hash|git|oid)[\s:=#]+)", re.I)
+_HEXRUN = re.compile(r"(?<![0-9a-f])[0-9a-f]{7,64}(?![0-9a-f])")
+_NA = re.compile(r"\bn\s*[./]\s*a\b\.?")
+_SPACED_LETTERS = re.compile(r"\b(?:[a-z] )+[a-z]\b")
+# A number or version is a concrete anchor only after a content word ("line 12"): "#12", "2026-11-12", "v1" beside a
+# placeholder word are decoration. A path, URL, dotted name, "::", call or "@" token is an anchor unless every word in it is
+# a placeholder or filler word ("unknown/tbd", "n.a").
+_STRONG = re.compile(r"[/\\@]|[a-z0-9]\.[a-z0-9]|::|\w\(\)")
+_WEAK = re.compile(r"[0-9\"'`=#]")
+_NUMBER = re.compile(r"[#v]?[0-9][0-9:.,/-]*")
+
+
+def _is_placeholder_commit(t):
+    """A commit text with no digit that only says the commit is not known: any placeholder word, or nothing but
+    placeholder, filler and label words ("unknown commit", "tbc", "not recorded", "no commit", "pending")."""
+    if any(c.isdigit() for c in t):
+        return False
+    words = re.findall(r"[a-z]+", t)
+    return bool(words) and (any(w in _NE_PLACEHOLDER for w in words)
+                            or all(w in _NE_FILLER or w in _COMMIT_NOISE for w in words))
+
+
+def commit_id(c):
+    """See _commit_id(): the rule, with the result cached per string (the validator asks it for every commit twice)."""
+    return None if not isinstance(c, str) else _commit_id(c)
+
+
+@lru_cache(maxsize=65536)
+def _commit_id(c):
+    """Canonical spelling of a commit, or None when the commit is UNSTATED. A value that is not a string, is an
+    UNKNOWN-equivalent (is_unknown) or only says it is not known (a placeholder wording such as "unknown (pending)", "tbc",
+    "not recorded", "no commit") is unstated, as an unstated repo is. Otherwise NFKC folding, removal
+    of format/control characters and surrounding blanks, lower case, a leading label ("sha:", "sha1:", "sha256:",
+    "commit ", "rev ", "hash ", "git:" ...) and edge punctuation removed; when what remains is not one bare hex but holds
+    exactly one hex of 7+ digits (letters and a digit, so "0x<hex>", "g<hex>", "<hex> (HEAD)", "HEAD@{<hex>}", a URL ending
+    in @<hex>, "commit-<hex>" and a trailing ref name), that hex is the commit."""
+    if is_unknown(c):
+        return None
+    t = _COMMIT_LABEL.sub("", fold(c)).strip(_EDGE)
+    t = re.sub(r"^0x(?=[0-9a-f]{7})", "", t)
+    if not re.fullmatch(r"[0-9a-f]{7,64}", t):
+        hexes = {h for h in _HEXRUN.findall(t) if any(x.isdigit() for x in h) and any(x in "abcdef" for x in h)}
+        if len(hexes) == 1:
+            t = hexes.pop()
+    if is_unknown(t) or _is_placeholder_commit(t):
+        return None
+    return t
+
+
+def _anchored(tokens, words):
+    """True when a token of the ref is a concrete anchor (see _STRONG / _NUMBER above)."""
+    prev = None
+    for tok in tokens:
+        core = tok.strip(_EDGE + "?-")
+        if _STRONG.search(core) and any(w not in _NE_PLACEHOLDER and w not in _NE_FILLER and not w.isdigit()
+                                         for w in re.findall(r"[a-z0-9]+", core)):
+            return True
+        if _NUMBER.fullmatch(core) and prev is not None and prev not in _NE_PLACEHOLDER and prev not in _NE_FILLER \
+                and len(prev) > 1:
+            return True
+        m = re.findall(r"[a-z]+", core)
+        if m:
+            prev = m[-1]
+    return False
 
 
 def non_evidence(ref):
-    """True when a prose evidence ref only says the fact is unknown, missing, null, nil, unavailable or pending (rule in
-    the comment above). Callers judge prose only (a path, URL or bare location is not passed here)."""
+    """True when a prose evidence ref only says the fact is unknown, missing, null, nil, unavailable or pending. The ONE
+    rule for every ref (a token such as "status=unknown" or "<evidence>" is judged as a ref with spaces is): the words
+    (NE_PLACEHOLDER / NE_FILLER) are read with quotes, "=", brackets, backticks, numbers and dates ignored; a ref with a
+    concrete anchor (_anchored) is never judged by its words; a ref with no placeholder word and a weak mark (a digit,
+    quote, "=", backtick, "#": "status 200") is evidence too; otherwise it is non-evidence when (A) every word is a
+    placeholder or filler word, or (B) it holds a placeholder word and is short (<= 6 words): "status: unknown",
+    "value is nil", "needs review". Callers judge a ref text only (a path or URL is an anchor)."""
     if not isinstance(ref, str):
         return True
-    t = canon(ref, slashes=True).replace("n/a", "na")
+    t = _SPACED_LETTERS.sub(lambda m: m.group().replace(" ", ""), _NA.sub("na", canon(ref, slashes=True)))
     words = re.findall(r"[a-z]+(?:['\u2019][a-z]+)?", t)
-    if not words or _NE_ANCHOR.search(t):
+    if not words:
+        return False
+    ph = any(w in _NE_PLACEHOLDER for w in words)
+    if _anchored(t.split(), words) or (not ph and _WEAK.search(t)):
         return False
     if all(w in _NE_PLACEHOLDER or w in _NE_FILLER for w in words):
         return True
-    return len(words) <= 6 and any(w in _NE_PLACEHOLDER for w in words)
+    return len(words) <= 6 and ph
 
 
 def _credential_view(t):

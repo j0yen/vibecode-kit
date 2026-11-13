@@ -112,16 +112,23 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    -ed/-ied such as unchecked or unreviewed, and a few others) anywhere in the clause before a side mark (counted from the
    previous side mark; `;`, a newline or a full stop ends a clause) or after it up to the end of the clause leaves the role
    UNKNOWN, at any distance; a negation that heads another side mark does not reach this one. The same words make a prose
-   evidence ref, or a single bare word such as `skipped`, non-evidence. A second class is non-evidence prose, which only
-   says the fact is not known: a prose ref with no concrete anchor (no digit, path or URL separator, dotted name, `#`, `@`
-   or quote) whose words are all placeholder or framing words (`unknown null nil n/a unavailable missing pending draft
-   empty placeholder`, plus `status result value is the see above needs review to be verified`), or that holds a
-   placeholder word in at most six words, is non-evidence (`ir_norm.non_evidence`): `status: unknown`, `result UNKNOWN`,
-   `value is nil`, `evidence: null`, `source unavailable`, `needs review`, `see above`. A ref with an anchor (`a.py:12`,
-   `status 200`, `4 passed`) is judged by the other rules only; a zero count of failures (`tests: 0 failed, 12
-   passed`) is positive, `0 passed` is not. The lists are vocabulary and cannot be complete: an unlisted wording is read as
-   positive, and a genuine positive ref that uses a listed word (`validates invalid input`) is refused as missing-evidence
-   (restate it); UNKNOWN is never filled. A path-like ref (no space, not a bare word) is never judged as prose.
+   evidence ref, or a single bare word such as `skipped`, non-evidence. A second class is non-evidence, which only says the fact is not known. It is judged on every ref, whatever its shape
+   (`status=unknown`, `<evidence>` and `status: unknown` are one rule), with quotes, `=`, backticks, brackets, `#`, numbers
+   and dates read as decoration: a weak mark (quote, `=`, backtick, `#`, a bare number, date or version such as `v1`) beside a
+   placeholder word is never a concrete anchor. A concrete anchor is a path or URL separator, a dotted name, `::`, a call
+   `f()` or `@` in a token that holds a word other than a placeholder or framing word (`a.py:12`, `src/unknown/x.py`; not
+   `unknown/tbd` or `n.a`), or a number after a content word (`line 12`); a ref with no placeholder word is also evidence
+   when it holds a digit, quote, `=` or backtick (`status 200`, `4 passed`). A ref with no anchor is non-evidence when every
+   word is a placeholder or framing word (`unknown null nil n/a n.a unavailable missing pending draft empty placeholder tbc
+   fixme dunno redacted withheld awaiting`, plus `status result value is the see above needs review lost gone to be verified`),
+   or when it holds a placeholder word in at most six words (`ir_norm.non_evidence`): `status: unknown`, `status=unknown`,
+   `result = "unknown" (2026)`, `value is nil`, `evidence: n.a.`, `source unavailable`, `needs review`, `see above`. A zero
+   count of failures (`tests: 0 failed, 12 passed`) is positive, `0 passed` is not. The lists are vocabulary and cannot be
+   complete: an unlisted wording is read as positive, a sentence of more than six words that holds a placeholder word and a
+   content word (`unknown opcodes are rejected by the parser`) is read as evidence, and a genuine ref of six words or fewer
+   that uses a listed word with no anchor (`checked the stub generator`) is refused as missing-evidence (restate it with a
+   location); UNKNOWN is never filled. A path-like ref (no space, not a bare word) is not judged for negation words, only
+   by the rule above.
    Scope: the `installed` rule (stated path and 64-hex sha256) is enforced by the extractor only. A
    hand-written register states `installed` on the reviewer's word, so the validator's OK line names every
    installed record taken on that word ("installed state of N record(s) taken on the declarer's word"); a
@@ -139,9 +146,14 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    prove they differ: both state repos (canonical) and share none, or both state commits and share none. One commit written
    two ways is one commit (`ir_norm.commit_id`, the one rule): case is folded, a label (`sha:`, `sha1:`, `sha256:`, `commit `,
    `rev `, `hash `, `git:`) and zero-width/format characters or edge punctuation around the hex are dropped, and an abbreviated
-   hex sha of 7+ digits equals any longer sha it prefixes (a 6-digit one is not matched). A placeholder commit (`UNKNOWN`, `TBD`,
-   `n/a`, `null`, empty: any UNKNOWN-equivalent) is an unstated commit, exactly as a placeholder repo is an unstated repo: it
-   differs from nothing, so records that differ only by it, or by a spelling above, are `duplicate-record`. The
+   hex sha of 7+ digits equals any longer sha it prefixes (a 6-digit one is not matched). A placeholder commit is an unstated commit (the "unstated commit" rule, `ir_norm.commit_id`): any UNKNOWN-equivalent
+   (`UNKNOWN`, `TBD`, `n/a`, `null`, empty), any commit text without a digit that holds a placeholder word or says nothing
+   but placeholder and label words (`unknown (pending)`, `tbc`, `pending`, `missing`, `unresolved`, `not recorded`, `unknown
+   commit`, `no commit`) (an all-zero sha is a hex and stays a stated commit: residual, see the report); it is an unstated commit exactly as a placeholder repo is an
+   unstated repo. One hex of 7+ digits (letters and a digit) inside decoration is the same commit as the bare hex: `0x<hex>`,
+   `g<hex>`, `<hex> (HEAD)`, `HEAD@{<hex>}`, `commit <hex> main`, a URL ending in `@<hex>`, `commit-<hex>`. A label before `-`
+   is not stripped from a non-hex ref (`git-2.40` and `2.40`, `rev-1` and `1` are different commits), and a floating ref
+   (`HEAD`, `main`, `master`, `latest`) is a stated commit of its own that differs from a sha. An unstated commit differs from nothing, so records that differ only by it, or by a spelling above, are `duplicate-record`. The
    validator finds these groups by keyed lookup (near-linear, pairwise `_conflict` is the definition and reads the same
    commit rule through `_same_commit`; a test pins the two equal on random registers), never by scanning all pairs. A record that omits its
    commit or repo is never provably different, so a pair where one side omits it is refused (a `complete` claim is REFUSED
