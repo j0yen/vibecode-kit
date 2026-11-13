@@ -1,0 +1,9 @@
+[
+ {
+  "ask_id": "A1",
+  "rev": 1,
+  "status": "running",
+  "claim": "launched pid 42 on ryzen7 unit x.service",
+  "owner": "r7"
+ }
+]

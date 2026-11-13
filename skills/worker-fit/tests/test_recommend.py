@@ -54,8 +54,11 @@ class ControlC_DuplicateAndConflict(unittest.TestCase):
 
     def test_bad_duplicate_task_refused(self):
         a, b = many("good_running", "good_running")
-        self.assertTrue(a["refused"] and b["refused"])
-        self.assertIn("DUPLICATE_TASK", a["reason_codes"])
+        # SKILL.md: refusal is for the newcomer; the running original stays undisturbed (review D2)
+        self.assertFalse(a["refused"])
+        self.assertEqual(a["disposition"], "reuse-active-worker")
+        self.assertTrue(b["refused"])
+        self.assertIn("DUPLICATE_TASK", b["reason_codes"])
 
     def test_bad_second_worker_on_conflicting_target_refused(self):
         a, b = many("good_running", "ready_conflicting_target")

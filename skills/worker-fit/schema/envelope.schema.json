@@ -48,7 +48,8 @@
       "properties": {
         "artifact": {"type": ["string", "null"]}, "event": {"type": ["string", "null"]},
         "task_id": {"type": ["string", "null"]}, "revision": {"type": ["integer", "null"]},
-        "reviewed": {"enum": [true, false, "UNKNOWN"]}
+        "reviewed": {"enum": [true, false, "UNKNOWN"]},
+        "reviewed_by": {"type": ["string", "null"], "description": "optional: identity of a reviewer distinct from the worker; reviewed=true without it does not drop independent verification"}
       }
     },
     "consumer": {
@@ -56,7 +57,8 @@
       "required": ["named", "alternate", "alternate_authorized", "available"],
       "properties": {
         "named": {"type": "string"}, "alternate": {"type": ["string", "null"]},
-        "alternate_authorized": {"type": "boolean"}, "available": {"enum": [true, false, "UNKNOWN"]}
+        "alternate_authorized": {"type": "boolean"}, "available": {"enum": [true, false, "UNKNOWN"]},
+        "alternate_authorization_ref": {"type": ["string", "null"], "description": "optional: reference to the evidence authorizing the alternate; alternate_authorized=true alone does not authorize"}
       }
     },
     "ack": {
@@ -77,7 +79,10 @@
         "type": "object", "additionalProperties": false, "required": ["ref", "task_id", "revision", "observed_at"],
         "properties": {
           "ref": {"type": "string"}, "task_id": {"type": "string"}, "revision": {"type": "integer"},
-          "observed_at": {"$ref": "#/$defs/ts_or_unknown"}
+          "observed_at": {"$ref": "#/$defs/ts_or_unknown"},
+          "head": {"type": "string", "minLength": 1, "description": "optional: head sha the evidence was read at; a mismatch with target.head is refused"},
+          "repo": {"type": "string", "minLength": 1, "description": "optional: repo the evidence is about; a mismatch with target.repo is refused"},
+          "branch": {"type": "string", "minLength": 1, "description": "optional: branch the evidence is about; a mismatch with target.branch is refused"}
         }
       }
     },

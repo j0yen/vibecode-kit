@@ -31,17 +31,17 @@
   "model": "claude-sonnet-5-5",
   "effort": "medium"
  },
- "state": "RUNNING",
+ "state": "DONE",
  "effect": {
   "state": "applied",
   "no_replay": true,
   "policy": "never replay; resume or consume only"
  },
  "result": {
-  "artifact": null,
+  "artifact": "source-only retained terminal result",
   "event": null,
-  "task_id": null,
-  "revision": null,
+  "task_id": "SYN-100",
+  "revision": 3,
   "reviewed": false
  },
  "consumer": {
@@ -58,7 +58,7 @@
  "observed_at": {
   "envelope": "2026-11-13T06:30:00Z",
   "worker": "2026-11-13T06:29:00Z",
-  "result": "UNKNOWN"
+  "result": "2026-11-13T06:29:00Z"
  },
  "evidence": [
   {

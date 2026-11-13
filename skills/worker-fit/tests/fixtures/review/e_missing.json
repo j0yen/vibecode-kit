@@ -1,0 +1,71 @@
+{
+ "schema": "worker-fit-envelope/1",
+ "parent": "WF-0",
+ "revision": 2,
+ "approved_ac_refs": [
+  "WF-0/AC1"
+ ],
+ "work_shape": "implementation",
+ "source": {
+  "owner": "r7",
+  "identity": "row WF-1",
+  "identity_at": "2026-11-12T10:00:00Z",
+  "revision_at": "2026-11-12T10:00:00Z"
+ },
+ "current_owner": "r7",
+ "owner_reachable": true,
+ "target": {
+  "repo": "acme/app",
+  "branch": "feat/one",
+  "head": "abc123def4567890"
+ },
+ "worker": {
+  "host": "ryzen7",
+  "unit": "w-WF-1.service",
+  "invocation": "inv-1",
+  "child": "pid:77",
+  "session": "sess-WF-1",
+  "account": "acct-a",
+  "model": "claude-sonnet-5-5",
+  "effort": "medium"
+ },
+ "state": "RUNNING",
+ "effect": {
+  "state": "applied",
+  "no_replay": true,
+  "policy": "never replay"
+ },
+ "result": {
+  "artifact": null,
+  "event": null,
+  "task_id": null,
+  "revision": null,
+  "reviewed": false
+ },
+ "consumer": {
+  "named": "verifier-1",
+  "alternate": null,
+  "alternate_authorized": false,
+  "available": true
+ },
+ "ack": {
+  "accepted": false,
+  "evidence": null
+ },
+ "next_action": "read worker status",
+ "observed_at": {
+  "envelope": "2026-11-12T10:30:00Z",
+  "worker": "2026-11-12T10:29:00Z",
+  "result": "UNKNOWN"
+ },
+ "evidence": [
+  {
+   "ref": "unit-read",
+   "task_id": "WF-1",
+   "revision": 2,
+   "observed_at": "2026-11-12T10:29:00Z"
+  }
+ ],
+ "coverage_gaps": [],
+ "declared_complete": false
+}

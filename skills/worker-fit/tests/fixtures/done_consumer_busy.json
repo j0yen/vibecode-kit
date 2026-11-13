@@ -48,7 +48,8 @@
   "named": "ctl",
   "alternate": "hermes",
   "alternate_authorized": true,
-  "available": false
+  "available": false,
+  "alternate_authorization_ref": "source-only grant: hermes authorized for this verification (ledger row ref)"
  },
  "ack": {
   "accepted": false,

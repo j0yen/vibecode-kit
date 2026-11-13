@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Validate worker-fit task envelopes. Standard library only, read-only, no network.
 
-Usage: envelope_validate.py FILE [FILE...]   (FILE = one envelope, a list, or {"envelopes": [...]})
-Exit 0 = no REFUSE finding, 1 = at least one REFUSE finding, 2 = unreadable input.
+Usage: envelope_validate.py [--now TS|system] FILE [FILE...]   (FILE = one envelope, a list, or {"envelopes": [...]})
+Exit 0 = no REFUSE finding, 1 = at least one REFUSE finding, 2 = unreadable input (not JSON, bad --now).
+Observation window: observations older than STALE_WINDOW_SECONDS before the reference now, or dated after it,
+are refused; the reference now is --now (system = host clock) or else the newest observation in the set.
+Credential-shaped values are redacted from every printed line.
 Counts are derived from the enumerated records; a declared total is only compared, never used.
 A pass is a statement about the envelope's shape and internal consistency, not about production.
 """
@@ -11,6 +14,8 @@ import sys
 from datetime import datetime, timezone
 
 UNKNOWN = "UNKNOWN"
+# values that stand for "nothing observed": compared after strip() and lower(), so 'unknown', ' None ', '' all count
+PLACEHOLDERS = {"unknown", "none", "null", "n/a", ""}
 STATES = ["NOT_STARTED", "RUNNING", "DONE", "BLOCKED", "UNKNOWN"]
 SHAPES = ["implementation", "review", "decision", "deterministic", "UNKNOWN"]
 EFFECTS = ["none", "applied", "UNKNOWN"]
@@ -32,11 +37,114 @@ SUB = {
     "ack": {"accepted": "b", "evidence": "sn"},
     "observed_at": {"envelope": "t", "worker": "t", "result": "t"},
 }
-SUB_OPTIONAL = {"source": ["claim"]}
+# optional sub-fields and their kinds: reviewed_by = identity of a reviewer distinct from the worker;
+# alternate_authorization_ref = reference to the evidence that authorises the alternate consumer
+SUB_OPTIONAL = {"source": ["claim"], "result": ["reviewed_by"], "consumer": ["alternate_authorization_ref"]}
+OPTIONAL_KIND = {"result.reviewed_by": "sn", "consumer.alternate_authorization_ref": "sn"}
+EVIDENCE_OPTIONAL = ["head", "repo", "branch"]
 
 
 def finding(code, path, message, severity="REFUSE"):
     return {"code": code, "severity": severity, "path": path, "message": message}
+
+
+def is_unknown(v):
+    """True for None and for any UNKNOWN-equivalent placeholder string (any case, any surrounding whitespace)."""
+    if v is None:
+        return True
+    return isinstance(v, str) and v.strip().lower() in PLACEHOLDERS
+
+
+class DupDict(dict):
+    """dict that remembers which keys the JSON text repeated (json would silently keep the last value)."""
+    dups = ()
+
+
+def _pairs(pairs):
+    d, dups = DupDict(), []
+    for k, v in pairs:
+        if k in d:
+            dups.append(k)
+        d[k] = v
+    d.dups = tuple(dups)
+    return d
+
+
+SECRET_WORDS = ("token", "key", "password", "passwd", "secret", "credential", "authorization")
+REDACTED = "[REDACTED]"
+
+
+def _secret_name(tok):
+    low = tok.lower()
+    return any(w in low for w in SECRET_WORDS)
+
+
+def redact(text):
+    """Replace credential-shaped values (token=, key=, password=, secret=, bearer <x>, sk-... keys) in any output string.
+    Token based on whitespace runs; a name ending in = or : (or followed by a lone = / :) redacts the next token."""
+    if not isinstance(text, str):
+        return text
+    parts, cur, ws = [], "", None
+    for ch in text:
+        if ch.isspace() == ws:
+            cur += ch
+        else:
+            if cur:
+                parts.append(cur)
+            cur, ws = ch, ch.isspace()
+    if cur:
+        parts.append(cur)
+    out, hide_next, prev = [], False, ""
+    for part in parts:
+        if part.isspace():
+            out.append(part)
+            continue
+        low = part.lower()
+        if hide_next and part not in ("=", ":"):
+            out.append(REDACTED)
+            hide_next = False
+        elif prev.lower() == "bearer" or low.startswith("sk-"):
+            out.append(REDACTED)
+        else:
+            sep = next((i for i, c in enumerate(part) if c in "=:" and _secret_name(
+                part[:i].replace("&", " ").replace("?", " ").replace("/", " ").split()[-1:] and
+                part[:i].replace("&", " ").replace("?", " ").replace("/", " ").split()[-1] or "")), -1)
+            if sep >= 0:
+                if sep == len(part) - 1:
+                    out.append(part)
+                    hide_next = True
+                else:
+                    out.append(part[:sep + 1] + REDACTED)
+            elif part in ("=", ":") and _secret_name(prev):
+                out.append(part)
+                hide_next = True
+            else:
+                out.append(part)
+        prev = part
+    return "".join(out)
+
+
+def load_json_text(txt):
+    return json.loads(txt, object_pairs_hook=_pairs)
+
+
+def find_dups(obj, path="$"):
+    """Paths of objects that carry a repeated key; such input is ambiguous and is refused."""
+    out = []
+    if isinstance(obj, dict):
+        if getattr(obj, "dups", ()):
+            out.append("%s (%s)" % (path, ",".join(obj.dups)))
+        for k, v in obj.items():
+            out += find_dups(v, "%s.%s" % (path, k))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            out += find_dups(v, "%s[%d]" % (path, i))
+    return out
+
+
+def load_json_file(path):
+    with open(path) as fh:
+        return load_json_text(fh.read())
 
 
 def parse_ts(v):
@@ -110,6 +218,8 @@ def _shape(d):
         for f in o:
             if f not in spec and f not in SUB_OPTIONAL.get(k, []):
                 out.append(finding("UNKNOWN_KEY", k + "." + f, "field not in schema"))
+            elif (k + "." + f) in OPTIONAL_KIND and not _kind_ok(OPTIONAL_KIND[k + "." + f], o[f]):
+                out.append(finding("SCHEMA_TYPE", k + "." + f, "wrong type or empty"))
     ev = d.get("evidence")
     if "evidence" in d:
         if not isinstance(ev, list):
@@ -125,6 +235,12 @@ def _shape(d):
                         out.append(finding("SCHEMA_MISSING", p + "." + f, "required field missing"))
                     elif not _kind_ok(kind, e[f]):
                         out.append(finding("SCHEMA_TYPE", p + "." + f, "wrong type or empty"))
+                for f in e:
+                    if f in EVIDENCE_OPTIONAL:
+                        if not _kind_ok("s", e[f]):
+                            out.append(finding("SCHEMA_TYPE", p + "." + f, "wrong type or empty"))
+                    elif f not in ("ref", "task_id", "revision", "observed_at"):
+                        out.append(finding("UNKNOWN_KEY", p + "." + f, "field not in schema"))
     return out
 
 
@@ -145,10 +261,41 @@ def _timestamps(d):
     return found, out
 
 
-def validate(d):
-    """Findings for one envelope. Empty list = shape and internal consistency hold."""
+def as_now(now):
+    """datetime (aware, UTC), parsed from an ISO-8601 string with offset; None stays None."""
+    if now is None or isinstance(now, datetime):
+        return now.astimezone(timezone.utc) if isinstance(now, datetime) and now.tzinfo else now
+    t = parse_ts(now)
+    if t is None:
+        raise ValueError("now must be a timestamp, not UNKNOWN")
+    return t
+
+
+def observation_times(d):
+    """Every parseable observation time in one record (tolerant: used before validation to find the newest)."""
+    out = []
+    try:
+        vals = [d["observed_at"][k] for k in ("envelope", "worker", "result")] + [e["observed_at"] for e in d["evidence"]]
+    except (KeyError, TypeError):
+        return out
+    for v in vals:
+        try:
+            t = parse_ts(v)
+        except (ValueError, TypeError):
+            continue
+        if t is not None:
+            out.append(t)
+    return out
+
+
+def validate(d, now=None):
+    """Findings for one envelope. Empty list = shape and internal consistency hold.
+    `now` is the reference clock for the observation window; None = the newest observation in this envelope."""
     if not isinstance(d, dict):
         return [finding("SCHEMA_TYPE", "$", "envelope must be an object")]
+    dups = find_dups(d)
+    if dups:
+        return [finding("DUPLICATE_KEY", "$", "duplicate JSON key makes the record ambiguous: " + "; ".join(dups))]
     out = _shape(d)
     if any(f["code"] in ("SCHEMA_MISSING", "SCHEMA_TYPE", "SCHEMA_ENUM") for f in out):
         return out  # cross-field rules need a well-formed record
@@ -163,6 +310,20 @@ def validate(d):
                 continue
             if t is not None and t < newest:
                 out.append(finding("STALE_EVIDENCE", p, "observed before the cited source identity/revision"))
+    ref_now = as_now(now) or max(observation_times(d), default=None)
+    if ref_now is not None:
+        checked = [("observed_at.envelope", True), ("observed_at.worker", d["state"] != "DONE"),
+                   ("observed_at.result", False)]
+        checked += [("evidence[%d].observed_at" % i, d["state"] != "DONE") for i in range(len(d["evidence"]))]
+        for p, stale_applies in checked:
+            t = ts.get(p)
+            if t is None:
+                continue
+            if (t - ref_now).total_seconds() > FUTURE_SKEW_SECONDS:
+                out.append(finding("FUTURE_TIMESTAMP", p, "observation is dated after the reference now (%s)" % ref_now.isoformat()))
+            elif stale_applies and (ref_now - t).total_seconds() > STALE_WINDOW_SECONDS:
+                out.append(finding("STALE_EVIDENCE", p, "observed more than %d s before the reference now (%s)" %
+                                   (STALE_WINDOW_SECONDS, ref_now.isoformat())))
     tid, rev = d["task_id"], d["revision"]
     for i, e in enumerate(d["evidence"]):
         if e["task_id"] != tid:
@@ -170,19 +331,34 @@ def validate(d):
         elif e["revision"] != rev:
             out.append(finding("STALE_REVISION", "evidence[%d].revision" % i,
                                "evidence cites rev %d, envelope is rev %d" % (e["revision"], rev)))
+        tg = d["target"]
+        if not is_unknown(tg["head"]):
+            for h in evidence_heads(e):
+                if not same_head(h, tg["head"]):
+                    out.append(finding("WRONG_TASK", "evidence[%d].head" % i,
+                                       "evidence names head %s, target.head is %s" % (h, tg["head"])))
+        if "repo" in e and not is_unknown(tg["repo"]) and norm_repo(e["repo"]) != norm_repo(tg["repo"]):
+            out.append(finding("WRONG_TASK", "evidence[%d].repo" % i, "evidence is for repo " + e["repo"]))
+        if "branch" in e and not is_unknown(tg["branch"]) and norm_branch(e["branch"]) != norm_branch(tg["branch"]):
+            out.append(finding("WRONG_TASK", "evidence[%d].branch" % i, "evidence is for branch " + e["branch"]))
     r, w, st = d["result"], d["worker"], d["state"]
     if r["task_id"] is not None and r["task_id"] != tid:
         out.append(finding("WRONG_TASK", "result.task_id", "result is for task " + r["task_id"]))
     elif r["revision"] is not None and r["revision"] != rev:
         out.append(finding("STALE_REVISION", "result.revision", "result cites rev %d, envelope is rev %d" % (r["revision"], rev)))
     if st == "RUNNING":
-        missing = [k for k in ("host", "unit", "child") if w[k] == UNKNOWN]
+        missing = [k for k in ("host", "unit", "child") if is_unknown(w[k])]
         if missing or d["observed_at"]["worker"] == UNKNOWN:
             out.append(finding("RUNNING_NO_EVIDENCE", "worker",
                                "RUNNING needs observed host+unit+child (missing: %s)" %
                                ",".join(missing + (["observed_at.worker"] if d["observed_at"]["worker"] == UNKNOWN else []))))
+        if not d["evidence"]:
+            out.append(finding("RUNNING_NO_EVIDENCE", "evidence", "RUNNING needs at least one evidence entry; the list is empty"))
+    if st == "NOT_STARTED" and not (is_unknown(w["unit"]) and is_unknown(w["child"])):
+        out.append(finding("NOT_STARTED_WITH_WORKER", "worker",
+                           "NOT_STARTED carries an observed unit or child: contradictory; a started worker is not an unowned slice"))
     if st == "DONE":
-        if not (r["artifact"] or r["event"]):
+        if is_unknown(r["artifact"]) and is_unknown(r["event"]):
             out.append(finding("DONE_NO_ARTIFACT", "result", "DONE needs a durable result artifact or event"))
         elif r["task_id"] is None or r["revision"] is None:
             out.append(finding("RESULT_UNBOUND", "result", "result does not state which task and revision it answers"))
@@ -197,11 +373,53 @@ def validate(d):
                "source.identity_at": d["source"]["identity_at"], "source.revision_at": d["source"]["revision_at"]}
         req.update({"target." + k: v for k, v in d["target"].items()})
         req.update({"worker." + k: v for k, v in w.items()})
-        unk = sorted(k for k, v in req.items() if v == UNKNOWN)
-        if unk or d["coverage_gaps"]:
+        req["result.reviewed"] = r["reviewed"]
+        unk = sorted(k for k, v in req.items() if is_unknown(v))
+        if unk or d["coverage_gaps"] or st != "DONE":
             out.append(finding("FALSE_COMPLETE", "declared_complete",
-                               "declared complete with UNKNOWN: %s; coverage gaps listed: %d" % (",".join(unk) or "-", len(d["coverage_gaps"]))))
+                               "declared complete with state %s and UNKNOWN: %s; coverage gaps listed: %d" %
+                               (st, ",".join(unk) or "-", len(d["coverage_gaps"]))))
     return out
+
+
+# Observation window: an envelope / worker / evidence observation older than this before the reference "now",
+# or dated more than FUTURE_SKEW_SECONDS after it, is refused. The reference "now" is the caller's explicit
+# `now` (CLI: --now TS, or --now system for the host clock) or, when none is given, the newest observation in the set.
+STALE_WINDOW_SECONDS = 24 * 3600
+FUTURE_SKEW_SECONDS = 300
+
+HEX = "0123456789abcdef"
+
+
+def evidence_heads(e):
+    """Head shas an evidence entry names: its head field and any 'head=<hex>' / 'head:<hex>' in its ref."""
+    heads = [e["head"]] if "head" in e else []
+    low, i = e["ref"].lower(), 0
+    while True:
+        i = low.find("head", i)
+        if i < 0:
+            return heads
+        i += 4
+        if low[i:i + 1] in ("=", ":"):
+            j = i + 1
+            while j < len(low) and low[j] in HEX:
+                j += 1
+            if j - (i + 1) >= 7:
+                heads.append(low[i + 1:j])
+
+
+def same_head(a, b):
+    a, b = a.strip().lower(), b.strip().lower()
+    return a == b or (min(len(a), len(b)) >= 7 and (a.startswith(b) or b.startswith(a)))
+
+
+def norm_repo(v):
+    return v.strip().lower()
+
+
+def norm_branch(v):
+    v = v.strip()
+    return v[len("refs/heads/"):] if v.startswith("refs/heads/") else v
 
 
 def _records(obj):
@@ -212,13 +430,21 @@ def _records(obj):
     return [obj], None
 
 
-def validate_set(obj):
+def validate_set(obj, now=None):
     """Per-envelope findings plus set rules: duplicate task, conflicting live target, derived count."""
     recs, declared = _records(obj)
     if not isinstance(recs, list):
         return {"derived_count": 0, "findings_by_index": [], "set_findings": [finding("SCHEMA_TYPE", "envelopes", "must be a list")]}
-    by_idx = [validate(r) for r in recs]
+    ref_now = as_now(now)
+    if ref_now is None:
+        ref_now = max((t for r in recs if isinstance(r, dict) for t in observation_times(r)), default=None)
+    by_idx = [validate(r, ref_now) for r in recs]
     sets = []
+    if isinstance(obj, dict) and getattr(obj, "dups", ()):
+        f = finding("DUPLICATE_KEY", "$", "duplicate JSON key in the set wrapper: " + ",".join(obj.dups))
+        sets.append(f)
+        for fs in by_idx:
+            fs.append(f)
     wf = [r for r in recs if isinstance(r, dict)]
     ids = {}
     for i, r in enumerate(recs):
@@ -228,15 +454,17 @@ def validate_set(obj):
         if len(idx) > 1:
             f = finding("DUPLICATE_TASK", "task_id", "task %s appears %d times" % (tid, len(idx)))
             sets.append(f)
-            for i in idx:
+            for i in idx[1:]:  # the first record keeps its place; only newcomers are refused
                 by_idx[i].append(f)
     live = {}
     for i, r in enumerate(recs):
-        if not (isinstance(r, dict) and isinstance(r.get("target"), dict) and r.get("state") in ("RUNNING", "NOT_STARTED")):
+        if not (isinstance(r, dict) and isinstance(r.get("task_id"), str) and isinstance(r.get("target"), dict)
+                and r.get("state") in ("RUNNING", "NOT_STARTED")):
             continue
         t = r["target"]
-        if isinstance(t.get("repo"), str) and isinstance(t.get("branch"), str) and UNKNOWN not in (t["repo"], t["branch"]):
-            live.setdefault((t["repo"], t["branch"]), []).append(i)
+        if isinstance(t.get("repo"), str) and isinstance(t.get("branch"), str) \
+                and not is_unknown(t["repo"]) and not is_unknown(t["branch"]):
+            live.setdefault((norm_repo(t["repo"]), norm_branch(t["branch"])), []).append(i)
     for key, idx in live.items():
         tasks = {recs[i]["task_id"] for i in idx}
         if len(tasks) < 2:
@@ -253,26 +481,44 @@ def validate_set(obj):
     return {"derived_count": len(recs), "findings_by_index": by_idx, "set_findings": sets}
 
 
+def parse_args(argv):
+    """(paths, now) where --now TS sets the reference clock and --now system uses the host clock; ValueError if bad."""
+    paths, now, it = [], None, iter(argv)
+    for a in it:
+        if a == "--now":
+            v = next(it, None)
+            if v is None:
+                raise ValueError("--now needs a timestamp or 'system'")
+            now = datetime.now(timezone.utc) if v == "system" else as_now(v)
+        else:
+            paths.append(a)
+    return paths, now
+
+
 def main(argv):
+    try:
+        argv, now = parse_args(argv)
+    except ValueError as e:
+        print("UNREADABLE --now: %s" % e)
+        return 2
     if not argv:
         print(__doc__)
         return 2
     rc = 0
     for path in argv:
         try:
-            with open(path) as fh:
-                obj = json.load(fh)
+            obj = load_json_file(path)
         except (OSError, ValueError) as e:
-            print("UNREADABLE %s: %s" % (path, e))
+            print(redact("UNREADABLE %s: %s" % (path, e)))
             rc = max(rc, 2)
             continue
-        res = validate_set(obj)
+        res = validate_set(obj, now)
         print("%s: %d envelope(s) enumerated" % (path, res["derived_count"]))
         everything = [(i, f) for i, fs in enumerate(res["findings_by_index"]) for f in fs]
         everything += [(None, f) for f in res["set_findings"]
                        if not any(f is g for _, g in everything)]
         for i, f in everything:
-            print("%s %s [%s] %s: %s" % (f["severity"], f["code"], "set" if i is None else i, f["path"], f["message"]))
+            print(redact("%s %s [%s] %s: %s" % (f["severity"], f["code"], "set" if i is None else i, f["path"], f["message"])))
         if any(f["severity"] == "REFUSE" for _, f in everything):
             rc = max(rc, 1)
         elif not everything:
