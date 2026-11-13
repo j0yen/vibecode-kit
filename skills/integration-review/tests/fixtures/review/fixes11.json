@@ -1,0 +1,229 @@
+{
+ "_note": "synthetic values; source-only fixture for re-review 11 D1-D5 (class closure), not production behaviour",
+ "hex": "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+ "other_hex": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807",
+ "digit_hex": "1234567",
+ "non_identifying_commits": [
+  "0000000000000000000000000000000000000000",
+  "0000000000000000000000000000000000000000000000000000000000000000",
+  "0000000",
+  "0x0000000",
+  "commit 0000000000000000000000000000000000000000",
+  "sha:0000000000000000000000000000000000000000",
+  "g0000000",
+  "HEAD",
+  "head",
+  "main",
+  "master",
+  "latest",
+  "trunk",
+  "tip",
+  "develop",
+  "default",
+  "origin/main",
+  "origin/HEAD",
+  "upstream/master",
+  "refs/heads/main",
+  "refs/heads/develop",
+  "refs/remotes/origin/main",
+  "FETCH_HEAD",
+  "ORIG_HEAD",
+  "HEAD~1",
+  "HEAD~12",
+  "HEAD^",
+  "main~3",
+  "the latest commit",
+  "current HEAD",
+  "commit: main",
+  "git:HEAD"
+ ],
+ "specific_names_distinct_from_sha": [
+  "release-7",
+  "v1.0",
+  "refs/tags/v1",
+  "feature/login",
+  "main-fix-12",
+  "mainline",
+  "headless-v2",
+  "hotfix_abc1234_a"
+ ],
+ "specific_name_pairs": [
+  [
+   "release-7",
+   "release-8"
+  ],
+  [
+   "refs/tags/v1",
+   "refs/tags/v2"
+  ],
+  [
+   "feature/login",
+   "feature/logout"
+  ],
+  [
+   "main-fix-12",
+   "main-fix-13"
+  ],
+  [
+   "mainline",
+   "maintenance"
+  ],
+  [
+   "v1.0",
+   "v1.1"
+  ]
+ ],
+ "digit_spelled_same": [
+  "g1234567",
+  "1234567 (HEAD)",
+  "commit 1234567 main",
+  "(1234567)",
+  "0x1234567",
+  "HEAD@{1234567}",
+  "commit-1234567",
+  "git+https://h/o/r@1234567",
+  "tag v1.0 @ 1234567",
+  "sha1:1234567",
+  "1234567 (1234567)",
+  "[1234567]",
+  "rev-1234567"
+ ],
+ "digit_long_spelled_same": [
+  "v1.0-3-g12345678",
+  "12345678 (HEAD)",
+  "g12345678",
+  "0x12345678"
+ ],
+ "two_hex_texts": [
+  "merge a1b2c3d4 and 1111111111111111111111111111111111111111",
+  "between 1234567 and 7654321",
+  "abc1234 abc1235",
+  "1234567 and 7654321 and a1b2c3d4"
+ ],
+ "branch_name_pairs": [
+  [
+   "feature/abc1234-login",
+   "bugfix/abc1234-logout"
+  ],
+  [
+   "null-handling-fix",
+   "null-handling-fix2"
+  ],
+  [
+   "pending-release",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "null-handling-fix",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "feature/1234567-login",
+   "feature/1234567-logout"
+  ],
+  [
+   "hotfix_abc1234_a",
+   "hotfix_abc1234_b"
+  ],
+  [
+   "stub-release",
+   "dummy-release"
+  ],
+  [
+   "fake-branch",
+   "mock-branch"
+  ],
+  [
+   "pr/abc1234",
+   "abc1234fffffffffffffffffffffffffffffffff"
+  ],
+  [
+   "fix-abc1234",
+   "fix-abc1235"
+  ]
+ ],
+ "call_dotted_evidence": [
+  "status()",
+  "verify()",
+  "check()",
+  "result()",
+  "value()",
+  "review()",
+  "is_null()",
+  "check_null()",
+  "is_none()",
+  "check_value()",
+  "check_pending()",
+  "a.status",
+  "data.value",
+  "check.status",
+  "result::value",
+  "is.null",
+  "Status::Unknown",
+  "self.result",
+  "result.value()",
+  "state.status.value",
+  "Review::check()",
+  "status.json",
+  "unknown.log",
+  "lib/unknown",
+  "docs/pending",
+  "src/status"
+ ],
+ "call_dotted_non_evidence": [
+  "unknown()",
+  "null()",
+  "none()",
+  "tbd()",
+  "unknown.tbd",
+  "null::nil",
+  "none.pending",
+  "n.a",
+  "unknown/tbd",
+  "n/a",
+  "pending::tbd"
+ ],
+ "incidental_token_non_evidence": [
+  "unknown e.g. later",
+  "status: unknown b/c lost",
+  "status: unknown (owner @bob)",
+  "status: unknown, see foo.bar",
+  "unknown, ask bob/alice",
+  "tbd i.e. pending",
+  "pending w/ owner",
+  "unknown, ping @alice",
+  "status: unknown a.k.a. later",
+  "unknown, see a/b",
+  "tbc, ask bob/ann",
+  "evidence: unknown f()",
+  "status: unknown, see https://x.org",
+  "unknown, see g()",
+  "tbd, ask svc@x",
+  "unknown, see docs.example.com",
+  "tbd, see x.org"
+ ],
+ "located_prose_evidence": [
+  "stub gen/stub.py:7",
+  "draft parse.rs:9",
+  "see unknown::parse",
+  "stub fix() at x.py:2",
+  "unknown, see gen.py",
+  "draft release pin emit@v2",
+  "unknown, see https://example.org/issue/12",
+  "unknown handler in src/lib/emit.rs",
+  "stub generator at src/gen/stub.rs",
+  "mock server pkg.mock.Server",
+  "unknown opcode handled in lib/parser",
+  "null case in util.null_case",
+  "draft handler at svc.handler.run",
+  "see unknown handler in src/handler"
+ ],
+ "url_spelled_same": [
+  "https://example.org/o/r/commit/3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+  "https://example.org/o/r/commits/3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+  "https://example.org/o/r/tree/3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+ ],
+ "url_digit_spelled_same": [
+  "https://example.org/o/r/commit/1234567"
+ ]
+}

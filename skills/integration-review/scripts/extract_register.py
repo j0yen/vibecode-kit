@@ -3,7 +3,7 @@
 
 Evidence fidelity rules (nothing is invented; every unstated fact stays UNKNOWN or missing):
 - source identity is parsed only from the forms the row states, matched in full (no trailing newline or
-  qualifier text): "path+sha256:<path> <64 hex>" and "commit <40 hex>"; anything else is version UNKNOWN, available false. The raw string is kept.
+  qualifier text): "path+sha256:<path> <64 hex>" and "commit <40 hex>" (an all-zero sha names no commit: UNKNOWN); anything else is version UNKNOWN, available false. The raw string is kept.
 - a producer/consumer/caller/adapter side is kept only when the row's own evidence states it as
   "side=<role>" (not negated: "not side=producer" and "side=producer failed" are no mark) matching the claimed role and states no other side; otherwise (no mark, or contradictory
   marks) role is UNKNOWN and the claim is kept in claimed_roles.
@@ -85,7 +85,7 @@ def parse_identity(row):
         si.update(path=m.group(1), sha256=m.group(2), version=m.group(2), available=True)
     else:
         m = COMMIT.fullmatch(rawtxt)
-        if m:
+        if m and _N.commit_id(m.group(1)) is not None:     # the all-zero sha names no commit: stated as UNKNOWN, as the validator reads it
             si.update(commit=m.group(1), version=m.group(1), available=True)
     if _s(row.get("captured_at")):
         si["captured_at"] = row["captured_at"]

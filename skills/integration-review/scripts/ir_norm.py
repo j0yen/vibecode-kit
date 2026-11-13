@@ -158,25 +158,91 @@ _COMMIT_NOISE = frozenset("commit sha id rev revision hash oid git ref no number
 # A label before a commit ("sha:", "sha1:", "sha-256:", "commit ", "rev ", "hash=", "git:" ...); only the sha forms may be
 # followed by "-" ("sha256-<hex>"): "git-2.40" and "rev-1" are names, not a label and a value.
 _COMMIT_LABEL = re.compile(r"^(?:(?:sha-?(?:1|256)?)[\s:=#-]+|(?:commit(?:\s*id)?|rev(?:ision)?|hash|git|oid)[\s:=#]+)", re.I)
-_HEXRUN = re.compile(r"(?<![0-9a-f])[0-9a-f]{7,64}(?![0-9a-f])")
+# A sha written inside decoration: the hex (7-64 digits) is a token of its own, optionally glued to 0x, g (git describe), or
+# label-. A hex glued to a name by - / _ . ("feature/abc1234-login", "fix-abc1234") is part of that name, never a commit.
+_HEXTOK = re.compile(r"(?:(?<![\w/.-])(?:0x|g|(?:commit|rev|revision|sha|sha1|sha256|hash|oid|git|id)-)?|(?<=\d-)g|(?<=/commit/)|(?<=/commits/)|(?<=/tree/))"
+                     r"([0-9a-f]{7,64})(?![\w/-]|\.\w)")
 _NA = re.compile(r"\bn\s*[./]\s*a\b\.?")
 _SPACED_LETTERS = re.compile(r"\b(?:[a-z] )+[a-z]\b")
+# Non-identifying commits: the null object (all zeros) and the generic moving pointers. They say that no particular commit is
+# named, so they are unstated, as UNKNOWN is. A pointer may carry a remote or refs/heads prefix, "the/current/latest" and a
+# trailing "commit/branch", and ~N, ^N or @{..} suffixes. A specific name (a tag, a release, feature/login) is not one.
+FLOATING_WORDS = ("HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD", "main", "master", "trunk", "develop", "development",
+                  "default", "latest", "tip", "current")
+_FLOATING = re.compile(r"(?:(?:origin|upstream)/|(?:refs/)?(?:heads|remotes/[^/\s]+)/)?(?:(?:the|current|latest) )*(?:%s)"
+                       r"(?: commit| branch| ref)?(?:[~^]\d*|@\{[^}]*\})*" % "|".join(w.lower() for w in FLOATING_WORDS))
+_POINTER_WORDS = frozenset(w.lower() for w in FLOATING_WORDS)
+_NULL_SHA = re.compile(r"0{7,64}")
 # A number or version is a concrete anchor only after a content word ("line 12"): "#12", "2026-11-12", "v1" beside a
-# placeholder word are decoration. A path, URL, dotted name, "::", call or "@" token is an anchor unless every word in it is
-# a placeholder or filler word ("unknown/tbd", "n.a").
-_STRONG = re.compile(r"[/\\@]|[a-z0-9]\.[a-z0-9]|::|\w\(\)")
+# placeholder word are decoration. Code tokens are classified by _token_kind().
 _WEAK = re.compile(r"[0-9\"'`=#]")
 _NUMBER = re.compile(r"[#v]?[0-9][0-9:.,/-]*")
+_TOK_EDGE = " \t\r\n.,;:!'\"`()[]{}<>*_~|=?-"
+_CALL = re.compile(r"[a-z_][\w.]*\([^()\s]*\)")
+_SCOPE = re.compile(r"\w::\w")
+_PIN = re.compile(r"\w@[\w.{~^-]*[0-9]")
+_LINE_SUFFIX = re.compile(r"(?::\d+(?:-\d+)?|#l\d+(?:-l?\d+)?)$")
+_DOTTED = re.compile(r"[a-z_]\w*(?:\.[a-z_]\w*)+")
+_TLD = frozenset("com org net io dev edu gov co uk de fr app ai".split())
+_DIRS = frozenset("src lib bin pkg app apps cmd internal include test tests spec docs doc scripts tools util utils gen generated "
+                  "config configs conf svc services handlers vendor build crates mod modules".split())
+_EXT = frozenset("py rs js ts tsx jsx go java kt c h cc cpp hpp rb sh bash md rst txt log json jsonl yaml yml toml ini cfg conf "
+                 "env sql html css scss proto xml csv tsv lock gradle php cs swift scala ex exs erl hs lua pl".split())
+
+
+def _token_kind(tok):
+    """What a whitespace-separated token of a ref is, as code: "call" (f(), a.b()), "scope" (a::b), "url" (a://b), "pin"
+    (name@version), "file" (a dotted name with a known file extension or a line suffix), "path" (a/b/c, or a/b.ext, or a
+    path with a line suffix), "module" (a.b.c with 3+ parts that is no host name, or a name with "_"), "slash" (lib/unknown) or "dotted" (a.b), the last two anchors only when lone, or None (prose, an abbreviation such as b/c / w/o,
+    a mention such as @bob, an alternative such as unknown/tbd)."""
+    b = tok.strip(_TOK_EDGE)
+    if re.search(r"\w://[^/\s]+/\S", b):
+        return "url"                                 # a URL with a path; a bare site root names no location
+    if _CALL.search(tok):
+        return "call"
+    if _SCOPE.search(b):
+        return "scope"
+    if _PIN.search(b):
+        return "pin"
+    base = _LINE_SUFFIX.sub("", b)
+    line = base != b
+    base = re.sub(r"[#?].*$", "", base)             # a fragment or query on a path ("docs/x.md#pending")
+    if "/" in base:
+        segs = [x for x in base.split("/") if x]
+        last = segs[-1] if segs else ""
+        if len(segs) >= 3 or line or ("." in last and last.rsplit(".", 1)[1] in _EXT):
+            return "path"
+        if len(segs) == 2 and segs[0] in _DIRS and len(segs[1]) >= 2:
+            return "path"                            # a conventional directory first: lib/parser, src/handler
+        return "slash" if len(segs) == 2 and all(len(x) >= 2 for x in segs) else None   # lib/unknown; not b/c, w/o, i/o
+    if _DOTTED.fullmatch(base):
+        segs = base.split(".")
+        if line or segs[-1] in _EXT:
+            return "file"
+        if (len(segs) >= 3 and segs[-1] not in _TLD) or any("_" in x for x in segs):
+            return "module"                          # pkg.mock.Server, util.null_case; a host name (a.example.com) is not one
+        return "dotted"                              # a.b, e.g., i.e.: never precise beside a placeholder
+    return None
 
 
 def _is_placeholder_commit(t):
-    """A commit text with no digit that only says the commit is not known: any placeholder word, or nothing but
-    placeholder, filler and label words ("unknown commit", "tbc", "not recorded", "no commit", "pending")."""
+    """A commit text with no digit that only says the commit is not known: nothing but placeholder, filler and label words
+    ("unknown commit", "tbc", "not recorded", "no commit", "pending"); a phrase (it holds a blank, which no tag or branch name
+    can) is also unstated when it holds any placeholder word ("pending approval from bob"). A name without a blank
+    ("pending-release", "null-handling-fix") is a commit of its own unless all its words are placeholder words."""
     if any(c.isdigit() for c in t):
         return False
     words = re.findall(r"[a-z]+", t)
-    return bool(words) and (any(w in _NE_PLACEHOLDER for w in words)
-                            or all(w in _NE_FILLER or w in _COMMIT_NOISE for w in words))
+    if not words:
+        return False
+    if all(w in _NE_FILLER or w in _NE_PLACEHOLDER or w in _COMMIT_NOISE or w in _POINTER_WORDS for w in words):
+        return True
+    return bool(re.search(r"\s", t)) and any(w in _NE_PLACEHOLDER for w in words)
+
+
+def _non_identifying(t):
+    """The null object (an all-zero sha) or a generic moving pointer (see FLOATING_WORDS): names no particular commit."""
+    return bool(_NULL_SHA.fullmatch(t) or _FLOATING.fullmatch(t))
 
 
 def commit_id(c):
@@ -186,34 +252,53 @@ def commit_id(c):
 
 @lru_cache(maxsize=65536)
 def _commit_id(c):
-    """Canonical spelling of a commit, or None when the commit is UNSTATED. A value that is not a string, is an
-    UNKNOWN-equivalent (is_unknown) or only says it is not known (a placeholder wording such as "unknown (pending)", "tbc",
-    "not recorded", "no commit") is unstated, as an unstated repo is. Otherwise NFKC folding, removal
-    of format/control characters and surrounding blanks, lower case, a leading label ("sha:", "sha1:", "sha256:",
-    "commit ", "rev ", "hash ", "git:" ...) and edge punctuation removed; when what remains is not one bare hex but holds
-    exactly one hex of 7+ digits (letters and a digit, so "0x<hex>", "g<hex>", "<hex> (HEAD)", "HEAD@{<hex>}", a URL ending
-    in @<hex>, "commit-<hex>" and a trailing ref name), that hex is the commit."""
+    """THE ONE IDENTITY RULE. Canonical spelling of a commit, or None when the commit is UNSTATED (non-identifying). A commit
+    text identifies a commit when it is a sha (7+ hex digits, not all zero), a sha written inside decoration, or a name
+    specific to one commit (a tag, a release, a branch such as feature/login); two spellings of one sha are one commit, and a
+    name is only itself. It is unstated, as an unstated repo is, when it names no particular commit: not a string, an
+    UNKNOWN-equivalent (is_unknown), a placeholder wording ("unknown (pending)", "tbc", "not recorded", "no commit"; see
+    _is_placeholder_commit), the null object (all zeros), or a generic moving pointer (HEAD, main, origin/main, HEAD~1 ...;
+    FLOATING_WORDS). Spelling: NFKC folding, removal of format/control characters and surrounding blanks, lower case, a
+    leading label ("sha:", "sha1:", "sha256:", "commit ", "rev ", "hash ", "git:" ...) and edge punctuation removed; when what
+    remains is not one bare hex but holds exactly one hex token of 7+ digits with a digit (a hex that is a token of its own, or
+    glued to 0x, g or a label-: "0x<hex>", "g<hex>", "<hex> (HEAD)", "HEAD@{<hex>}", a URL ending in @<hex>,
+    "commit-<hex>", "v1.0-3-g<hex>", a trailing ref name; all-digit hexes included), that hex is the commit. A hex glued to a
+    name ("feature/abc1234-login") is part of that name; text naming two different hexes is its own identity."""
     if is_unknown(c):
         return None
     t = _COMMIT_LABEL.sub("", fold(c)).strip(_EDGE)
     t = re.sub(r"^0x(?=[0-9a-f]{7})", "", t)
     if not re.fullmatch(r"[0-9a-f]{7,64}", t):
-        hexes = {h for h in _HEXRUN.findall(t) if any(x.isdigit() for x in h) and any(x in "abcdef" for x in h)}
+        hexes = {m.group(1) for m in _HEXTOK.finditer(t) if any(x.isdigit() for x in m.group(1))}
         if len(hexes) == 1:
             t = hexes.pop()
-    if is_unknown(t) or _is_placeholder_commit(t):
+    if is_unknown(t) or _is_placeholder_commit(t) or _non_identifying(t):
         return None
     return t
 
 
-def _anchored(tokens, words):
-    """True when a token of the ref is a concrete anchor (see _STRONG / _NUMBER above)."""
-    prev = None
-    for tok in tokens:
-        core = tok.strip(_EDGE + "?-")
-        if _STRONG.search(core) and any(w not in _NE_PLACEHOLDER and w not in _NE_FILLER and not w.isdigit()
-                                         for w in re.findall(r"[a-z0-9]+", core)):
+def _anchored(t):
+    """True when the (canonical) ref text holds a concrete anchor. A LONE code token (every token with a letter is a code
+    token, see _token_kind: status(), a.status, Status::Unknown, check_null()) is a location unless all its words are placeholder
+    words (unknown(), null::nil). Beside plain prose words a code token anchors only when it is precise (a call, ::, URL,
+    name@version, a file, a path; never a bare dotted name or two-part slash name, an abbreviation, a mention or an alternative) and holds a word
+    of 2+ letters that is neither a placeholder nor a filler word (src/unknown/x.py). A number after a content word ("line 12") anchors."""
+    toks = t.split()
+    kinds = [(tok, _token_kind(tok)) for tok in toks]
+    lone = any(k for _, k in kinds) and not any(k is None and re.search(r"[a-z]", tok) for tok, k in kinds)
+    for tok, k in kinds:
+        if k is None:
+            continue
+        ws = re.findall(r"[a-z0-9]+", tok)
+        if lone:
+            if any(w not in _NE_PLACEHOLDER and not w.isdigit() for w in ws):
+                return True
+        elif k not in ("dotted", "slash") and any(len(w) > 1 and w not in _NE_PLACEHOLDER and w not in _NE_FILLER and not w.isdigit()
+                                                  for w in ws):
             return True
+    prev = None
+    for tok in toks:
+        core = tok.strip(_EDGE + "?-")
         if _NUMBER.fullmatch(core) and prev is not None and prev not in _NE_PLACEHOLDER and prev not in _NE_FILLER \
                 and len(prev) > 1:
             return True
@@ -238,7 +323,7 @@ def non_evidence(ref):
     if not words:
         return False
     ph = any(w in _NE_PLACEHOLDER for w in words)
-    if _anchored(t.split(), words) or (not ph and _WEAK.search(t)):
+    if _anchored(t) or (not ph and _WEAK.search(t)):
         return False
     if all(w in _NE_PLACEHOLDER or w in _NE_FILLER for w in words):
         return True

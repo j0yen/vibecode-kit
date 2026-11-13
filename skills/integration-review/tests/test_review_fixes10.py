@@ -62,9 +62,10 @@ class TestD2UnstatedAndAlternateCommits(unittest.TestCase):
         self.assertEqual(ir_norm.commit_id("sha256-" + H), H)
         self.assertEqual(ir_norm.commit_id("sha-1:" + H), H)
 
-    def test_branch_names_are_stated_commits_of_their_own(self):
+    def test_floating_refs_are_unstated_commits_not_commits_of_their_own(self):
+        # re-expected by re-review 11 D1 (was: stated commits of their own): a moving pointer proves nothing about the commit
         for c in ("HEAD", "main", "master", "latest"):
-            self.assertEqual(ir_norm.commit_id(c), c.lower())
+            self.assertIsNone(ir_norm.commit_id(c))
 
     def test_cli_refuses_complete_naming_both_records(self):
         for c in ("unknown (pending)", "tbc", "not recorded", "HEAD@{" + H + "}"):

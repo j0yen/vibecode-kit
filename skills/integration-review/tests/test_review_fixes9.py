@@ -150,8 +150,9 @@ class TestD1PlaceholderAndAlternateCommitSpellings(unittest.TestCase):
         self.assertEqual(bad, 0)
 
     def test_grouping_with_spelling_variants_stays_fast(self):
+        # "+ 1" below: group 0 was the all-zero sha by arithmetic accident; the null sha is unstated (re-review 11 D1, fixture correction)
         spell = ("%s", "sha:%s", "commit %s", "​%s")
-        recs = [hand(f"r{i}", source_identity=srcid("o/r", spell[i % 4] % ("%040x" % (i // 4)))) for i in range(3000)]
+        recs = [hand(f"r{i}", source_identity=srcid("o/r", spell[i % 4] % ("%040x" % (i // 4 + 1)))) for i in range(3000)]
         t = time.time()
         groups = rv._duplicate_groups(recs)
         self.assertLess(time.time() - t, 15)
