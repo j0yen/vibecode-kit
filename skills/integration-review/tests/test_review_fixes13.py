@@ -15,6 +15,7 @@ import json
 import re
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -106,6 +107,11 @@ class TestY3StateWordBesideOnlyANumber(unittest.TestCase):
         for r in FX["own_state_number_non_evidence"]:
             self.assertTrue(ir_norm.non_evidence(r), r)
 
+    def test_a_zero_count_of_a_state_word_is_a_positive_statement(self):
+        """"0 pending", "zero missing" are not state words (regression found by the earlier neg9 probe set, row e30)."""
+        for r in FX["zero_count_of_a_state_word_is_evidence"]:
+            self.assertFalse(ir_norm.non_evidence(r), r)
+
     def test_the_pinned_location_tolerance_stays(self):
         for r in FX["ev_state_pinned_location_evidence"]:
             self.assertFalse(ir_norm.non_evidence(r), r)
@@ -115,6 +121,20 @@ class TestY3StateWordBesideOnlyANumber(unittest.TestCase):
             if r == "pending PR 12 merged":
                 continue                      # R4, the stated refusal-side residual
             self.assertFalse(ir_norm.non_evidence(r), r)
+
+    def test_a_long_run_of_state_word_and_counts_is_read_in_linear_time(self):
+        """A quadratic re-scan of the text per number ("unknown 3 passed 3 passed ...": found by the strict ReDoS probe) costs 64x for 8x
+        the length; a linear pass costs 8x. The bound (below 24x for 8x the length, best of three) is coarse on purpose."""
+        def best(n):
+            text = "unknown " + "3 passed " * n
+            out = []
+            for _ in range(3):
+                s = time.process_time()
+                ir_norm.non_evidence(text)
+                out.append(time.process_time() - s)
+            return min(out)
+        small, large = best(2000), best(16000)
+        self.assertLess(large, 24 * max(small, 0.002), (small, large))
 
     def test_skill_states_the_rule(self):
         text = (SK / "SKILL.md").read_text()

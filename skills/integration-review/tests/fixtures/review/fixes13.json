@@ -250,5 +250,13 @@
   "status 200 at line 3",
   "missing-field check at line 12",
   "parser column 8"
+ ],
+ "zero_count_of_a_state_word_is_evidence": [
+  "12 passed, 0 failed, 0 skipped, 0 pending",
+  "7 passed, zero missing",
+  "tests: 5 passed, 0 pending",
+  "checked: 0 skipped, 5 passed",
+  "9 passed, 0 missing",
+  "3 passed; 0 pending items left"
  ]
 }

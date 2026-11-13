@@ -420,7 +420,9 @@ def _anchored(t):
                                                   for w in ws):
             return True
     prev = None
-    stated = bool(_PH_PHRASE.search(t)) or any(w in _NE_STATE for w in re.findall(r"[a-z]+", t))
+    content = None                         # _has_content(t), computed once and only when a number beside a state word needs it
+    # a zero count of a failure or pending word ("0 pending", "0 missing") is a positive statement, never a state word
+    stated = bool(_PH_PHRASE.search(t)) or any(w in _NE_STATE for w in re.findall(r"[a-z]+", _ZERO_FAIL.sub(" ", t)))
     for i, tok in enumerate(toks):
         core = tok.strip(_EDGE + "?-")
         if _NUMBER.fullmatch(core):
@@ -428,8 +430,11 @@ def _anchored(t):
             if stated:                      # a state word beside a number: the pinned location nouns anchor it; a result or another
                 if prev in _STATE_LOCATION:  # location only with a content word of its own ("null handling test passes: 3 passed")
                     return True
-                if (prev in _LOCATION_NOUNS or prev in _RESULT_BEFORE or nxt in _RESULT_AFTER) and _has_content(t):
-                    return True
+                if prev in _LOCATION_NOUNS or prev in _RESULT_BEFORE or nxt in _RESULT_AFTER:
+                    if content is None:
+                        content = _has_content(t)
+                    if content:
+                        return True
             elif (prev in _LOCATION_NOUNS or prev in _RESULT_BEFORE or nxt in _RESULT_AFTER
                   or (prev is not None and prev not in _NE_PLACEHOLDER and prev not in _NE_FILLER and len(prev) > 1)):
                 return True
