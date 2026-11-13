@@ -136,6 +136,57 @@ def _is_unknown(v):
     return re.sub(r"[\s./_-]+", "", core) in _FAMILY
 
 
+# ---- commits and non-evidence prose (one definition each, shared by the scripts) -----------------------------
+_COMMIT_LABEL = re.compile(r"^(?:sha-?(?:1|256)?|commit(?:\s*id)?|rev(?:ision)?|hash|git|oid)[\s:=#-]+", re.I)
+
+
+def commit_id(c):
+    """Canonical spelling of a commit, or None when the commit is UNSTATED. A value that is not a string or is an
+    UNKNOWN-equivalent (is_unknown: UNKNOWN, TBD, n/a, null, empty ...) is unstated, as an unstated repo is. Otherwise
+    NFKC folding, removal of format/control characters and surrounding blanks, lower case, a leading label ("sha:",
+    "sha1:", "sha256:", "commit ", "rev ", "hash ", "git:" ...) and edge punctuation removed: "sha:<hex>", "commit <hex>"
+    and a zero-width-marked hex are the same commit as the bare hex."""
+    if not isinstance(c, str) or is_unknown(c):
+        return None
+    t = fold(c)
+    t = _COMMIT_LABEL.sub("", t).strip(_EDGE)
+    return None if is_unknown(t) else t
+
+
+# Non-evidence prose: a statement that only says the fact is not known, missing, unavailable, pending or still to be
+# done. NE_PLACEHOLDER words say so by themselves; NE_FILLER words only frame a statement (status, result, value, is,
+# see above, to be verified ...). A prose ref with no concrete anchor (a digit, a path or URL
+# separator, a dotted name, a hash mark, an at sign or a quote) is non-evidence when (A) every word is one of the two
+# lists, or (B) it holds a NE_PLACEHOLDER word and is short (<= 6 words): "status: unknown", "value is nil", "needs
+# review". "a.py:12", "status 200" and "src/unknown/x.py" have an anchor and are never judged by their words.
+_NE_PLACEHOLDER = frozenset(
+    "unknown unk unknowable unverifiable unverified undetermined undefined unspecified unstated unavailable unconfirmed "
+    "null nil none nothing nada na tbd tba todo missing absent empty blank vacant pending placeholder dummy fake stub "
+    "mock lorem ipsum xxx draft incomplete unfinished unnamed unset notset undone tentative provisional later "
+    "unclear inconclusive".split())
+_NE_FILLER = frozenset(
+    "status result results evidence value values source owner output data answer check reviewer review reviewed "
+    "is are was were be been being the a an of for to this that it its still yet currently now not "
+    "see above below attached notes note ticket same as before earlier previous follow will verify verified confirm "
+    "confirmed confirmation verification needs need needed awaiting await in progress determined announced provided stated known "
+    "available applicable set filled fill details detail info information more further later soon todo".split())
+_NE_ANCHOR = re.compile(r"[0-9/\\#@\"'`=]|\w\.\w|::|\w\(\)")
+
+
+def non_evidence(ref):
+    """True when a prose evidence ref only says the fact is unknown, missing, null, nil, unavailable or pending (rule in
+    the comment above). Callers judge prose only (a path, URL or bare location is not passed here)."""
+    if not isinstance(ref, str):
+        return True
+    t = canon(ref, slashes=True).replace("n/a", "na")
+    words = re.findall(r"[a-z]+(?:['\u2019][a-z]+)?", t)
+    if not words or _NE_ANCHOR.search(t):
+        return False
+    if all(w in _NE_PLACEHOLDER or w in _NE_FILLER for w in words):
+        return True
+    return len(words) <= 6 and any(w in _NE_PLACEHOLDER for w in words)
+
+
 def _credential_view(t):
     """A credential-shaped text: a pattern from CRED, or a run of 32+ characters from [A-Za-z0-9+/=_-] holding
     an upper-case letter, a lower-case letter and a digit, wherever it sits and whatever precedes it (a path,

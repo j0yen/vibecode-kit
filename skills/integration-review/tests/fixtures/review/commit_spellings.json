@@ -1,0 +1,177 @@
+{
+ "_note": "synthetic commit spellings; source-only fixture, not production behaviour",
+ "hex": "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+ "other_hex": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807",
+ "same_pairs": [
+  [
+   "UNKNOWN",
+   "TBD"
+  ],
+  [
+   "",
+   "n/a"
+  ],
+  [
+   "N/A",
+   "none"
+  ],
+  [
+   "null",
+   "Nil"
+  ],
+  [
+   "unknown",
+   "?"
+  ],
+  [
+   "-",
+   "not available"
+  ],
+  [
+   "TBA",
+   "unspecified"
+  ],
+  [
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "UNKNOWN"
+  ],
+  [
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "tbd"
+  ],
+  [
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   ""
+  ],
+  [
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "n/a"
+  ],
+  [
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "null"
+  ],
+  [
+   "sha:3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "SHA:3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "sha1:3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "sha-1 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "commit 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "Commit: 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "commit=3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "rev 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "revision: 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "git:3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "hash 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "sha256:3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "\u200b3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2\u200d",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "\ufeff3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "3f9c2b7d1e4a5860b1c2\u2060d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   " 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2\n",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "\uff53\uff48\uff41:3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "sha:3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "commit 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "sha:3f9c2b7d1",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "commit 3f9c2b7d1e4a",
+   "sha:3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ],
+  [
+   "sha:3F9C2B7D1E4A5860B1C2D3E4F5A6B7C8D9E0F1A2",
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2"
+  ]
+ ],
+ "distinct_pairs": [
+  [
+   "3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807"
+  ],
+  [
+   "sha:3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807"
+  ],
+  [
+   "commit 3f9c2b7d1e4a5860b1c2d3e4f5a6b7c8d9e0f1a2",
+   "sha:9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807"
+  ],
+  [
+   "3f9c2b7",
+   "9e8d7c6"
+  ],
+  [
+   "v1.2.0",
+   "v1.3.0"
+  ],
+  [
+   "sha:3f9c2b7",
+   "3f9c2b0"
+  ],
+  [
+   "3f9c2b",
+   "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807"
+  ],
+  [
+   "release-7",
+   "release-8"
+  ]
+ ]
+}

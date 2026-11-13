@@ -112,7 +112,13 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    -ed/-ied such as unchecked or unreviewed, and a few others) anywhere in the clause before a side mark (counted from the
    previous side mark; `;`, a newline or a full stop ends a clause) or after it up to the end of the clause leaves the role
    UNKNOWN, at any distance; a negation that heads another side mark does not reach this one. The same words make a prose
-   evidence ref, or a single bare word such as `skipped`, non-evidence; a zero count of failures (`tests: 0 failed, 12
+   evidence ref, or a single bare word such as `skipped`, non-evidence. A second class is non-evidence prose, which only
+   says the fact is not known: a prose ref with no concrete anchor (no digit, path or URL separator, dotted name, `#`, `@`
+   or quote) whose words are all placeholder or framing words (`unknown null nil n/a unavailable missing pending draft
+   empty placeholder`, plus `status result value is the see above needs review to be verified`), or that holds a
+   placeholder word in at most six words, is non-evidence (`ir_norm.non_evidence`): `status: unknown`, `result UNKNOWN`,
+   `value is nil`, `evidence: null`, `source unavailable`, `needs review`, `see above`. A ref with an anchor (`a.py:12`,
+   `status 200`, `4 passed`) is judged by the other rules only; a zero count of failures (`tests: 0 failed, 12
    passed`) is positive, `0 passed` is not. The lists are vocabulary and cannot be complete: an unlisted wording is read as
    positive, and a genuine positive ref that uses a listed word (`validates invalid input`) is refused as missing-evidence
    (restate it); UNKNOWN is never filled. A path-like ref (no space, not a bare word) is never judged as prose.
@@ -131,9 +137,13 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    (an unstated repo or commit is not a difference); otherwise each is its own record with its own record_id, and the
    validator reads two records of one family/role/host/component/path/kind as one endpoint (`duplicate-record`) unless they
    prove they differ: both state repos (canonical) and share none, or both state commits and share none. One commit written
-   two ways is one commit: case is folded, and an abbreviated hex sha of 7+ digits equals any longer sha it prefixes. The
-   validator finds these groups by keyed lookup (near-linear, pairwise `_conflict` is the definition; a test pins the two
-   equal on random registers), never by scanning all pairs. A record that omits its
+   two ways is one commit (`ir_norm.commit_id`, the one rule): case is folded, a label (`sha:`, `sha1:`, `sha256:`, `commit `,
+   `rev `, `hash `, `git:`) and zero-width/format characters or edge punctuation around the hex are dropped, and an abbreviated
+   hex sha of 7+ digits equals any longer sha it prefixes (a 6-digit one is not matched). A placeholder commit (`UNKNOWN`, `TBD`,
+   `n/a`, `null`, empty: any UNKNOWN-equivalent) is an unstated commit, exactly as a placeholder repo is an unstated repo: it
+   differs from nothing, so records that differ only by it, or by a spelling above, are `duplicate-record`. The
+   validator finds these groups by keyed lookup (near-linear, pairwise `_conflict` is the definition and reads the same
+   commit rule through `_same_commit`; a test pins the two equal on random registers), never by scanning all pairs. A record that omits its
    commit or repo is never provably different, so a pair where one side omits it is refused (a `complete` claim is REFUSED
    naming both records), exactly as the extractor joins them. Path-less rows follow the same rule: different repos or
    distinct commits stay separate records, and path-less rows never fuse across repos (only path-less rows of the same

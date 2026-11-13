@@ -180,8 +180,9 @@ def _ident(r):
         repo = si.get("repo")
         rid = _N.repo_id(repo) if isinstance(repo, str) and not _unk(repo) else None
         ends.add((rid, si.get("path_or_command", own)))
-        if isinstance(si.get("commit"), str):
-            commits.add(si["commit"])
+        cid = _N.commit_id(si.get("commit"))             # a placeholder commit is unstated, as an unstated repo is
+        if cid is not None:
+            commits.add(cid)
     if any(rp is not None for rp, _ in ends):
         ends = {e for e in ends if e[0] is not None}      # an unstated source beside a stated repo adds no wildcard
     return frozenset(ends), frozenset(commits)
@@ -191,12 +192,13 @@ _HEXC = re.compile(r"[0-9a-f]{7,64}")
 
 
 def _same_commit(x, y):
-    """One commit written two ways is not two commits: equal after trimming and lower-casing, or, when both are
-    hex of 7+ digits, one is a prefix of the other (an abbreviated sha)."""
-    a, b = x.strip().lower(), y.strip().lower()
-    if a == b:
-        return True
-    return bool(_HEXC.fullmatch(a) and _HEXC.fullmatch(b)) and (a.startswith(b) or b.startswith(a))
+    """One commit written two ways is not two commits (the rule is _commit_toks(), the only one): the canonical
+    spellings (ir_norm.commit_id: no label such as sha: or "commit ", no zero-width character, any case) are equal or,
+    when both are hex of 7+ digits, one is a prefix of the other (an abbreviated sha). An unstated commit (a
+    placeholder) is the same as none and differs from nothing."""
+    fx, px = _commit_toks([x])
+    fy, py = _commit_toks([y])
+    return bool(fx & py or fy & px)
 
 
 def _conflict(a, b):
@@ -212,12 +214,15 @@ def _conflict(a, b):
 
 
 def _commit_toks(commits):
-    """(full tokens, prefix tokens) of a record's commits: the lower-cased commit, and for a hex commit of 7+ digits
-    every prefix of 7+ digits. Two commits are the same commit exactly when the full token of one is a prefix token
-    of the other (_same_commit), so equality of tokens finds them without comparing pairs."""
+    """(full tokens, prefix tokens) of a record's commits (spelling normalised by ir_norm.commit_id; an unstated commit
+    has none): the canonical commit, and for a hex commit of 7+ digits every prefix of 7+ digits. Two commits are the same
+    commit exactly when the full token of one is a prefix token of the other, so equality of tokens finds them without
+    comparing pairs; _same_commit() reads the same tokens, so this is the one commit-equality rule."""
     full, pre = set(), set()
     for c in commits:
-        c = c.strip().lower()
+        c = _N.commit_id(c)
+        if c is None:
+            continue
         full.add(c)
         if _HEXC.fullmatch(c):
             pre.update(c[:n] for n in range(7, len(c) + 1))
@@ -355,11 +360,13 @@ def _prose_ref(ref):
 
 def _positive_refs(items):
     """Evidence refs that count as evidence: not UNKNOWN-equivalent and, when they are prose (see _prose_ref), neither
-    negated ("not verified", "no test", "failed") nor a doubt or non-evidence wording (ir_norm NEG_DOUBT: unchecked,
-    skipped, pending, TBD, waived, disproved, invalid, false ...). A zero count of failures ("tests: 0 failed, 12
-    passed") is positive; "0 passed" is not. The word lists are vocabulary, not proof: UNKNOWN is never filled."""
+    negated ("not verified", "no test", "failed"), nor a doubt wording (ir_norm NEG_DOUBT: unchecked, skipped, pending,
+    TBD, waived, disproved, invalid, false ...), nor non-evidence (ir_norm.non_evidence: prose that only says the fact is
+    unknown, missing, null, nil, unavailable or pending, such as "status: unknown" or "needs review"). A zero count of
+    failures ("tests: 0 failed, 12 passed") is positive; "0 passed" is not. The word lists are vocabulary, not proof:
+    UNKNOWN is never filled."""
     return [(i, e) for i, e in _refs(items) if not (isinstance(e["ref"], str) and _prose_ref(e["ref"])
-                                                       and _N.negated(e["ref"], doubt=True))]
+                                                       and (_N.negated(e["ref"], doubt=True) or _N.non_evidence(e["ref"])))]
 
 
 def _adopted(items):
