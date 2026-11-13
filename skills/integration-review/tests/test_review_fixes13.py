@@ -73,6 +73,12 @@ class TestY1RelationDirection(unittest.TestCase):
             self.assertIn(w, text, w)
 
 
+class TestSkillStatesTheDataFileLimit(unittest.TestCase):
+    def test_the_verbatim_data_files_are_named_as_outside_the_redaction(self):
+        text = (SK / "SKILL.md").read_text()
+        self.assertIn("keep the input rows verbatim", text)
+
+
 class TestY2HedgeMarksLeaveTheRoleUnknown(unittest.TestCase):
     def test_reviewer_hedge_forms_are_unknown(self):
         for e in FX["hedge_forms"]:

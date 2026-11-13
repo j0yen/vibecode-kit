@@ -52,7 +52,7 @@ production state, and it opens no tasks or PRs; findings go to their existing ca
   text (NFKD, combining marks and zero-width/control characters removed, then NFKC, before any pattern is applied) and
   after decoding `\uXXXX`, `\n`, `\t` and `\r` escapes; a token split by a newline, tab or carriage return, or by their
   JSON escapes, is joined and masked in every output path including the `by_role`/`by_label` counts) is redacted from every message the scripts print, from record ids, roles, property names,
-  finding ids, actors, record fields and duplicate-key names, in every script (`discriminator_check.py` included); the redactor is a pattern list, so it is a net, not a proof.
+  finding ids, actors, record fields and duplicate-key names, in every script (`discriminator_check.py` included); the redactor is a pattern list, so it is a net, not a proof. The data files `extract_register.py` writes (`register-partial.json`, `register-declared-complete.json`) keep the input rows verbatim by the fidelity rule (evidence, repo and commit text are not rewritten), so a credential-shaped input value is in them as given: the redaction covers what the scripts print and the `extraction.json` / `rejected.json` reports, not those two data files; treat them as sensitive input, never print or quote them.
 
 ## Labels (exactly five)
 `observed-defect` (reproduced on real source/behaviour) · `conditional-risk` (breaks only if a
