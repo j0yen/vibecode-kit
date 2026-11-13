@@ -341,7 +341,7 @@ class TestD07Timestamps(unittest.TestCase):
 
 class TestD08Fusion(unittest.TestCase):
     def recs(self, rows):
-        return xr.convert(rows)["register"]["records"]
+        return xr.convert(rows, heuristic_fusion=True)["register"]["records"]
 
     def test_same_name_different_repos_unrooted_paths_not_fused(self):
         out = self.recs([row(component="recall", source_repo="summa", path_or_command="/s/recall.py", interface_kind="cli"),

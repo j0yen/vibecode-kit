@@ -2,8 +2,8 @@
 """Convert child-B endpoints.jsonl rows into integration-review register records (stdlib, read-only).
 
 Evidence fidelity rules (nothing is invented; every unstated fact stays UNKNOWN or missing):
-- source identity is parsed only from the forms the row states: "path+sha256:<path> <64 hex>" and
-  "commit <40 hex>"; anything else is version UNKNOWN, available false. The raw string is kept.
+- source identity is parsed only from the forms the row states, matched in full (no trailing newline or
+  qualifier text): "path+sha256:<path> <64 hex>" and "commit <40 hex>"; anything else is version UNKNOWN, available false. The raw string is kept.
 - a producer/consumer/caller/adapter side is kept only when the row's own evidence states it as
   "side=<role>" matching the claimed role and states no other side; otherwise (no mark, or contradictory
   marks) role is UNKNOWN and the claim is kept in claimed_roles.
@@ -14,15 +14,16 @@ Evidence fidelity rules (nothing is invented; every unstated fact stays UNKNOWN 
 - a row naming no valid family becomes family UNASSIGNED (kept, counted, blocks a complete claim).
 - unparseable lines, duplicate JSON keys and non-object rows are rejected into rejected.json, never
   repaired. Lines are split on "\\n" only (U+2028/U+0085 inside a valid row are data); input must be UTF-8.
-- rows with one endpoint key merge (evidence union); rows with an equal name fuse into ONE record with a
-  sources list (no component qualifier) by a HEURISTIC that does not prove they are one component: each member
-  row's path, normalized (".." and "." resolved, no leading "/", no "//", repo without a trailing "/"), is rooted in its own stated repo
-  ("<repo>/..."), each has a stated identity (not UNKNOWN-equivalent), and the identities differ. The fused
-  record carries fusion_basis; every source is kept, so nothing is lost if the guess is wrong. Equal names
-  with any other shape stay separate endpoints. UNKNOWN-equivalents (scripts/ir_norm.py) in component,
-  host, repo, path and evidence refs are treated as not stated.
+- rows with one endpoint key merge (evidence union). Equally named endpoints with different paths fuse into ONE
+  record (a sources list, no component qualifier) only on direct proof that they are one component: the same
+  content sha256, or the same canonical repo identity (URL/scp/.git/trailing-slash spellings folded) with the same
+  normalized path. Same-named records in different repos, or with distinct commits, stay separate. The fused
+  record carries fusion_basis and every source. The old guess (repo-rooted paths + distinct identities) is OFF
+  by default; `--heuristic-fusion` / convert(heuristic_fusion=True) turns it on, labels it
+  "same-name-and-repo-rooted-paths-heuristic" and it is a guess, not proof. UNKNOWN-equivalents
+  (scripts/ir_norm.py) in component, host, repo, path and evidence refs are treated as not stated.
 - labels stay "unclassified"; effect_state/replay are not emitted.
-usage: extract_register.py ENDPOINTS.jsonl OUTDIR   (exit 0 ok, 3 if any row was rejected, 2 unreadable input or output)
+usage: extract_register.py [--heuristic-fusion] ENDPOINTS.jsonl OUTDIR   (exit 0 ok, 3 if any row was rejected, 2 unreadable input or output)
 Writes register-partial.json, register-declared-complete.json (same records, for refusal checks),
 rejected.json, extraction.json.
 """
@@ -54,8 +55,8 @@ UNASSIGNED = "UNASSIGNED"
 KINDS = {"http", "cli", "exit-code", "filesystem", "event", "receipt", "identity", "schema",
          "ordering", "retry", "trust", "rollback", "other"}
 SIDES = ("producer", "consumer", "caller", "adapter")
-PATH_SHA = re.compile(r"^path\+sha256:(\S+) ([0-9a-f]{64})$")
-COMMIT = re.compile(r"^commit ([0-9a-f]{40})\b")
+PATH_SHA = re.compile(r"path\+sha256:(\S+) ([0-9a-f]{64})")      # always fullmatch: "$" would accept a trailing newline
+COMMIT = re.compile(r"commit ([0-9a-f]{40})")                     # always fullmatch: no trailing qualifier text
 SIDE_MARK = re.compile(r"\bside=(producer|consumer|caller|adapter)\b")
 
 
@@ -77,11 +78,11 @@ def parse_identity(row):
     repo = _s(row.get("source_repo")) or "UNKNOWN"
     rawtxt = raw if isinstance(raw, str) else "UNKNOWN"
     si = {"repo": repo, "version": "UNKNOWN", "available": False, "raw": rawtxt}
-    m = PATH_SHA.match(rawtxt)
+    m = PATH_SHA.fullmatch(rawtxt)
     if m:
         si.update(path=m.group(1), sha256=m.group(2), version=m.group(2), available=True)
     else:
-        m = COMMIT.match(rawtxt)
+        m = COMMIT.fullmatch(rawtxt)
         if m:
             si.update(commit=m.group(1), version=m.group(1), available=True)
     if _s(row.get("captured_at")):
@@ -125,11 +126,11 @@ def _id(*parts):
     return "x-" + hashlib.sha256(json.dumps(parts).encode()).hexdigest()[:16]
 
 
-def convert(rows, declared="partial"):
-    return _build(list(enumerate(rows, 1)), declared, [])
+def convert(rows, declared="partial", heuristic_fusion=False):
+    return _build(list(enumerate(rows, 1)), declared, [], heuristic_fusion)
 
 
-def convert_lines(lines, declared="partial"):
+def convert_lines(lines, declared="partial", heuristic_fusion=False):
     items, rejected = [], []
     for n, line in enumerate(lines, 1):
         if not line.strip(" \t\r"):
@@ -140,10 +141,10 @@ def convert_lines(lines, declared="partial"):
             rejected.append({"line": n, "reason": f"not JSON: {redact(e)}"})
         except RecursionError:
             rejected.append({"line": n, "reason": "not JSON: nested too deeply to parse"})
-    return _build(items, declared, rejected)
+    return _build(items, declared, rejected, heuristic_fusion)
 
 
-def _build(items, declared, rejected):
+def _build(items, declared, rejected, heuristic_fusion=False):
     stats = Counter()
     eps = {}  # (family, role, host, component, kind, path) -> endpoint
     order = []
@@ -189,13 +190,23 @@ def _build(items, declared, rejected):
         groups.setdefault(ep["key"][:5], []).append(ep)
     records = []
     for g, members in groups.items():
-        repos = [{s["repo"] for s in m["sources"]} for m in members]
-        flat = [r for rs in repos for r in rs]
-        fuse = (len(members) > 1 and all(len(rs) == 1 for rs in repos) and "UNKNOWN" not in flat
-                and len(set(flat)) == len(flat) and _one_component(members))
-        if fuse:
-            stats["fused_multi_source_components"] += 1
-            members = [_fuse(members)]
+        if len(members) > 1:
+            clusters = _positive_clusters(members)
+            if heuristic_fusion:
+                repos = [{s["repo"] for s in m["sources"]} for m in members]
+                flat = [r for rs in repos for r in rs]
+                if (all(len(rs) == 1 for rs in repos) and "UNKNOWN" not in flat
+                        and len(set(flat)) == len(flat) and _one_component(members)):
+                    clusters = [(list(range(len(members))), "same-name-and-repo-rooted-paths-heuristic")]
+            used = {i for idx, _ in clusters for i in idx}
+            fused = []
+            for n, (idx, basis) in enumerate(clusters):
+                stats["fused_multi_source_components"] += 1
+                f = _fuse([members[i] for i in idx], basis)
+                if n:
+                    f["key"] = f["key"][:5] + (members[idx[0]]["key"][5],)
+                fused.append(f)
+            members = fused + [m for i, m in enumerate(members) if i not in used]
         records += [_record(m, stats) for m in members]
     stats["records"] = len(records)
     stats["unassigned_records"] = sum(1 for r in records if r["family"] == UNASSIGNED)
@@ -203,6 +214,59 @@ def _build(items, declared, rejected):
     reg = {"schema_version": 1, "coverage": {"declared": declared},
            "families": [{"id": f} for f in fams], "records": records}
     return {"register": reg, "rejected": rejected, "stats": dict(stats)}
+
+
+def _repo_id(repo):
+    """Canonical spelling of a repo identity: URL / scp forms, ".git" and trailing "/" removed, lower case."""
+    r = repo.strip().lower()
+    r = re.sub(r"^(?:https?|ssh|git)://(?:[^@/]*@)?", "", r)
+    r = re.sub(r"^[^@/\s]+@([^:/\s]+):", r"\1/", r)
+    r = re.sub(r"(?:\.git)?/*$", "", r)
+    return r
+
+
+def _path_id(path):
+    return posixpath.normpath(path) if isinstance(path, str) and path else None
+
+
+def _positive_clusters(members):
+    """Members (same family/role/host/component/kind, different path) that POSITIVELY are one component:
+    the same canonical repo identity with the same normalized path, or the same content sha256. Returns
+    [(member indexes, basis)] for clusters of two or more; every other member stays a separate record."""
+    parent = list(range(len(members)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    basis = {}
+    for i in range(len(members)):
+        for j in range(i + 1, len(members)):
+            a, b = members[i], members[j]
+            how = None
+            sa = {s["sha256"] for s in a["sources"] if "sha256" in s}
+            sb = {s["sha256"] for s in b["sources"] if "sha256" in s}
+            if sa & sb:
+                how = "same-content-sha256"
+            else:
+                ra = {_repo_id(s["repo"]) for s in a["sources"] if s["repo"] != "UNKNOWN"}
+                rb = {_repo_id(s["repo"]) for s in b["sources"] if s["repo"] != "UNKNOWN"}
+                pa, pb = _path_id(a["key"][5]), _path_id(b["key"][5])
+                if ra & rb and pa and pa == pb:
+                    how = "same-repo-identity-and-path"
+            if how:
+                parent[find(i)] = find(j)
+                basis[find(i)] = how
+    out = {}
+    for i in range(len(members)):
+        out.setdefault(find(i), []).append(i)
+    res = []
+    for root, idx in out.items():
+        if len(idx) > 1:
+            hows = {basis.get(k) for k in (find(i) for i in idx)} - {None}
+            res.append((idx, "same-content-sha256" if "same-content-sha256" in hows else "same-repo-identity-and-path"))
+    return res
 
 
 def _rooted(path, repo):
@@ -232,9 +296,9 @@ def _one_component(members):
     return len(set(vers)) == len(vers)
 
 
-def _fuse(members):
+def _fuse(members, basis):
     out = {"key": members[0]["key"][:5] + (None,), "rows": [], "sources": [], "evidence": [], "states": [],
-           "claimed_roles": [], "claimed_states": [], "fused": True}
+           "claimed_roles": [], "claimed_states": [], "fused": True, "fusion_basis": basis}
     for m in members:
         out["rows"] += m["rows"]
         for s in m["sources"]:
@@ -264,7 +328,7 @@ def _record(ep, stats):
         rec["source_identity"] = srcs[0]
     rec.update(installed_state=state, label="unclassified", evidence=ep["evidence"], source_rows=ep["rows"])
     if ep.get("fused"):
-        rec["fusion_basis"] = "same-name-and-repo-rooted-paths-heuristic"
+        rec["fusion_basis"] = ep["fusion_basis"]
     if ep["claimed_roles"]:
         rec["claimed_roles"] = ep["claimed_roles"]
         stats["roles_claimed_not_evidenced"] += 1
@@ -277,6 +341,8 @@ def _record(ep, stats):
 
 
 def main(argv):
+    heur = "--heuristic-fusion" in argv
+    argv = [a for a in argv if a != "--heuristic-fusion"]
     if len(argv) != 3:
         print(__doc__, file=sys.stderr)
         return 2
@@ -286,7 +352,7 @@ def main(argv):
     except (OSError, ValueError) as e:
         print(f"UNKNOWN: input unreadable: {type(e).__name__}: {redact(e)}", file=sys.stderr)
         return 2
-    out = convert_lines(lines, "partial")
+    out = convert_lines(lines, "partial", heur)
     try:
         os.makedirs(argv[2], exist_ok=True)
         for name, decl in (("register-partial.json", "partial"),

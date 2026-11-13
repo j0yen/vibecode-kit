@@ -24,7 +24,7 @@ class RealInput(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.out = Path(cls.tmp.name)
         cls.rows = [json.loads(l) for l in FIX.read_text().splitlines() if l.strip()]
-        cls.ex = run(SK / "scripts" / "extract_register.py", FIX, cls.out)
+        cls.ex = run(SK / "scripts" / "extract_register.py", "--heuristic-fusion", FIX, cls.out)
         cls.partial = json.loads((cls.out / "register-partial.json").read_text())
         cls.complete = json.loads((cls.out / "register-declared-complete.json").read_text())
         cls.vp = run(SK / "scripts" / "register_validate.py", cls.out / "register-partial.json")

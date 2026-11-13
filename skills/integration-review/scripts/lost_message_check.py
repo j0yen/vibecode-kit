@@ -10,8 +10,12 @@ accepts is a positive control. Findings with another claim pass through untouche
 Links are typed: ref a non-blank string, sha256 64 hex or commit 40 hex, adapters_none_evidence a non-blank
 ref string. Links must agree: family, interface and message, where stated, are equal across producer,
 adapters and waiter, and the actor chain holds (producer actor -> adapter maps_from/maps_to -> waiter
-actor); a disagreeing link is named and the finding stays conditional-risk. claim and label are matched
-after trim, lower-casing and "_"/space -> "-". An actor chain that returns to an actor already reached
+actor); a disagreeing link is named and the finding stays conditional-risk. label is matched
+after trim, lower-casing and "_"/space -> "-"; a claim is a message-lost claim when its words (any case,
+separators, punctuation, order) hold message|messages|msg and lost|loss|dropped|missing|... , or the joined
+form (messagelost). A claim not recognised is not silently passed: the output says "claim_recognised": false and
+a NOT-CHECKED line (the trace rule was not applied). Actors, family, interface and message are compared by JSON
+type and value (1, 1.0 and true differ). An actor chain that returns to an actor already reached
 (a -> b -> a; an identity mapping is not a loop) is inconsistent. A trace in which no family, interface or message is
 stated on two links, or that lacks the producer or waiter actor, is marked "consistency": "unproven"
 with the reasons in "unproven" and an UNPROVEN line; its label is unchanged, the marker is the signal.
@@ -24,6 +28,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 
 def _load_norm():
@@ -57,6 +62,28 @@ def _norm(v):
     return re.sub(r"[\s_]+", "-", v.strip().lower()) if isinstance(v, str) else v
 
 
+def _hk(v):
+    """Typed identity: 1, 1.0 and true are three different values (JSON text), never Python ==."""
+    return json.dumps(v, sort_keys=True, default=str)
+
+
+_MSG = ("message", "messages", "msg", "msgs")
+_LOSS = ("lost", "loss", "lose", "losing", "dropped", "drop", "drops", "missing", "vanished", "undelivered",
+         "discarded", "swallowed", "disappeared")
+_JOINED = re.compile(r"(?:%s)(?:%s)|(?:%s)(?:%s)" % ("|".join(_MSG), "|".join(_LOSS), "|".join(_LOSS), "|".join(_MSG)))
+
+
+def is_lost_claim(c):
+    """A message-lost claim in any separator/punctuation/case, word order (lost-message / message-lost) or
+    synonym (dropped, missing, loss ...); the joined form (messagelost) too. Anything else is not recognised."""
+    if not isinstance(c, str):
+        return False
+    words = re.findall(r"[a-z]+", unicodedata.normalize("NFKC", c).lower())
+    if any(w in _MSG for w in words) and any(w in _LOSS for w in words):
+        return True
+    return any(_JOINED.fullmatch(w) for w in words) or bool(_JOINED.fullmatch("".join(words)))
+
+
 def _str(v):
     return isinstance(v, str) and bool(v.strip())
 
@@ -82,21 +109,21 @@ def _consistency(t):
                     if json.dumps(v, sort_keys=True) != json.dumps(first, sort_keys=True)]
     p = t.get("producer")
     cur = p.get("actor") if isinstance(p, dict) else None
-    chain = [cur] if cur is not None else []
+    chain = [_hk(cur)] if cur is not None else []
     for i, a in enumerate(ad):
         if not isinstance(a, dict):
             continue
-        if cur is not None and "maps_from" in a and a["maps_from"] != cur:
+        if cur is not None and "maps_from" in a and _hk(a["maps_from"]) != _hk(cur):
             bad.append(f"adapters[{i}]: maps_from {a['maps_from']!r} is not the actor reaching it ({cur!r})")
         if "maps_to" in a:
             cur = a["maps_to"]
-            if chain and cur == chain[-1]:
+            if chain and _hk(cur) == chain[-1]:
                 continue                      # an identity mapping is not a loop
-            if cur in chain:
+            if _hk(cur) in chain:
                 bad.append(f"adapters[{i}]: actor chain cycle, {cur!r} was already reached")
-            chain.append(cur)
+            chain.append(_hk(cur))
     w = t.get("waiter")
-    if isinstance(w, dict) and cur is not None and "actor" in w and w["actor"] != cur:
+    if isinstance(w, dict) and cur is not None and "actor" in w and _hk(w["actor"]) != _hk(cur):
         bad.append(f"waiter: actor {w['actor']!r} is not the actor reaching it ({cur!r})")
     return bad
 
@@ -119,9 +146,10 @@ def _unproven(t):
 
 def classify(f):
     claim, label = _norm(f.get("claim")), _norm(f.get("label"))
-    if claim != CLAIM:
+    if not (claim == CLAIM or is_lost_claim(f.get("claim"))):
         return {"id": f.get("id"), "label": f.get("label"), "missing_links": [], "inconsistent_links": [],
-                "unproven": [], "consistency": "not-applicable", "ok": True}
+                "unproven": [], "consistency": "not-applicable", "claim_recognised": False,
+                "claim": f.get("claim") if isinstance(f.get("claim"), str) else _hk(f.get("claim")), "ok": True}
     t = f.get("trace") if isinstance(f.get("trace"), dict) else {}
     missing = []
     if not _ok(t.get("producer")):
@@ -167,6 +195,9 @@ def main(argv):
         return 2
     res = classify(f)
     print(json.dumps(redact_obj(res), indent=2))
+    if res.get("claim_recognised") is False:
+        print(redact(f"NOT-CHECKED: {res['id']} claim wording {res['claim']!r} is not recognised as a message-lost claim; "
+                     f"no trace rule was applied and its label {res['label']!r} is the declarer's, unverified"))
     if res.get("unproven"):
         print(redact("UNPROVEN: " + res["id"].__str__() + " consistency is not proven: " + "; ".join(res["unproven"])))
     if not res["ok"]:

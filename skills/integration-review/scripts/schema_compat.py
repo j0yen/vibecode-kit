@@ -46,6 +46,8 @@ def _load_norm():
 
 redact = _load_norm().redact
 
+ANNOTATIONS = {"format", "default", "examples", "example", "$comment", "$id", "id", "deprecated", "readOnly", "writeOnly",
+               "contentEncoding", "contentMediaType"}
 KNOWN = {"$schema", "title", "description", "type", "enum", "required", "properties",
          "additionalProperties", "items", "pattern", "minLength", "minItems", "definitions", "$ref"}
 DIRECTIONS = ("producer-first", "consumer-first", "both")
@@ -141,8 +143,10 @@ def _one(kind, d, closed, ctx):
     if kind == "req_rm":
         return (not pf, "old consumers still require a field new producers may omit" if pf else "")
     if kind == "prop_add":
-        bad = pf and ctx.get("old_closed")
-        return (not bad, "old consumer rejects additional properties" if bad else "")
+        bad = pf and (ctx.get("old_closed") or (closed and ctx.get("ap_rejects")))
+        why = ("old consumer rejects additional properties" if ctx.get("old_closed")
+               else "the new property's schema is not accepted by the old consumer's additionalProperties schema")
+        return (not bad, why if bad else "")
     if kind == "prop_rm":
         bad = pf or (not pf and ctx.get("new_closed"))
         return (not bad, "old consumers may read the removed property" if pf else "new consumer rejects the removed property")
@@ -160,10 +164,10 @@ def _classify(res, path, change, kind, direction, consumer, ctx=None):
         verdict, reason = "incompatible", {"incomparable": "type change is neither widening nor narrowing",
                                            "unsupported": "keyword outside the supported set"}[kind]
     elif kind == "undetermined":
-        verdict, reason = "undetermined", "regex text changed; direction cannot be decided mechanically"
+        verdict, reason = "undetermined", "direction cannot be decided mechanically (a changed regex or an unevaluated keyword)"
     elif kind in ("removed_def",):
         verdict, reason = "incompatible", "definition removed"
-    elif kind in ("added_def", "note"):
+    elif kind in ("added_def", "note", "unchanged_note"):
         verdict, reason = "compatible", ""
     else:
         ds = ("producer-first", "consumer-first") if direction == "both" else (direction,)
@@ -174,12 +178,26 @@ def _classify(res, path, change, kind, direction, consumer, ctx=None):
          "handling": consumer, "verdict": verdict, "reason": reason}
     res["classified"].append(c)
     text = f"{path}: {change}" + (f" [{direction}, {consumer} consumer: {reason}]" if reason else "")
-    if verdict == "incompatible":
+    if kind == "unchanged_note":
+        res.setdefault("notes", []).append(text)
+    elif verdict == "incompatible":
         res["breaking"].append(text)
     elif verdict == "undetermined":
         res["undetermined"].append(text)
     else:
         res["additions"].append(text)
+
+
+def _done_node(res, cl, unchanged, before):
+    """Unchanged unsupported keywords are not a change: a note when nothing else in the subtree changed, else the
+    subtree is UNDETERMINED (their interplay with the change is not evaluated)."""
+    if not unchanged:
+        return
+    names = ", ".join(repr(k) for k in unchanged)
+    if len(res["classified"]) > before:
+        cl(f"unchanged unsupported keyword(s) {names} may interact with the changes in this subtree; not evaluated", "undetermined")
+    else:
+        cl(f"unchanged unsupported keyword(s) {names}: equal text on both sides, not evaluated", "unchanged_note")
 
 
 def _walk(old, new, path, res, direction, consumer, depth=0):
@@ -190,8 +208,14 @@ def _walk(old, new, path, res, direction, consumer, depth=0):
     _shape(old)
     _shape(new)
     cl = lambda *a, **k: _classify(res, path, *a, direction=direction, consumer=consumer, **k)  # noqa: E731
+    before_node = len(res["classified"])
+    unchanged_applicators = []
     for k in sorted(set(old) | set(new)):
         if k not in KNOWN:
+            if k in old and k in new and json.dumps(old[k], sort_keys=True) == json.dumps(new[k], sort_keys=True):
+                if k not in ANNOTATIONS:        # unchanged: not a change; noted, and undetermined if the subtree changes
+                    unchanged_applicators.append(k)
+                continue
             where = "old and new" if k in old and k in new else ("old" if k in old else "new")
             cl(f"unsupported keyword {k!r} in {where}", "unsupported")
     orf, nrf = old.get("$ref"), new.get("$ref")
@@ -205,6 +229,8 @@ def _walk(old, new, path, res, direction, consumer, depth=0):
             _walk(oo, nn, f"{path}/$ref", res, direction, consumer, depth + 1)
             if len(res["classified"]) == before:
                 cl(f"$ref retargeted {orf!r} -> {nrf!r}; the targets are equivalent", "note")
+        _done_node(res, cl, unchanged_applicators, before_node)
+        return          # a $ref replaces its siblings: the compared targets are the whole comparison of this node
     if "type" in old and "type" in new:
         o, n = _types(old["type"]), _types(new["type"])
         if n > o:
@@ -267,7 +293,13 @@ def _walk(old, new, path, res, direction, consumer, depth=0):
                 _walk(op[name], np_[name], f"{path}/{section}/{name}", res, direction, consumer, depth + 1)
         for name in np_:
             if name not in op:
-                cl(f"{section}/{name} added", "prop_add" if section == "properties" else "added_def", ctx=ctx)
+                pctx = ctx
+                if section == "properties" and oa == "schema":
+                    sub = {"classified": [], "breaking": [], "additions": [], "undetermined": [], "_roots": res["_roots"]}
+                    _walk(old["additionalProperties"], np_[name], f"{path}/{section}/{name}", sub,
+                          "producer-first", consumer, depth + 1)
+                    pctx = dict(ctx, ap_rejects=bool(sub["breaking"] or sub["undetermined"]))
+                cl(f"{section}/{name} added", "prop_add" if section == "properties" else "added_def", ctx=pctx)
                 _walk({}, np_[name], f"{path}/{section}/{name}", {"classified": [], "breaking": [],
                                                                     "additions": [], "undetermined": [],
                                                                     "_roots": res["_roots"]},
@@ -287,12 +319,13 @@ def _walk(old, new, path, res, direction, consumer, depth=0):
             cl("items constraint removed", "loosen")
         else:
             cl("items form changed (schema vs list/other)", "unsupported")
+    _done_node(res, cl, unchanged_applicators, before_node)
 
 
 def compare(old, new, direction="both", consumer="closed"):
     if direction not in DIRECTIONS or consumer not in CONSUMERS:
         raise ValueError(f"direction must be one of {DIRECTIONS}, consumer one of {CONSUMERS}")
-    res = {"classified": [], "breaking": [], "additions": [], "undetermined": [], "_roots": (old, new)}
+    res = {"classified": [], "breaking": [], "additions": [], "undetermined": [], "notes": [], "_roots": (old, new)}
     _walk(old, new, "#", res, direction, consumer)
     del res["_roots"]
     ok = not res["breaking"] and not res["undetermined"]

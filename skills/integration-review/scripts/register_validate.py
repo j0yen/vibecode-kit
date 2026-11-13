@@ -45,7 +45,28 @@ UNASSIGNED = "UNASSIGNED"
 CRED = _N.CRED
 SKEW = timedelta(seconds=300)
 HEX64 = re.compile(r"[0-9a-f]{64}")
-PROCESS = re.compile(r"(\bpid\b|/proc/\d+|\bprocess\b|\bcmdline\b|\bexe\b|\blsof\b|\bfuser\b)", re.I)
+# Process-adoption rule (SKILL.md step 5): a ref is a positive observation of a running process when it states
+# /proc/<n>/<exe|cmdline|comm|status|stat|cwd|fd>, or "pid" with a non-zero number plus exe/cmdline/comm/command,
+# or a process-listing tool (ps, pgrep, pidof, lsof, fuser, top) with "shows|lists|reports|names|found process <name>".
+# It is refused when it carries a negation or placeholder word or names a unit (systemctl, *.service, list-units):
+# a tool name alone, an UNKNOWN value, "no process found", "pid=" and a unit listing are not observations.
+_PROC_PATH = re.compile(r"/proc/[1-9][0-9]*/(?:exe|cmdline|comm|status|stat|cwd|fd)\b")
+_PID_NUM = re.compile(r"\bpid[\s:=#_-]*[1-9][0-9]*\b")
+_PID_FACT = re.compile(r"\b(?:exe|cmdline|comm|command)\b")
+_TOOL_SAYS = re.compile(r"\b(?:ps|pgrep|pidof|lsof|fuser|top)\b[^\n]*?\b(?:shows|lists|reports|names|found)\s+(?:a\s+)?process\s+(?P<n>[^\s,;]+)")
+_NEGATED = re.compile(r"\b(?:no|not|none|never|without|absent|missing|nonexistent|dead|exited|gone|stopped|terminated|killed"
+                      r"|inactive|failed|unknown|unk|undefined|null|nil|tbd|unavailable|cannot|unable|nothing)\b|\bn\s*/\s*a\b")
+_UNIT = re.compile(r"\bsystemctl\b|\blist-units?\b|\blist-unit-files\b|\.(?:service|timer|socket|target|mount|path|slice|scope)\b")
+
+
+def _observed_process(ref):
+    t = _N.canon(ref)
+    if _NEGATED.search(t) or _UNIT.search(t):
+        return False
+    if _PROC_PATH.search(t) or (_PID_NUM.search(t) and _PID_FACT.search(t)):
+        return True
+    m = _TOOL_SAYS.search(t)
+    return bool(m) and not _unk(m.group("n"))
 
 
 def _pairs(pairs):
@@ -129,7 +150,7 @@ def _check(v, s, root, path, errs):
 def _ts(s):
     """(UTC datetime, "ok") | (None, "bad") unparseable | (None, "ambiguous") no UTC offset, never read in the host zone."""
     try:
-        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        d = datetime.fromisoformat(s[:-1] + "+00:00" if s.endswith(("Z", "z")) else s)
     except (ValueError, AttributeError):
         return None, "bad"
     if d.tzinfo is None or d.utcoffset() is None:
@@ -157,7 +178,7 @@ def _refs(items):
 
 def _adopted(items):
     """Adoption refs that state a process observation; a unit listing or an install location is not adoption."""
-    return [(i, e) for i, e in _refs(items) if PROCESS.search(e["ref"])]
+    return [(i, e) for i, e in _refs(items) if _observed_process(e["ref"])]
 
 
 def _on_word(r, srcs):
@@ -176,7 +197,12 @@ def _sources(r):
 
 
 def validate(reg, schema, now=None):
-    now = now if isinstance(now, datetime) and now.tzinfo else datetime.now(timezone.utc)
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif not isinstance(now, datetime):
+        raise TypeError("now must be a timezone-aware datetime or None")
+    elif now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now is a naive datetime: it is ambiguous and is never replaced by the wall clock")
     findings = []
     errs = []
     _check(reg, schema, schema, "", errs)
@@ -189,7 +215,8 @@ def validate(reg, schema, now=None):
     def add(code, msg, rec=None, gap=False):
         # gap = a completeness gap: error only when the register claims completeness
         sev = "error" if (not gap or complete) else "warn"
-        findings.append({"code": code, "severity": sev, "record": rec, "message": _safe(msg)})
+        findings.append({"code": code, "severity": sev, "record": _safe(rec) if isinstance(rec, str) else rec,
+                         "message": _safe(msg)})
 
     for path, msg in errs:
         add("schema", f"{path or '/'}: {msg}")
@@ -211,7 +238,7 @@ def validate(reg, schema, now=None):
 
     fl = reg.get("families") if isinstance(reg, dict) and isinstance(reg.get("families"), list) else []
     fams = {f["id"]: f for f in fl if isinstance(f, dict) and isinstance(f.get("id"), str)}
-    on_word, stamps = [], {}
+    on_word = []
     for r in recs:
         rid = _rid(r)
         srcs = _sources(r)
@@ -230,7 +257,7 @@ def validate(reg, schema, now=None):
         if _unk(r.get("installed_state")):
             add("unknown-field", "installed_state UNKNOWN", rid, gap=True)
         lbl = r.get("label")
-        if _unk(lbl) or _N.fold(lbl) == "unclassified":
+        if _unk(lbl) or _N.canon(lbl) == "unclassified":
             add("unclassified", f"{_safe(r.get('role'))} record is unclassified", rid, gap=True)
         for lab, si in srcs:
             if _unk(si.get("version")):
@@ -248,8 +275,6 @@ def validate(reg, schema, now=None):
             add("unevidenced-state", "installed_state loaded without adoption_evidence naming a process observation", rid, gap=True)
         if r.get("installed_state") == "installed" and _on_word(r, srcs):
             on_word.append(rid)
-        evs = r.get("evidence") if isinstance(r.get("evidence"), list) else []
-
         def stamp(what, value):
             d, st = _ts(value)
             if st == "bad":
@@ -260,18 +285,32 @@ def validate(reg, schema, now=None):
                 add("future-timestamp", f"{what} is later than the reference time plus 300 s", rid, gap=True)
             return d
 
+        # every stated source needs a captured_at and every evidence / adoption ref an observed_at: an omitted
+        # stamp makes staleness unprovable, the same refusal as an unparseable one.
+        caps = []
         for lab, si in srcs:
-            cap = stamp(f"{lab} captured_at", si.get("captured_at")) if "captured_at" in si else None
-            for i, ev in enumerate(evs):
-                if isinstance(ev, dict) and "observed_at" in ev:
-                    if (id(r), i) not in stamps:
-                        stamps[(id(r), i)] = stamp(f"evidence[{i}] observed_at", ev["observed_at"])
-                    at = stamps[(id(r), i)]
+            if "captured_at" not in si:
+                add("missing-timestamp", f"{lab} has no captured_at; staleness unprovable", rid, gap=True)
+                caps.append((lab, None))
+            else:
+                caps.append((lab, stamp(f"{lab} captured_at", si["captured_at"])))
+        for field in ("evidence", "adoption_evidence"):
+            items = r.get(field) if isinstance(r.get(field), list) else []
+            for i, ev in enumerate(items):
+                if not isinstance(ev, dict) or _unk(ev.get("ref")):
+                    continue
+                what = f"{field}[{i}] observed_at"
+                if "observed_at" not in ev:
+                    if field == "evidence":
+                        add("missing-timestamp", f"{what} is missing; staleness unprovable", rid, gap=True)
+                    else:       # residual, stated: an earlier test pins an unstamped adoption ref as accepted
+                        findings.append({"code": "unstamped-adoption", "severity": "warn", "record": rid,
+                                         "message": f"{what} is missing; the adoption observation is unstamped, staleness unprovable"})
+                    continue
+                at = stamp(what, ev["observed_at"])
+                for lab, cap in caps:
                     if at and cap and at < cap:
-                        add("stale-evidence", f"evidence[{i}] observed {at.isoformat()} before {lab} identity {cap.isoformat()}", rid, gap=True)
-        for i, ev in enumerate(evs):
-            if isinstance(ev, dict) and "observed_at" in ev and (id(r), i) not in stamps:
-                stamps[(id(r), i)] = stamp(f"evidence[{i}] observed_at", ev["observed_at"])
+                        add("stale-evidence", f"{field}[{i}] observed {at.isoformat()} before {lab} identity {cap.isoformat()}", rid, gap=True)
         if r.get("role") == "caller":
             reg_callers = (fams.get(r.get("family")) or {}).get("registered_callers")
             if isinstance(reg_callers, list) and r.get("component") not in reg_callers:

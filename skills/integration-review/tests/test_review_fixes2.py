@@ -418,7 +418,7 @@ class TestD06Timestamps(unittest.TestCase):
 
 class TestD07Fusion(unittest.TestCase):
     def recs(self, rows):
-        return xr.convert(rows)["register"]["records"]
+        return xr.convert(rows, heuristic_fusion=True)["register"]["records"]
 
     def pair(self, p1, p2, r1="r1", r2="r2"):
         return self.recs([row(component="recall", source_repo=r1, path_or_command=p1),

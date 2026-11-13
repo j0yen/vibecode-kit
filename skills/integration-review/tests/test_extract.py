@@ -26,7 +26,7 @@ def row(**kw):
 
 
 def conv(rows, declared="partial"):
-    return ex.convert(rows, declared)
+    return ex.convert(rows, declared, heuristic_fusion=True)     # the pinned fusion tests run the opt-in heuristic
 
 
 def one(r):

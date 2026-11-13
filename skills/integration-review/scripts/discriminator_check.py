@@ -9,9 +9,24 @@ exit: 0 ok, 2 bad input (sha mismatch, no quoted pattern on the line, unsafe nam
 """
 import argparse
 import hashlib
+import importlib.util
 import json
+import os
 import re
 import sys
+
+
+def _load_norm():
+    m = sys.modules.get("ir_norm")
+    if m is None:
+        spec = importlib.util.spec_from_file_location("ir_norm", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ir_norm.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        sys.modules["ir_norm"] = m
+    return m
+
+
+redact, redact_obj = _load_norm().redact, _load_norm().redact_obj
 
 NOTE = ("Conditional integration risk: the file does not accept these names; whether any producer "
         "publishes them is not shown. This is not evidence that live messages are lost.")
@@ -34,7 +49,7 @@ def verdicts(pattern, names):
     out = {}
     for n in names:
         if not SAFE.match(n):
-            raise ValueError(f"unsafe actor name {n!r}")
+            raise ValueError(f"unsafe actor name {redact(n)!r}")
         out[n] = "accept" if rx.search(f"2026-11-12T00:00:00 | {n} | message") else "refuse"
     return out
 
@@ -51,11 +66,11 @@ def main(argv=None):
     try:
         raw = open(a.file, "rb").read()
     except OSError as e:
-        print(f"UNKNOWN: source unavailable: {e}", file=sys.stderr)
+        print(redact(f"UNKNOWN: source unavailable: {e}"), file=sys.stderr)
         return 2
     digest = hashlib.sha256(raw).hexdigest()
     if a.sha256 and digest != a.sha256.lower():
-        print(f"sha256 mismatch: file {digest} expected {a.sha256}", file=sys.stderr)
+        print(redact(f"sha256 mismatch: file {digest} expected {a.sha256}"), file=sys.stderr)
         return 2
     names = [n for n in a.names.split(",") if n]
     expect_refuse = {n for n in a.expect_refuse.split(",") if n}
@@ -63,18 +78,18 @@ def main(argv=None):
         pattern = extract_pattern(raw.decode("utf-8", "replace"), a.line)
         res = verdicts(pattern, names)
     except (ValueError, re.error) as e:
-        print(f"error: {e}", file=sys.stderr)
+        print(redact(f"error: {e}"), file=sys.stderr)
         return 2
     labels = {n: ("positive-control" if v == "accept" or n in expect_refuse else "conditional-risk")
               for n, v in res.items()}
     if a.json:
-        print(json.dumps({"file_sha256": digest, "line": a.line, "pattern": pattern,
-                          "results": res, "labels": labels, "note": NOTE}, indent=2))
+        print(json.dumps(redact_obj({"file_sha256": digest, "line": a.line, "pattern": pattern,
+                                     "results": res, "labels": labels, "note": NOTE}), indent=2))
     else:
         print(f"source sha256 {digest} line {a.line}")
-        print(f"pattern {pattern}")
+        print(redact(f"pattern {pattern}"))
         for n, v in res.items():
-            print(f"{v} {n} [{labels[n]}]")
+            print(redact(f"{v} {n} [{labels[n]}]"))
         if any(v == "refuse" and n not in expect_refuse for n, v in res.items()):
             print(NOTE)
     return 0

@@ -28,12 +28,18 @@ production state, and it opens no tasks or PRs; findings go to their existing ca
   the record and `evidence[i]`, and redacts any credential-shaped text in a message.
 - UNKNOWN-equivalents count as UNKNOWN everywhere the complete check reads a field (role, component, host,
   installed state, label, source repo, version, evidence and adoption refs). One shared rule
-  (`scripts/ir_norm.py`): not a string, empty, or after Unicode folding and removal of zero-width and
-  whitespace characters, any case, with surrounding punctuation dropped, one of `unknown unk ? tbd - -- n/a na
-  none null nil`. A real component named `none` must be given another name.
-- Credential-shaped text (token/secret/password words, `ghp_`, `AKIA`, `eyJ`, `xox`, key headers, `key=value`
-  forms) is redacted from every message the scripts print, from record ids, roles, property names,
-  finding ids, actors and duplicate-key names; the redactor is a pattern list, so it is a net, not a proof.
+  (`scripts/ir_norm.py`): not a string, or after Unicode NFKD, removal of combining marks and variation
+  selectors and of zero-width/control characters, folding of every dash/minus variant to `-`, case folding,
+  whitespace collapse and dropping of edge punctuation and `=`, either a value with no letter or digit (`?`, `???`,
+  `-`, `--`, `...`) or one of the placeholder family `unknown unk n/a` (any dotting or spacing: `N.A.`, `n a`),
+  `undefined null nil none unavailable unspecified tbd tba todo` and `not available/applicable/known`, matched with
+  spaces, dots, slashes and dashes removed. The same function decides every field. A real component named
+  `none` must be given another name.
+- Credential-shaped text (token/secret/password words, `ghp_`, `sk_live_`, `glpat-`, `npm_`, `hf_`, `AKIA`, `eyJ`,
+  `xox`, key headers, `key=value` forms, and any 32+ character mixed-case-and-digit run such as a 40-character
+  secret key; judged also after NFKC, after removing zero-width characters and combining marks, and after decoding
+  `\uXXXX` escapes) is redacted from every message the scripts print, from record ids, roles, property names,
+  finding ids, actors, record fields and duplicate-key names, in every script (`discriminator_check.py` included); the redactor is a pattern list, so it is a net, not a proof.
 
 ## Labels (exactly five)
 `observed-defect` (reproduced on real source/behaviour) · `conditional-risk` (breaks only if a
@@ -57,8 +63,11 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    breaking; an added items constraint tightens and a removed one loosens; enum values compare by
    JSON type (`1` is not `true`); a `type` added tightens and one removed loosens; a `$ref` retargeted (or
    swapped with an inline schema) has its two local targets compared, a target that is not a `#/...`
-   pointer in its own document is UNDETERMINED; `additionalProperties` as a schema is compared
-   (open -> schema tightens, schema -> open loosens). A list-shaped or otherwise unreadable
+   pointer in its own document is UNDETERMINED (a `$ref` swapped with an equal inline schema, or identical files, is
+   compatible: note only); `additionalProperties` as a schema is compared (open -> schema tightens, schema -> open
+   loosens), and a property added under an old `additionalProperties` schema is checked against that schema
+   (producer-first incompatible, for a closed consumer, when the new type is not accepted by it); an unsupported
+   keyword with equal text on both sides is not a change (a note; UNDETERMINED when the same subtree changes). A list-shaped or otherwise unreadable
    `properties`/`definitions`/`required`/`enum` is rc 2, never a compatible result.
 5. Record endpoints in a register (`schema/register.schema.json`) and run
    `python3 -I scripts/register_validate.py REGISTER.json`. It refuses `all-interfaces-complete`
@@ -67,10 +76,19 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    are zero records, when a timestamp is not parseable ISO-8601 or has no UTC offset (an offset-less time is
    ambiguous and is never read in the host time zone) or is later than the reference time plus 300 s
    (`--now ISO8601-with-offset` sets the reference time, default the system clock), or when `loaded` lacks
-   `adoption_evidence`. Adoption rule: an adoption ref that is not an UNKNOWN-equivalent AND names a process
-   observation (`pid`, `/proc/<n>`, `process`, `cmdline`, `exe`, `lsof`, `fuser`); a unit listing, an enabled
-   state or an install location is not process adoption. This is a keyword check: it does not prove the
-   observed process is the right one, the reviewer still owns that.
+   `adoption_evidence`. An omitted `captured_at` on a source or `observed_at` on an evidence ref is as refused as
+   an unparseable one (staleness is unprovable); `adoption_evidence` timestamps follow the evidence rules when
+   stated (garbage, offset-less, future, or observed before the source capture: refused), and an unstamped
+   adoption ref is only warned (`unstamped-adoption`, a stated residual). `validate(now=...)` takes an aware
+   datetime or None (the wall clock); a naive datetime raises ValueError, it is never silently replaced.
+   Adoption rule: a ref is a positive observation of a running process only when it states a
+   `/proc/<n>/exe|cmdline|comm|status|stat|cwd|fd` path, or `pid` with a non-zero number plus `exe`, `cmdline`,
+   `comm` or `command`, or a listing tool (`ps pgrep pidof lsof fuser top`) with `shows|lists|reports|names|found
+   process <name>`. It is refused when it carries a negation or placeholder word (`no not none never dead exited
+   unknown n/a tbd ...`), or names a unit (`systemctl`, `list-units`, `*.service|timer|socket|...`), and a tool name,
+   `pid=` with no number, or a bare keyword is not an observation. The rule is textual and conservative (a
+   cmdline that itself contains `no` is refused: restate it); it does not prove the observed process is the right
+   one, the reviewer still owns that.
    Scope: the `installed` rule (stated path and 64-hex sha256) is enforced by the extractor only. A
    hand-written register states `installed` on the reviewer's word, so the validator's OK line names every
    installed record taken on that word ("installed state of N record(s) taken on the declarer's word"); a
@@ -78,18 +96,23 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    `path_or_command` separates two endpoints on one component; `sources` carries every stated
    source of a multi-repo component. To convert extraction rows run
    `python3 -I scripts/extract_register.py ENDPOINTS.jsonl OUTDIR` (sides and `loaded` are never
-   invented; contradictory side marks give UNKNOWN; equally named endpoints fuse across repos by a HEURISTIC
-   that does not prove one component: each path, normalized (`..` resolved, not absolute), rooted in its own
-   repo, identities stated and distinct. A fused record carries `fusion_basis` and every source, so a wrong
-   guess loses nothing; the reviewer must confirm a fused component before relying on it. Same-named
-   components in different repos otherwise stay separate; raw identity and
-   evidence kept verbatim; input is split on newline only, must be UTF-8, and a duplicate JSON key
+   invented; contradictory side marks give UNKNOWN; equally named endpoints fuse only on direct proof of
+   one component: the same content sha256, or the same canonical repo identity (URL, `.git`, trailing `/` folded)
+   with the same normalized path; a fused record carries `fusion_basis` and every source. Same-named
+   components in different repos, or with distinct commits, stay separate. The old guess (paths rooted in their
+   own repos, identities distinct) is a heuristic, off by default, enabled only by `--heuristic-fusion`; it is a
+   guess and its records are labelled `same-name-and-repo-rooted-paths-heuristic`; raw identity and
+   evidence kept verbatim; an identity parses only when the whole string is
+   `path+sha256:<path> <64 hex>` or `commit <40 hex>` (a trailing newline or `(dirty, unverified)` is UNKNOWN); input is split on newline only, must be UTF-8, and a duplicate JSON key
    rejects the row). Unreadable or wrong-shape input exits 2 in every script, never with a traceback;
    schema_compat never reports an unreadable input as rc 1.
 5b. A "message lost" finding needs producer -> alias adapter -> installed waiter, each traced:
    `python3 -I scripts/lost_message_check.py FINDING.json`. A missing link keeps it conditional-risk.
    Links are typed (sha256 64 hex, commit 40 hex, non-blank ref) and must agree on any stated
-   family, interface, message and actor chain; a disagreeing link is named and keeps conditional-risk, and
+   family, interface, message and actor chain, compared by JSON type and value (actor `1` and `true` differ);
+   a claim is a message-lost claim in any case, separators, word order or synonym (`messagelost`,
+   `lost-message`, `message-dropped`, `msg-loss`); a claim not recognised is not silently passed: the output
+   states `"claim_recognised": false` and a `NOT-CHECKED:` line (the label is then the declarer's, unverified); a disagreeing link is named and keeps conditional-risk, and
    an actor chain that returns to an earlier actor is a cycle (inconsistent). A trace in which no family,
    interface or message is stated on two links, or that lacks the producer or waiter actor, is marked
    `"consistency": "unproven"` with an `UNPROVEN:` line; its label is not changed by the tool, so say in the
