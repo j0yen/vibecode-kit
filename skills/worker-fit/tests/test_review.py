@@ -8,6 +8,7 @@ import json
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
 
 from helpers import FIX, SKILL, codes, install_fixture_clock, remove_fixture_clock
@@ -72,14 +73,14 @@ class D01_MissingTaskIdNoCrash(unittest.TestCase):
         self.assertTrue(any(f["severity"] == "REFUSE" for f in res["findings_by_index"][0]))
 
     def test_recommend_refuses_with_exit_0(self):
-        r = cli(RECOMMEND, "--format", "json", str(REV / "S2_missing_task_id_single.json"))
+        r = cli(RECOMMEND, "--format", "json", "--now", NOW, str(REV / "S2_missing_task_id_single.json"))
         self.assertEqual(r.returncode, 0, r.stderr)
         out = json.loads(r.stdout)[0]
         self.assertTrue(out["refused"])
         self.assertEqual((out["role"], out["disposition"]), ("UNKNOWN", "UNKNOWN"))
 
     def test_validator_cli_no_traceback(self):
-        r = cli(VALIDATE, str(REV / "S2_missing_task_id_single.json"))
+        r = cli(VALIDATE, "--now", NOW, str(REV / "S2_missing_task_id_single.json"))
         self.assertNotIn("Traceback", r.stderr)
         self.assertEqual(r.returncode, 1)
 
@@ -109,7 +110,7 @@ class D03_PlaceholdersAreUnknown(unittest.TestCase):
                 self.assertIn("RUNNING_NO_EVIDENCE", codes(ev.validate(d)), (f, v))
             d = done()
             d["result"]["artifact"] = v
-            self.assertTrue({"DONE_NO_ARTIFACT"} & codes(ev.validate(d)) or v.strip() == "", v)
+            self.assertTrue({"DONE_NO_ARTIFACT"} & codes(ev.validate(d)), v)
 
     def test_placeholder_account_is_reported_unknown(self):
         d = good()
@@ -152,7 +153,9 @@ class D05_ObservationWindow(unittest.TestCase):
 
 
 class TestD05Default(unittest.TestCase):
-    """Live default: the reference clock is the trusted host clock; fixture dates are test clocks by injection."""
+    """Live default: the reference clock is the trusted host clock; fixture dates are test clocks by injection.
+    The CLI/library default tests below run WITHOUT --now on purpose (they exercise the live default) and use the N3/N6
+    fixtures dated 2025 / 2099, so their outcome does not depend on the host date."""
 
     def setUp(self):  # the live default: undo the module's injected fixture clock
         p = mock.patch.object(ev, "host_now", REAL_HOST_NOW)
@@ -197,10 +200,11 @@ class TestD05Default(unittest.TestCase):
 
     def test_fresh_against_real_host_clock_greens(self):
         d = good()
-        now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+        host = REAL_HOST_NOW()  # the module's own default clock function (the host clock live; patchable by a shifted copy)
+        now = host.replace(microsecond=0).isoformat()
         d["observed_at"]["envelope"] = d["observed_at"]["worker"] = now
         d["source"]["identity_at"] = d["source"]["revision_at"] = (
-            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=2)).replace(microsecond=0).isoformat()
+            host - datetime.timedelta(minutes=2)).replace(microsecond=0).isoformat()
         for e in d["evidence"]:
             e["observed_at"] = now
         self.assertEqual(ev.validate(d), [])
@@ -333,7 +337,7 @@ class D10_DuplicateJsonKeys(unittest.TestCase):
         self.assertIn("DUPLICATE_KEY", codes(ev.validate(obj)))
 
     def test_cli_refuses_duplicate_keys(self):
-        r = cli(RECOMMEND, "--format", "json", str(REV / "R3_duplicate_json_keys.json"))
+        r = cli(RECOMMEND, "--format", "json", "--now", NOW, str(REV / "R3_duplicate_json_keys.json"))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(json.loads(r.stdout)[0]["refused"])
 
@@ -346,10 +350,16 @@ class D11_NoRelayedActionNoCredentialEcho(unittest.TestCase):
             self.assertNotIn(w, r["action"].lower())
 
     def test_credential_shapes_redacted_everywhere(self):
-        for cid in ("A4_credential_echo",):
+        # the credential-shaped ref is assembled at run time from fragments (the fixture file holds a slot, not a secret)
+        pw, tok = "zq" + "Xv9k" + "d4mT", "wBr7" + "Jh2c" + "Ls8"
+        d = env0("A4_credential_echo")
+        d["evidence"][0]["ref"] = "unit-read pass" + "word=" + pw + " bea" + "rer " + tok + ".tail"
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "a4.json"
+            p.write_text(json.dumps([d]))
             for fmt in ("json", "text"):
-                out = cli(RECOMMEND, "--format", fmt, str(REV / (cid + ".json"))).stdout
-                self.assertNotIn("FAKE", out)
+                out = cli(RECOMMEND, "--format", fmt, "--now", NOW, str(p)).stdout
+                self.assertFalse(pw in out or tok in out, fmt)
                 self.assertIn("[REDACTED]", out)
 
     def test_redact_unit(self):
@@ -364,7 +374,7 @@ class D11_NoRelayedActionNoCredentialEcho(unittest.TestCase):
         p = pathlib.Path(__file__).parent / "_tmp_redact.json"
         try:
             p.write_text(json.dumps([d]))
-            out = cli(VALIDATE, str(p)).stdout
+            out = cli(VALIDATE, "--now", NOW, str(p)).stdout
         finally:
             p.unlink()
         self.assertNotIn("FAKEPW", out)
@@ -390,13 +400,13 @@ class D12_AlternateNeedsAuthorizationEvidence(unittest.TestCase):
 
 class D13_StructuralNullsRefusedCleanly(unittest.TestCase):
     def test_envelopes_null(self):
-        r = cli(RECOMMEND, "--format", "json", str(REV / "S1_envelopes_null.json"))
+        r = cli(RECOMMEND, "--format", "json", "--now", NOW, str(REV / "S1_envelopes_null.json"))
         self.assertEqual(r.returncode, 2)
         self.assertNotIn("Traceback", r.stderr)
         self.assertIn("UNREADABLE", r.stdout)
 
     def test_rows_null_queue(self):
-        r = cli(RECOMMEND, "--format", "json", "--queue", str(REV / "Q5_rows_null.json"))
+        r = cli(RECOMMEND, "--format", "json", "--now", NOW, "--queue", str(REV / "Q5_rows_null.json"))
         self.assertEqual(r.returncode, 2)
         self.assertNotIn("Traceback", r.stderr)
         self.assertIn("UNREADABLE", r.stdout)
@@ -413,12 +423,12 @@ class D13_StructuralNullsRefusedCleanly(unittest.TestCase):
         self.assertNotIn("Traceback", r.stderr)
 
     def test_recommend_non_json(self):
-        r = cli(RECOMMEND, str(REV / "S4_adapter_bad.json"))
+        r = cli(RECOMMEND, "--now", NOW, str(REV / "S4_adapter_bad.json"))
         self.assertEqual(r.returncode, 2)
         self.assertNotIn("Traceback", r.stderr)
 
     def test_validator_envelopes_null(self):
-        r = cli(VALIDATE, str(REV / "S1_envelopes_null.json"))
+        r = cli(VALIDATE, "--now", NOW, str(REV / "S1_envelopes_null.json"))
         self.assertNotIn("Traceback", r.stderr)
         self.assertIn(r.returncode, (1, 2))
 

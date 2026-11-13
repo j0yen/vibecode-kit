@@ -5,6 +5,7 @@ The queue row is silent about workers, effects, consumers and timestamps with an
 field stays UNKNOWN. A claim string is carried verbatim in source.claim; it is a queue entry, not a
 worker launch, and never fills worker.host/unit/child. Nothing is invented: a row with no ask_id or rev
 yields an empty identity that the validator refuses. Read-only; standard library only.
+Credential-shaped values are redacted from the printed envelopes (claim strings, owners).
 Exit 0 on output, 2 (UNREADABLE) when the input is not JSON or not a list of rows.
 """
 import json
@@ -72,7 +73,7 @@ def main(argv):
     except (OSError, ValueError) as e:
         print(ev.redact("UNREADABLE %s: %s" % (argv[0], e)))
         return 2
-    print(json.dumps({"envelopes": envs}, indent=1))
+    print(json.dumps(ev.scrub({"envelopes": envs}), indent=1))
     return 0
 
 

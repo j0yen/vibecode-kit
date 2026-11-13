@@ -50,13 +50,13 @@ def _own_identities(d):
 
 
 def ev_norm(v):
-    return v.strip().lower()
+    return ev.norm_text(v)
 
 
 def _distinct_reviewer(d):
     res = d["result"]
     by = res.get("reviewed_by")
-    return res["reviewed"] is True and not ev.is_unknown(by) and ev_norm(by) not in _own_identities(d)
+    return res["reviewed"] is True and ev.ident(by) is not None and ev_norm(by) not in _own_identities(d)
 
 
 def _evidence(d):
@@ -102,31 +102,37 @@ def recommend_one(d, findings):
                  terminal_durable=True, no_takeover=True, no_replay=True)
         if res["reviewed"] is True and not distinct:
             r["reasons"].append("result.reviewed=true carries no distinct reviewer identity: independent verification kept")
-        named = cons["named"]
-        named_ok = not ev.is_unknown(named) and (distinct or ev_norm(named) not in own)
+        # The action sentence is built from tool-owned text only. Envelope strings (consumer, session, unit, owner,
+        # authorization reference, task id) are never echoed into it: they appear, redacted, in evidence_used, and the
+        # validated consumer identifiers in next_consumer / later_consumers.
+        named = ev.ident(cons["named"])
+        named_ok = named is not None and (distinct or ev_norm(named) not in own)
         later = [named] if named_ok else []
         r["next_consumer"] = named if named_ok else UNKNOWN
         what = "accept/install owner decides next" if distinct else "exact-head independent review of the terminal result"
         if named_ok and cons["available"] is True:
-            r["action"] = "%s consumes the retained terminal (%s); no new coder." % (named, what)
+            r["action"] = "The named consumer (next_consumer) consumes the retained terminal (%s); no new coder." % what
         else:
-            alt = cons["alternate"]
-            alt_ok = not ev.is_unknown(alt) and (distinct or ev_norm(alt) not in own)
-            if alt_ok and cons["alternate_authorized"] and not ev.is_unknown(cons.get("alternate_authorization_ref")):
+            alt = ev.ident(cons["alternate"])
+            alt_ok = alt is not None and (distinct or ev_norm(alt) not in own)
+            ref_ok = not ev.is_unknown(cons.get("alternate_authorization_ref"))
+            if alt_ok and cons["alternate_authorized"] and ref_ok:
                 later.append(alt)
-                tail = "authorized alternate %s may consume (authorization ref %s)" % (alt, cons["alternate_authorization_ref"])
+                tail = "an authorized alternate (later_consumers) may consume; its authorization reference is recorded in evidence_used"
             elif alt_ok and cons["alternate_authorized"]:
-                tail = "alternate %s is marked authorized with no authorization evidence reference: no authority; not used" % alt
+                tail = "the alternate is marked authorized with no authorization evidence reference: no authority; not used"
             elif alt_ok:
-                tail = "alternate %s is a label with no authority; not used" % alt
-            elif not ev.is_unknown(alt):
-                tail = "alternate %s is the worker's own session: not independent; not used" % alt
+                tail = "the alternate is a label with no authority; not used"
+            elif alt is not None:
+                tail = "the alternate is the worker's own session: not independent; not used"
             else:
                 tail = "UNKNOWN alternate: none on record"
-            if not ev.is_unknown(named) and not named_ok:
-                lead = "Consumer %s is the worker's own session: not independent, not used for verification" % named
+            if not ev.is_unknown(cons["named"]) and named is not None and not named_ok:
+                lead = "The named consumer is the worker's own session: not independent, not used for verification"
+            elif named is None and not ev.is_unknown(cons["named"]):
+                lead = "The named consumer is not a valid identifier and is not used"
             else:
-                lead = "Consumer %s busy/unavailable (available=%s)" % (named, cons["available"])
+                lead = "The named consumer is busy/unavailable (available=%s)" % cons["available"]
             r["action"] = ("%s: terminal stays durable and unconsumed; %s (%s); "
                            "no ACK recorded, no new coder." % (lead, what, tail))
         r["later_consumers"] = later
@@ -139,13 +145,12 @@ def recommend_one(d, findings):
     if st in ("RUNNING", "NOT_STARTED", "BLOCKED") and d["owner_reachable"] is False:
         r.update(disposition="blocked", role="coordinator-decision", no_takeover=True, no_replay=True,
                  reasons=["owner unreachable: no takeover of a live claim"],
-                 action="No takeover, no launch, no replay: owner %s is unreachable. Reach the owner or wait; a claim is not released by this recommendation." % d["current_owner"])
+                 action="No takeover, no launch, no replay: the recorded owner (current_owner) is unreachable. Reach the owner or wait; a claim is not released by this recommendation.")
         return r
     if st == "RUNNING":
         if d["owner_reachable"] is True:
             r.update(disposition="reuse-active-worker", role=shape_role, no_takeover=False, no_replay=True,
-                     action="Reuse worker %s on %s (unit %s, child %s); do not start another implementation." %
-                            (d["worker"]["session"], d["task_id"], d["worker"]["unit"], d["worker"]["child"]))
+                     action="Reuse the recorded active worker (worker fields in evidence_used); do not start another implementation.")
         else:
             r.update(disposition=UNKNOWN, role=shape_role, reasons=["owner reachability UNKNOWN"],
                      action="No takeover, no launch: owner reachability is UNKNOWN. Observe the owner first.")
@@ -154,6 +159,10 @@ def recommend_one(d, findings):
         r.update(disposition=UNKNOWN, role=shape_role, no_takeover=True, no_replay=True,
                  reasons=["NOT_STARTED with effect %s: an unowned slice needs effect none and no worker evidence" % eff],
                  action="No launch, no takeover, no replay: effect is %s on a task marked NOT_STARTED. Read the effect and any worker through their owner first." % eff)
+        return r
+    if st == "NOT_STARTED" and d["owner_reachable"] is not True:
+        r.update(disposition=UNKNOWN, role=shape_role, no_takeover=True, no_replay=True, reasons=["owner reachability UNKNOWN"],
+                 action="No takeover, no launch: owner reachability is UNKNOWN. Observe the owner first.")
         return r
     if st == "NOT_STARTED":
         r.update(disposition="ready-unowned-slice", role=shape_role, no_takeover=False,
@@ -169,13 +178,7 @@ def recommend_one(d, findings):
 
 
 def _scrub(v):
-    if isinstance(v, str):
-        return ev.redact(v)
-    if isinstance(v, list):
-        return [_scrub(x) for x in v]
-    if isinstance(v, dict):
-        return {k: _scrub(x) for k, x in v.items()}
-    return v
+    return ev.scrub(v)
 
 
 def recommend_set(obj, now=None):
@@ -223,7 +226,7 @@ def main(argv):
             else:
                 path = a
     except ValueError as e:
-        print("UNREADABLE --now: %s" % e)
+        print(ev.redact("UNREADABLE --now: %s" % e))
         return 2
     if path is None:
         print(__doc__)

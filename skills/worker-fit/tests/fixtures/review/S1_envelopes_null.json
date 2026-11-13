@@ -1,3 +1,4 @@
 {
+ "label": "source-only synthetic fixture; does not prove production behavior",
  "envelopes": null
 }

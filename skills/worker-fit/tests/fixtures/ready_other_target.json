@@ -15,7 +15,7 @@
   "revision_at": "2026-11-13T06:00:00Z"
  },
  "current_owner": "UNKNOWN",
- "owner_reachable": "UNKNOWN",
+ "owner_reachable": true,
  "target": {
   "repo": "synthetic/repo-a",
   "branch": "syn/b2",

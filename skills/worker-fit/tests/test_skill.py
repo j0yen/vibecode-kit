@@ -2,9 +2,12 @@ import json
 import re
 import unittest
 
-from helpers import FIX, SKILL
+from helpers import FIX, FIXTURE_NOW, SKILL
 
 import envelope_validate as ev
+
+
+TEMPLATE_NOW = "2026-11-13T06:30:00Z"  # injected clock: the template's own observation time, never the host date
 
 
 class SkillSource(unittest.TestCase):
@@ -31,7 +34,8 @@ class SkillSource(unittest.TestCase):
             self.assertIn(disp, self.text)
 
     def test_template_envelope_is_valid(self):
-        self.assertEqual(ev.validate(json.loads((SKILL / "templates" / "envelope.template.json").read_text())), [])
+        self.assertEqual(ev.validate(json.loads((SKILL / "templates" / "envelope.template.json").read_text()),
+                                     now=TEMPLATE_NOW), [])
 
     def test_fixtures_are_labelled_source_only_and_clean(self):
         bad = re.compile(r"token=|sk-ant|password|bearer|PRIVATE KEY|api[_-]?key", re.I)
@@ -41,7 +45,7 @@ class SkillSource(unittest.TestCase):
             self.assertIsNone(bad.search(txt), p.name)
 
     def test_scripts_use_only_the_standard_library(self):
-        allowed = {"json", "sys", "os", "string", "datetime", "envelope_validate", "queue_adapter"}
+        allowed = {"json", "sys", "os", "re", "string", "datetime", "unicodedata", "envelope_validate", "queue_adapter"}
         for p in (SKILL / "scripts").glob("*.py"):
             mods = set(re.findall(r"^(?:import|from)\s+(\w+)", p.read_text(), re.M))
             self.assertLessEqual(mods, allowed, p.name)

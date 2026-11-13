@@ -157,7 +157,7 @@ class ControlH_BusyConsumer(unittest.TestCase):
     def test_bad_unauthorized_alternate_gets_no_authority_from_label(self):
         r = one("done_consumer_busy_alt_unauth")
         self.assertEqual(r["later_consumers"], ["ctl"])
-        self.assertIn("rb", r["action"])
+        self.assertNotIn("rb", r["later_consumers"])
         self.assertIn("no authority", r["action"])
 
     def test_no_alternate_is_reported_unknown(self):

@@ -10,12 +10,18 @@ Counts are derived from the enumerated records; a declared total is only compare
 A pass is a statement about the envelope's shape and internal consistency, not about production.
 """
 import json
+import re
 import sys
+import unicodedata
 from datetime import datetime, timezone
 
 UNKNOWN = "UNKNOWN"
-# values that stand for "nothing observed": compared after strip() and lower(), so 'unknown', ' None ', '' all count
-PLACEHOLDERS = {"unknown", "none", "null", "n/a", ""}
+# values that stand for "nothing observed", compared after norm_text(): NFKC, format/control characters dropped,
+# whitespace collapsed, edge punctuation/brackets/quotes stripped, lower-cased. A value with no letter or digit left
+# (e.g. '?', '-', '--', '...') is a placeholder as well.
+PLACEHOLDERS = {"unknown", "unk", "?", "tbd", "tba", "todo", "-", "--", "n/a", "n.a", "na", "none", "null", "nil",
+                "undefined", "not available", "not applicable", "unspecified", "missing", "empty", ""}
+_EDGE = "<>[](){}\"'`.,;:!*_~|\\ "
 STATES = ["NOT_STARTED", "RUNNING", "DONE", "BLOCKED", "UNKNOWN"]
 SHAPES = ["implementation", "review", "decision", "deterministic", "UNKNOWN"]
 EFFECTS = ["none", "applied", "UNKNOWN"]
@@ -48,11 +54,39 @@ def finding(code, path, message, severity="REFUSE"):
     return {"code": code, "severity": severity, "path": path, "message": message}
 
 
+def norm_text(v):
+    """The one normalizer for evidence-bearing strings: NFKC, zero-width/format and control characters dropped,
+    any whitespace collapsed to one space, edge punctuation/brackets/quotes stripped, lower-cased."""
+    s = unicodedata.normalize("NFKC", v)
+    s = "".join(" " if c.isspace() else c for c in s if c.isspace() or unicodedata.category(c) not in ("Cf", "Cc"))
+    return " ".join(s.split()).strip(_EDGE).strip().lower()
+
+
 def is_unknown(v):
-    """True for None and for any UNKNOWN-equivalent placeholder string (any case, any surrounding whitespace)."""
+    """True for None and for any UNKNOWN-equivalent placeholder string, however spelled (see norm_text)."""
     if v is None:
         return True
-    return isinstance(v, str) and v.strip().lower() in PLACEHOLDERS
+    if not isinstance(v, str):
+        return False
+    s = norm_text(v)
+    return s in PLACEHOLDERS or not any(c.isalnum() for c in s)
+
+
+_IDENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}")
+_SHA = re.compile(r"[0-9a-fA-F]{7,64}")
+
+
+def ident(v):
+    """The value as an identifier (ASCII word characters and . _ : @ / + -, no spaces), or None when it is not one
+    or is a placeholder. Used wherever a value names a host, unit, child, consumer or reviewer."""
+    if not isinstance(v, str) or is_unknown(v):
+        return None
+    s = unicodedata.normalize("NFKC", v).strip()
+    return s if _IDENT.fullmatch(s) else None
+
+
+def is_sha(v):
+    return isinstance(v, str) and bool(_SHA.fullmatch(v.strip()))
 
 
 class DupDict(dict):
@@ -70,62 +104,56 @@ def _pairs(pairs):
     return d
 
 
-SECRET_WORDS = ("token", "key", "password", "passwd", "secret", "credential", "authorization")
 REDACTED = "[REDACTED]"
-
-
-def _secret_name(tok):
-    low = tok.lower()
-    return any(w in low for w in SECRET_WORDS)
+# the name starts at its secret word and may run on for a bounded stretch (keeps matching linear on hostile input)
+_NAME = r"(?:token|key|password|passwd|pwd|secret|credential|authorization)[\w.-]{0,200}"
+_NOT_DONE = r"(?!\[REDACTED\])"
+_QUOTED_OR_WORD = r"""(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s,;&)"'\]}]+)"""
+_REDACTIONS = [
+    # PEM private/secret key blocks (a missing END line redacts to the end of the text)
+    (re.compile(r"-----BEGIN [A-Z0-9 ]*(?:PRIVATE|SECRET)[A-Z0-9 ]*-----.*?(?:-----END [A-Z0-9 ]*-----|\Z)", re.S), REDACTED),
+    # URL userinfo: scheme://user:pass@host and scheme://token@host
+    (re.compile(r"(?i)(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://)[^\s/@:]*(?::[^\s/@]*)?@"), r"\1" + REDACTED + "@"),
+    # Authorization header value (Basic/Bearer/Digest/Token scheme plus credential)
+    (re.compile(r"(?i)(\bauthorization[\"']?\s*[:=]\s*[\"']?)" + _NOT_DONE +
+                r"(?:(?:basic|bearer|digest|token|negotiate)\s+)?[^\s\"',;)]+"), r"\1" + REDACTED),
+    (re.compile(r"(?i)\b(bearer)\s+" + _NOT_DONE + r"[^\s\"',;)]+"), r"\1 " + REDACTED),
+    # name = value / name: value, value may be quoted (with spaces); the name contains a secret word
+    (re.compile(r"(?i)(" + _NAME + r"[\"']?\s*[:=]\s*)" + _NOT_DONE + _QUOTED_OR_WORD), r"\1" + REDACTED),
+    (re.compile(r"(?<![A-Za-z0-9_])sk-[A-Za-z0-9_-]{3,}"), REDACTED),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|xox[abprs]-[A-Za-z0-9-]{8,}|AKIA[0-9A-Z]{12,}"
+                r"|AIza[0-9A-Za-z_-]{20,})"), REDACTED),
+    (re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*"), REDACTED),
+]
 
 
 def redact(text):
-    """Replace credential-shaped values (token=, key=, password=, secret=, bearer <x>, sk-... keys) in any output string.
-    Token based on whitespace runs; a name ending in = or : (or followed by a lone = / :) redacts the next token."""
+    """Replace credential-shaped values in any output string: PEM key blocks, URL userinfo, Authorization/Bearer values,
+    name=value pairs whose name holds token/key/password/secret/credential (quoted values with spaces included),
+    sk-... keys, GitHub/Slack/AWS/Google token prefixes and JWTs."""
     if not isinstance(text, str):
         return text
-    parts, cur, ws = [], "", None
-    for ch in text:
-        if ch.isspace() == ws:
-            cur += ch
-        else:
-            if cur:
-                parts.append(cur)
-            cur, ws = ch, ch.isspace()
-    if cur:
-        parts.append(cur)
-    out, hide_next, prev = [], False, ""
-    for part in parts:
-        if part.isspace():
-            out.append(part)
-            continue
-        low = part.lower()
-        if hide_next and part not in ("=", ":"):
-            out.append(REDACTED)
-            hide_next = False
-        elif prev.lower() == "bearer" or low.startswith("sk-"):
-            out.append(REDACTED)
-        else:
-            sep = next((i for i, c in enumerate(part) if c in "=:" and _secret_name(
-                part[:i].replace("&", " ").replace("?", " ").replace("/", " ").split()[-1:] and
-                part[:i].replace("&", " ").replace("?", " ").replace("/", " ").split()[-1] or "")), -1)
-            if sep >= 0:
-                if sep == len(part) - 1:
-                    out.append(part)
-                    hide_next = True
-                else:
-                    out.append(part[:sep + 1] + REDACTED)
-            elif part in ("=", ":") and _secret_name(prev):
-                out.append(part)
-                hide_next = True
-            else:
-                out.append(part)
-        prev = part
-    return "".join(out)
+    for rx, rep in _REDACTIONS:
+        text = rx.sub(rep, text)
+    return text
+
+
+def scrub(v):
+    """redact() applied to every string inside a JSON-shaped value."""
+    if isinstance(v, str):
+        return redact(v)
+    if isinstance(v, list):
+        return [scrub(x) for x in v]
+    if isinstance(v, dict):
+        return {k: scrub(x) for k, x in v.items()}
+    return v
 
 
 def load_json_text(txt):
-    return json.loads(txt, object_pairs_hook=_pairs)
+    try:
+        return json.loads(txt, object_pairs_hook=_pairs)
+    except RecursionError:
+        raise ValueError("JSON nesting too deep")
 
 
 def find_dups(obj, path="$"):
@@ -154,9 +182,12 @@ def parse_ts(v):
     if not isinstance(v, str):
         raise ValueError("not a string")
     dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
-    if dt.tzinfo is None:
+    if dt.tzinfo is None or dt.utcoffset() is None:
         raise ValueError("timestamp lacks an offset")
-    return dt.astimezone(timezone.utc)
+    try:
+        return dt.astimezone(timezone.utc)
+    except OverflowError:
+        raise ValueError("timestamp out of range")
 
 
 def _kind_ok(kind, v):
@@ -262,13 +293,23 @@ def _timestamps(d):
 
 
 def as_now(now):
-    """datetime (aware, UTC), parsed from an ISO-8601 string with offset; None stays None."""
-    if now is None or isinstance(now, datetime):
-        return now.astimezone(timezone.utc) if isinstance(now, datetime) and now.tzinfo else now
-    t = parse_ts(now)
-    if t is None:
-        raise ValueError("now must be a timestamp, not UNKNOWN")
-    return t
+    """datetime (aware, UTC) from an aware datetime or an ISO-8601 string with offset; None stays None.
+    ValueError for a naive datetime, UNKNOWN, an out-of-range value or any other type."""
+    if now is None:
+        return None
+    if isinstance(now, datetime):
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must carry a UTC offset")
+        try:
+            return now.astimezone(timezone.utc)
+        except OverflowError:
+            raise ValueError("now out of range")
+    if isinstance(now, str):
+        t = parse_ts(now)
+        if t is None:
+            raise ValueError("now must be a timestamp, not UNKNOWN")
+        return t
+    raise ValueError("now must be a datetime or an ISO-8601 string")
 
 
 def host_now():
@@ -300,7 +341,16 @@ def observation_times(d):
 
 def validate(d, now=None):
     """Findings for one envelope. Empty list = shape and internal consistency hold.
-    `now` is the reference clock for the observation window; None = the host clock (host_now())."""
+    `now` is the reference clock for the observation window; None = the host clock (host_now()).
+    ValueError for a naive or out-of-range `now`; a malformed record never raises: it yields a refusal."""
+    ref_now = resolve_now(now)
+    try:
+        return _validate(d, ref_now)
+    except (RecursionError, OverflowError):
+        return [finding("MALFORMED", "$", "record cannot be evaluated (nesting or number out of range)")]
+
+
+def _validate(d, ref_now):
     if not isinstance(d, dict):
         return [finding("SCHEMA_TYPE", "$", "envelope must be an object")]
     dups = find_dups(d)
@@ -320,7 +370,17 @@ def validate(d, now=None):
                 continue
             if t is not None and t < newest:
                 out.append(finding("STALE_EVIDENCE", p, "observed before the cited source identity/revision"))
-    ref_now = resolve_now(now)
+    st = d["state"]
+    # freshness evidence that is required for the state: an UNKNOWN one is unverifiable, never skipped
+    required = ["observed_at.envelope"] + (["observed_at.worker"] if st == "RUNNING" else []) + \
+        (["observed_at.result"] if st == "DONE" else []) + \
+        (["evidence[%d].observed_at" % i for i in range(len(d["evidence"]))] if st != "DONE" else [])
+    raw = {"observed_at.envelope": d["observed_at"]["envelope"], "observed_at.worker": d["observed_at"]["worker"],
+           "observed_at.result": d["observed_at"]["result"]}
+    raw.update({"evidence[%d].observed_at" % i: e["observed_at"] for i, e in enumerate(d["evidence"])})
+    for p in required:
+        if raw[p] == UNKNOWN and st != "UNKNOWN":  # a state-UNKNOWN record can only yield an UNKNOWN disposition anyway
+            out.append(finding("UNKNOWN_TIMESTAMP", p, "required observation time is UNKNOWN: freshness cannot be verified"))
     if ref_now is not None:
         checked = [("observed_at.envelope", True), ("observed_at.worker", d["state"] != "DONE"),
                    ("observed_at.result", False)]
@@ -357,7 +417,7 @@ def validate(d, now=None):
     elif r["revision"] is not None and r["revision"] != rev:
         out.append(finding("STALE_REVISION", "result.revision", "result cites rev %d, envelope is rev %d" % (r["revision"], rev)))
     if st == "RUNNING":
-        missing = [k for k in ("host", "unit", "child") if is_unknown(w[k])]
+        missing = [k for k in ("host", "unit", "child") if ident(w[k]) is None]
         if missing or d["observed_at"]["worker"] == UNKNOWN:
             out.append(finding("RUNNING_NO_EVIDENCE", "worker",
                                "RUNNING needs observed host+unit+child (missing: %s)" %
@@ -374,7 +434,7 @@ def validate(d, now=None):
             out.append(finding("RESULT_UNBOUND", "result", "result does not state which task and revision it answers"))
     if d["effect"]["state"] in ("applied", "UNKNOWN") and not d["effect"]["no_replay"]:
         out.append(finding("NO_REPLAY_POLICY", "effect.no_replay", "an applied or UNKNOWN effect must carry no_replay=true"))
-    if d["ack"]["accepted"] and not d["ack"]["evidence"]:
+    if d["ack"]["accepted"] and is_unknown(d["ack"]["evidence"]):
         out.append(finding("INVENTED_ACK", "ack", "accepted=true without evidence of the consumer's ACK"))
     if d["declared_complete"]:
         req = {"current_owner": d["current_owner"], "owner_reachable": d["owner_reachable"],
@@ -385,6 +445,14 @@ def validate(d, now=None):
         req.update({"worker." + k: v for k, v in w.items()})
         req["result.reviewed"] = r["reviewed"]
         unk = sorted(k for k, v in req.items() if is_unknown(v))
+        for k in ("target.head",):  # positive validation where the field has a format: a hex sha
+            if k not in unk and not is_sha(req[k]):
+                unk.append(k)
+        for k in ("worker.host", "worker.unit", "worker.child", "worker.session", "worker.invocation", "worker.account",
+                  "worker.model", "worker.effort", "consumer.named"):
+            if k not in unk and ident(req[k]) is None:
+                unk.append(k)
+        unk.sort()
         if unk or d["coverage_gaps"] or st != "DONE":
             out.append(finding("FALSE_COMPLETE", "declared_complete",
                                "declared complete with state %s and UNKNOWN: %s; coverage gaps listed: %d" %
@@ -398,27 +466,33 @@ def validate(d, now=None):
 STALE_WINDOW_SECONDS = 24 * 3600
 FUTURE_SKEW_SECONDS = 300
 
-HEX = "0123456789abcdef"
+# a commit named in free text: after a keyword (head/commit/sha/rev/oid/hash, any separator) any 4-64 hex run, or a bare
+# 7-64 hex run mixing digits and letters. Short (< 7) names never count as a match: they are an UNKNOWN ref.
+_HEAD_KEYWORD = re.compile(r"(?i)\b(?:head|commit|sha1?|sha256|revision|rev|oid|hash)\b[\s=:#@-]*([0-9a-f]{4,64})(?![\w])")
+_HEAD_BARE = re.compile(r"(?i)(?<![\w-])([0-9a-f]{7,64})(?![\w-])")
 
 
 def evidence_heads(e):
-    """Head shas an evidence entry names: its head field and any 'head=<hex>' / 'head:<hex>' in its ref."""
+    """Head shas an evidence entry names: its head field and every commit-like name in its ref."""
     heads = [e["head"]] if "head" in e else []
-    low, i = e["ref"].lower(), 0
-    while True:
-        i = low.find("head", i)
-        if i < 0:
-            return heads
-        i += 4
-        if low[i:i + 1] in ("=", ":"):
-            j = i + 1
-            while j < len(low) and low[j] in HEX:
-                j += 1
-            if j - (i + 1) >= 7:
-                heads.append(low[i + 1:j])
+    ref = unicodedata.normalize("NFKC", e["ref"])
+    for m in _HEAD_KEYWORD.finditer(ref):
+        h = m.group(1).lower()
+        if len(h) >= 7 or any(c in "abcdef" for c in h):
+            heads.append(h)
+    for m in _HEAD_BARE.finditer(ref):
+        h = m.group(1).lower()
+        if any(c.isdigit() for c in h) and any(c in "abcdef" for c in h):
+            heads.append(h)
+    out = []
+    for h in heads:
+        if h not in out:
+            out.append(h)
+    return out
 
 
 def same_head(a, b):
+    """Equal, or one a prefix of the other with both at least 7 hex long. A shorter, unequal name is not a match."""
     a, b = a.strip().lower(), b.strip().lower()
     return a == b or (min(len(a), len(b)) >= 7 and (a.startswith(b) or b.startswith(a)))
 
@@ -446,7 +520,7 @@ def validate_set(obj, now=None):
     if not isinstance(recs, list):
         return {"derived_count": 0, "findings_by_index": [], "set_findings": [finding("SCHEMA_TYPE", "envelopes", "must be a list")]}
     ref_now = resolve_now(now)
-    by_idx = [validate(r, ref_now) for r in recs]
+    by_idx = [validate(r, ref_now) for r in recs]  # validate() never raises for a malformed record
     sets = []
     if isinstance(obj, dict) and getattr(obj, "dups", ()):
         f = finding("DUPLICATE_KEY", "$", "duplicate JSON key in the set wrapper: " + ",".join(obj.dups))
@@ -457,13 +531,18 @@ def validate_set(obj, now=None):
     ids = {}
     for i, r in enumerate(recs):
         if isinstance(r, dict) and isinstance(r.get("task_id"), str):
-            ids.setdefault(r["task_id"], []).append(i)
+            ids.setdefault(norm_text(r["task_id"]), []).append(i)
     for tid, idx in ids.items():
         if len(idx) > 1:
-            f = finding("DUPLICATE_TASK", "task_id", "task %s appears %d times" % (tid, len(idx)))
+            f = finding("DUPLICATE_TASK", "task_id", "task %s appears %d times" % (recs[idx[0]]["task_id"], len(idx)))
             sets.append(f)
-            for i in idx[1:]:  # the first record keeps its place; only newcomers are refused
-                by_idx[i].append(f)
+            # state-aware, never positional: the first RUNNING record is the original and stays undisturbed;
+            # with no RUNNING record the first listed keeps its place. Every other record of the id is refused.
+            running = [i for i in idx if recs[i].get("state") == "RUNNING"]
+            keep = running[0] if running else idx[0]
+            for i in idx:
+                if i != keep:
+                    by_idx[i].append(f)
     live = {}
     for i, r in enumerate(recs):
         if not (isinstance(r, dict) and isinstance(r.get("task_id"), str) and isinstance(r.get("target"), dict)
@@ -497,7 +576,7 @@ def parse_args(argv):
             v = next(it, None)
             if v is None:
                 raise ValueError("--now needs a timestamp or 'system'")
-            now = datetime.now(timezone.utc) if v == "system" else as_now(v)
+            now = host_now() if v == "system" else as_now(v)
         else:
             paths.append(a)
     return paths, now
@@ -507,7 +586,7 @@ def main(argv):
     try:
         argv, now = parse_args(argv)
     except ValueError as e:
-        print("UNREADABLE --now: %s" % e)
+        print(redact("UNREADABLE --now: %s" % e))
         return 2
     if not argv:
         print(__doc__)
@@ -521,7 +600,7 @@ def main(argv):
             rc = max(rc, 2)
             continue
         res = validate_set(obj, now)
-        print("%s: %d envelope(s) enumerated" % (path, res["derived_count"]))
+        print(redact("%s: %d envelope(s) enumerated" % (path, res["derived_count"])))
         everything = [(i, f) for i, fs in enumerate(res["findings_by_index"]) for f in fs]
         everything += [(None, f) for f in res["set_findings"]
                        if not any(f is g for _, g in everything)]

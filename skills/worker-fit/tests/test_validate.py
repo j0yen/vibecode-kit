@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from helpers import SKILL, codes, load, install_fixture_clock, remove_fixture_clock
+from helpers import FIXTURE_NOW, SKILL, codes, load, install_fixture_clock, remove_fixture_clock
 
 import envelope_validate as ev
 
@@ -131,8 +131,8 @@ class ValidatorPairs(unittest.TestCase):
         script = str(SKILL / "scripts" / "envelope_validate.py")
         good = str(SKILL / "tests" / "fixtures" / "good_running.json")
         bad = str(SKILL / "tests" / "fixtures" / "false_complete.json")
-        self.assertEqual(subprocess.run([sys.executable, "-I", script, good], capture_output=True).returncode, 0)
-        r = subprocess.run([sys.executable, "-I", script, bad], capture_output=True, text=True)
+        self.assertEqual(subprocess.run([sys.executable, "-I", script, "--now", FIXTURE_NOW, good], capture_output=True).returncode, 0)
+        r = subprocess.run([sys.executable, "-I", script, "--now", FIXTURE_NOW, bad], capture_output=True, text=True)
         self.assertEqual(r.returncode, 1)
         self.assertIn("FALSE_COMPLETE", r.stdout)
 

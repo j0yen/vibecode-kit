@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from helpers import FIX, codes, install_fixture_clock, remove_fixture_clock
+from helpers import FIX, FIXTURE_NOW, codes, install_fixture_clock, remove_fixture_clock
 
 import envelope_validate as ev
 import queue_adapter as qa
@@ -59,12 +59,12 @@ class QueueAdapter(unittest.TestCase):
     def test_cli_roundtrip(self):
         import subprocess, sys
         script = str(FIX.parent.parent / "scripts" / "recommend.py")
-        out = subprocess.run([sys.executable, "-I", script, "--queue", str(FIX / "queue_rows.json")],
+        out = subprocess.run([sys.executable, "-I", script, "--now", FIXTURE_NOW, "--queue", str(FIX / "queue_rows.json")],
                              capture_output=True, text=True)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("A1663", out.stdout)
         self.assertIn("recommendation only", out.stdout.lower())
-        js = subprocess.run([sys.executable, "-I", script, "--format", "json", str(FIX / "good_running.json")],
+        js = subprocess.run([sys.executable, "-I", script, "--now", FIXTURE_NOW, "--format", "json", str(FIX / "good_running.json")],
                             capture_output=True, text=True)
         self.assertEqual(json.loads(js.stdout)[0]["disposition"], "reuse-active-worker")
 
