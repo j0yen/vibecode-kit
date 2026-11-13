@@ -107,18 +107,22 @@ _CLAUSE_END = re.compile(r"[;\n]|\.\s")
 
 
 def _marks(t):
-    """Side marks of one evidence ref that are stated positively. A mark is negated by a negation word among the two
-    words before it ("not side=producer", "isn't side=producer"), or one later in its clause (; newline or a full
-    stop ends the clause) that does not itself head another side mark ("side=producer failed", "side=producer is
-    not verified"; but "side=producer, not side=consumer" keeps the producer mark)."""
+    """Side marks of one evidence ref that are stated positively. A mark is negated, as a class and at any distance,
+    by a negation or doubt word (ir_norm NEG_CORE and NEG_DOUBT: "no evidence that side=producer", "never really
+    established that side=producer", "unverified: side=producer", "side=producer is false") between the start of its
+    clause and the mark, counted from the end of the previous side mark, or one after it up to the end of its clause
+    (; newline or a full stop ends the clause). A negation that heads another side mark does not reach this one
+    ("side=producer, not side=consumer" keeps the producer mark); a zero count of failures is no negation."""
     out = set()
+    prev_end = 0
     for m in SIDE_MARK.finditer(t):
         a = max([c.end() for c in _CLAUSE_END.finditer(t, 0, m.start())] or [0])
         c = _CLAUSE_END.search(t, m.end())
         z = c.start() if c else len(t)
-        before = t[a:m.start()].split()[-2:]
+        before = t[max(a, prev_end):m.start()]
+        prev_end = m.end()
         after = SIDE_MARK.sub(" ", re.sub(r"(?i)\b(?:not|no|never|without|isn['\u2019]t)\s+(?=side=)", " ", t[m.end():z]))
-        if _N.negated(" ".join(before)) or _N.negated(after):
+        if _N.negated(before, doubt=True) or _N.negated(after, doubt=True):
             continue
         out.add(m.group(1))
     return out

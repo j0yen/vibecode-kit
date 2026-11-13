@@ -28,7 +28,13 @@ production state, and it opens no tasks or PRs; findings go to their existing ca
   the record and `evidence[i]`, and redacts any credential-shaped text in a message. Redaction covers every printed
   file name, path, option value, record id, property/required/enum name and message in all five scripts (a prefixed
   AWS key id inside a name, a URL credential whatever its scheme separator is spelled or percent-encoded, and an
-  e-mail address, which is masked as well, though it is not a credential).
+  e-mail address, which is masked as well, though it is not a credential: a plain, a quoted-local-part
+  (`"a b"@host`), an `@localhost`, a bracketed or dotted-quad IP-literal and any dotted domain ending in letters; a version
+  pin such as `svc@1.2.3` or `pkg@2.0.0-rc.1` is not an address and prints as written. A URL credential whose password holds
+  a raw `/` is masked too (a port followed by a path, `https://host:8080/@scope/pkg`, is not). A record id that must be
+  redacted prints as `[credential-shaped text redacted #N]` with its position N in `records`, so two distinct redacted ids
+  never print as one text and each REFUSED item stays traceable. The pattern list is a net, not a proof: a one-to-five digit
+  password followed by `/` right after the colon of a URL reads as a port and is not masked).
 - UNKNOWN-equivalents count as UNKNOWN everywhere the complete check reads a field (role, component, host,
   installed state, label, source repo, version, evidence and adoption refs). One shared rule
   (`scripts/ir_norm.py`): not a string, or after Unicode NFKD, removal of combining marks and variation
@@ -101,6 +107,15 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    (one with a space) carrying a negation (`not verified`, `no test`, `failed`) does not count as evidence for the
    complete check (`missing-evidence` names the record; a warning under `partial`), and a negated side mark
    (`not side=producer`, `side=producer failed`) is no side mark in the extractor (role UNKNOWN, claim kept).
+   The negation rule is a class, not a word: a negation or doubt word (`ir_norm.NEG_CORE` plus `NEG_DOUBT`: false, untrue,
+   invalid, disproved, refuted, rejected, pending, skipped, waived, TBD, to do, disputed, any `un-` word ending in
+   -ed/-ied such as unchecked or unreviewed, and a few others) anywhere in the clause before a side mark (counted from the
+   previous side mark; `;`, a newline or a full stop ends a clause) or after it up to the end of the clause leaves the role
+   UNKNOWN, at any distance; a negation that heads another side mark does not reach this one. The same words make a prose
+   evidence ref, or a single bare word such as `skipped`, non-evidence; a zero count of failures (`tests: 0 failed, 12
+   passed`) is positive, `0 passed` is not. The lists are vocabulary and cannot be complete: an unlisted wording is read as
+   positive, and a genuine positive ref that uses a listed word (`validates invalid input`) is refused as missing-evidence
+   (restate it); UNKNOWN is never filled. A path-like ref (no space, not a bare word) is never judged as prose.
    Scope: the `installed` rule (stated path and 64-hex sha256) is enforced by the extractor only. A
    hand-written register states `installed` on the reviewer's word, so the validator's OK line names every
    installed record taken on that word ("installed state of N record(s) taken on the declarer's word"); a
@@ -115,7 +130,10 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    one endpoint key and a path join one record only when their stated repos (canonical) and stated commits do not differ
    (an unstated repo or commit is not a difference); otherwise each is its own record with its own record_id, and the
    validator reads two records of one family/role/host/component/path/kind as one endpoint (`duplicate-record`) unless they
-   prove they differ: both state repos (canonical) and share none, or both state commits and share none. A record that omits its
+   prove they differ: both state repos (canonical) and share none, or both state commits and share none. One commit written
+   two ways is one commit: case is folded, and an abbreviated hex sha of 7+ digits equals any longer sha it prefixes. The
+   validator finds these groups by keyed lookup (near-linear, pairwise `_conflict` is the definition; a test pins the two
+   equal on random registers), never by scanning all pairs. A record that omits its
    commit or repo is never provably different, so a pair where one side omits it is refused (a `complete` claim is REFUSED
    naming both records), exactly as the extractor joins them. Path-less rows follow the same rule: different repos or
    distinct commits stay separate records, and path-less rows never fuse across repos (only path-less rows of the same

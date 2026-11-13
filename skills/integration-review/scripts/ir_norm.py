@@ -9,6 +9,7 @@ redact() replaces text shaped like a credential (or an e-mail address) by a fixe
 """
 import re
 import unicodedata
+from functools import lru_cache
 from urllib.parse import unquote
 
 PLACEHOLDERS = frozenset({"", "unknown", "unk", "?", "tbd", "-", "--", "n/a", "na", "none", "null", "nil"})
@@ -21,11 +22,16 @@ _FAMILY = frozenset({"", "na", "undefined", "undef", "null", "nil", "none", "not
 # solidus forms) and the backslash fold to "/" in canon(slashes=True) (the placeholder rule), so "N\u2215A", "n\\a" and "none\u2044" read as n/a, none/.
 _SLASHES = "\u2215\u2044\u29f8\u29f9\uff0f\u2571\u27cb\u27cd\u2216\u29f5\u29f7\u3033\u1735\u2e0b\ufe68\uff3c\\\u2572\u27c8\u2afb\u2afd"
 _DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u2043\u207b\u208b\u2e3a\u2e3b\u058a\u05be\u1806\ufe58\ufe63\uff0d\u30fc"
+# E-mail domain: a dotted name whose last label is alphabetic (a version pin such as svc@1.2.3 or pkg@2.0.0-rc.1 is
+# not an address), localhost, a bracketed IP literal, or a dotted-quad IPv4.
+_OCTET = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
+_EMAIL_HOST = (r"[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,7}\.[A-Za-z]{2,63}(?![A-Za-z0-9])"
+               r"|localhost(?![A-Za-z0-9.-])|\[[^\]\s]{2,45}\]|%s(?:\.%s){3}(?![0-9A-Za-z]|\.[0-9A-Za-z])" % (_OCTET, _OCTET))
 CRED = re.compile(
     r"(token|secret|passw|bearer|api[_-]?key|sk-ant|sk-[A-Za-z0-9]{8}|sk_(?:live|test)_|rk_(?:live|test)_|-----BEGIN"
-    r"|authorization\s*[:=]|://[^/\s]*:[^/\s]*@|\b[a-z][a-z0-9+.-]{0,30}:[^A-Za-z0-9\s@]{0,6}[^/\s@:]{0,100}:[^/\s@]{0,200}@|gh[pousr]_[A-Za-z0-9]|github_pat_|glpat-|npm_[A-Za-z0-9]{8}"
+    r"|authorization\s*[:=]|://[^/\s]*:[^/\s]*@|://[^/\s@:]*:(?!\d{1,5}/)[^\s@]{0,200}@|\b[a-z][a-z0-9+.-]{0,30}:[^A-Za-z0-9\s@]{0,6}[^/\s@:]{0,100}:[^/\s@]{0,200}@|gh[pousr]_[A-Za-z0-9]|github_pat_|glpat-|npm_[A-Za-z0-9]{8}"
     r"|pypi-[A-Za-z0-9_-]{8}|hf_[A-Za-z0-9]{8}|dop_v1_|shp(?:at|ss|ca|pa)_|SG\.[A-Za-z0-9_-]{8}|ya29\.|"
-    r"(?-i:AKIA|ASIA)[A-Za-z0-9]{8}|[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,8}|eyJ[A-Za-z0-9_-]{6}|xox[abprs]-|AIza[0-9A-Za-z_-]{8}"
+    r"(?-i:AKIA|ASIA)[A-Za-z0-9]{8}|(?:[A-Za-z0-9._%+-]{1,64}|\"[^\"\r\n]{1,64}\")@(?:" + _EMAIL_HOST + r")|eyJ[A-Za-z0-9_-]{6}|xox[abprs]-|AIza[0-9A-Za-z_-]{8}"
     r"|\b(?:key|auth|pwd|cred\w*)\s*[:=]\s*\S{6})", re.I)
 _RUN = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
 REDACTED = "[credential-shaped text redacted]"
@@ -42,11 +48,32 @@ NEG_CORE = re.compile(r"\b(?:%s)\b|%s|\bn\s*/\s*a\b" % (_NEG_CORE, _CONTR))
 NEG_STATE = re.compile(r"\b(?:%s|%s)\b|%s|\bn\s*/\s*a\b|\btimed\s+out\b" % (_NEG_CORE, _NEG_STATE, _CONTR))
 
 
-def negated(text, state=False):
-    """True when the text carries a negation word (NEG_CORE; with state=True the process-state words too)."""
+# NEG_DOUBT (doubt=True): the wordings that say a claim is not established, beyond a plain negation: falsity
+# (false, untrue, incorrect, invalid, wrong), refutation (disproved, refuted, rejected, retracted), an open or
+# skipped check (pending, skipped, waived, ignored, blocked, cancelled, tbd, todo, "to do"), a dispute, and any un- word that
+# ends in -ed/-ied ("unchecked", "unreviewed", "unrun"; "united" and "unified" excepted).
+_NEG_DOUBT = (r"false|untrue|incorrect|invalid|wrong|disprove[ds]?|disproven|refuted?|rejected|retracted|revoked|withdrawn|"
+              r"doubtful|dubious|unclear|inconclusive|incomplete|pending|skipped|skip|skips|skipping|waived?|ignored|"
+              r"blocked|cancell?ed|abandoned|tbd|tba|todo|to\s+do|disputed?|contested|questionable|doubt|doubted|"
+              r"unproven|unrun|unseen|unsure|uncertain|undone|unfinished")
+NEG_DOUBT = re.compile(r"\b(?:%s)\b|\bun(?!ited\b|ified\b)[a-z]{2,}(?:ed|ied)\b" % _NEG_DOUBT)
+# A zero count of a failure word is a positive statement ("0 failed", "zero errors"); a zero count of passes is not
+# evidence at all ("0 passed").
+_ZERO_FAIL = re.compile(r"(?<![\w.])(?:0+|zero)\s+(?:tests?\s+)?(?:fail\w*|errors?|skipped|skips?|regress\w*|"
+                        r"violations?|warnings?|unchecked|pending|missing)\b")
+_ZERO_PASS = re.compile(r"(?<![\w.])(?:0+|zero)\s+(?:tests?\s+)?(?:passed|passing|succe\w+|ok)\b")
+
+
+def negated(text, state=False, doubt=False):
+    """True when the text carries a negation word (NEG_CORE; with state=True the process-state words too; with
+    doubt=True the NEG_DOUBT wordings and a zero count of passes too). A zero count of failures ("0 failed, 12
+    passed") is not a negation."""
     if not isinstance(text, str):
         return False
     t = canon(text, slashes=True).replace("\u2019", "'")
+    t = _ZERO_FAIL.sub(" ", t)
+    if doubt and (_ZERO_PASS.search(t) or NEG_DOUBT.search(t)):
+        return True
     return bool((NEG_STATE if state else NEG_CORE).search(t))
 
 
@@ -88,6 +115,12 @@ def repo_id(repo):
 
 
 def is_unknown(v):
+    """See _is_unknown(): the rule, with the result cached per string (the validator asks it for every field)."""
+    return True if not isinstance(v, str) else _is_unknown(v)
+
+
+@lru_cache(maxsize=65536)
+def _is_unknown(v):
     """The ONE UNKNOWN-equivalent rule: not a string; or, after canon() and stripping edge punctuation and "=",
     a value with no letter or digit at all (?, ???, -, --, ..., an ellipsis), or one of the placeholder family
     (unknown unk n/a in any dotting or spacing, undefined, null, nil, none, not available/applicable/known,
@@ -139,6 +172,20 @@ def _plain(t):
 
 
 def redact(text):
+    """See _redact(): the rule, with printable ASCII that holds no backslash or percent sign judged on one view (every
+    other view of such text is the text itself) and the result cached per string."""
+    t = text if isinstance(text, str) else str(text)
+    return _redact(t)
+
+
+@lru_cache(maxsize=65536)
+def _redact(t):
+    if t.isascii() and t.isprintable() and "\\" not in t and "%" not in t:
+        return REDACTED if (_credential_view(t) or CRED.search(re.sub(r"\s+", "", t))) else t
+    return _redact_full(t)
+
+
+def _redact_full(text):
     """Fixed marker for text shaped like a credential. It is judged on the text as written, on its NFKC form, and
     on the fully normalized form (NFKD, then combining marks, format and control characters removed, then NFKC,
     so neither a mark nor a zero-width character hides a token) before any pattern is applied; escapes (\\uXXXX,

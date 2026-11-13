@@ -187,21 +187,51 @@ def _ident(r):
     return frozenset(ends), frozenset(commits)
 
 
+_HEXC = re.compile(r"[0-9a-f]{7,64}")
+
+
+def _same_commit(x, y):
+    """One commit written two ways is not two commits: equal after trimming and lower-casing, or, when both are
+    hex of 7+ digits, one is a prefix of the other (an abbreviated sha)."""
+    a, b = x.strip().lower(), y.strip().lower()
+    if a == b:
+        return True
+    return bool(_HEXC.fullmatch(a) and _HEXC.fullmatch(b)) and (a.startswith(b) or b.startswith(a))
+
+
 def _conflict(a, b):
     """Two records of one base key are one endpoint (a duplicate) unless they PROVE they differ: no (repo, path)
     endpoint is shared (an unstated repo matches any repo on the same path), or both state commits and none is
-    shared. A record that omits its repo or commit, or one side of a pair that does, is therefore never provably
-    different, as in the extractor."""
+    the same commit (_same_commit). A record that omits its repo or commit, or one side of a pair that does, is
+    therefore never provably different, as in the extractor. This pairwise form is the definition;
+    _duplicate_groups() reaches the same groups by keyed lookup."""
     (ea, ca), (eb, cb) = a, b
-    if ca and cb and not ca & cb:
+    if ca and cb and not any(_same_commit(x, y) for x in ca for y in cb):
         return False
     return any(pa == pb and (ra is None or rb is None or ra == rb) for ra, pa in ea for rb, pb in eb)
 
 
+def _commit_toks(commits):
+    """(full tokens, prefix tokens) of a record's commits: the lower-cased commit, and for a hex commit of 7+ digits
+    every prefix of 7+ digits. Two commits are the same commit exactly when the full token of one is a prefix token
+    of the other (_same_commit), so equality of tokens finds them without comparing pairs."""
+    full, pre = set(), set()
+    for c in commits:
+        c = c.strip().lower()
+        full.add(c)
+        if _HEXC.fullmatch(c):
+            pre.update(c[:n] for n in range(7, len(c) + 1))
+        else:
+            pre.add(c)
+    return full, pre
+
+
 def _duplicate_groups(recs):
-    """Groups (record lists, size > 1) of records that are one endpoint: connected records under _conflict()
-    within one base key. Records stating both repo and commit meet through their repo buckets; a record that omits
-    either is compared with every record of its base key."""
+    """Groups (record lists, size > 1) of records that are one endpoint: the connected records under _conflict()
+    within one base key, found by keyed lookup and never by a scan of all pairs (a union-find over: the records of
+    one path, grouped by stated repo; within a repo, one hub per commit token, or every record when one states no
+    commit; a record with an unstated repo is joined to the records of the path that share a commit token, or to
+    all of them when it states no commit; a record stating no commit is joined to every record of its repo)."""
     by = {}
     for i, r in enumerate(recs):
         by.setdefault(_key(r), []).append(i)
@@ -209,7 +239,6 @@ def _duplicate_groups(recs):
     for idx in by.values():
         if len(idx) < 2:
             continue
-        ids = {i: _ident(recs[i]) for i in idx}
         parent = {i: i for i in idx}
 
         def find(i):
@@ -218,24 +247,16 @@ def _duplicate_groups(recs):
                 i = parent[i]
             return i
 
-        def join(i, j):
-            if _conflict(ids[i], ids[j]):
-                parent[find(i)] = find(j)
-        full = [i for i in idx if ids[i][1] and all(rp is not None for rp, _ in ids[i][0])]
-        fset = set(full)
-        loose = [i for i in idx if i not in fset]
-        repo_bucket = {}
-        for i in full:
-            for rp, _ in ids[i][0]:
-                repo_bucket.setdefault(rp, []).append(i)
-        for lst in repo_bucket.values():
-            for n, i in enumerate(lst):
-                for j in lst[:n]:
-                    join(j, i)
-        for i in loose:
-            for j in idx:
-                if j != i:
-                    join(i, j)
+        def union(i, j):
+            parent[find(i)] = find(j)
+        info = {i: _ident(recs[i]) for i in idx}
+        toks = {i: _commit_toks(info[i][1]) for i in idx}
+        paths = {}
+        for i in idx:
+            for rp, pa in info[i][0]:
+                paths.setdefault(pa, []).append((i, rp))
+        for ents in paths.values():
+            _link_path(ents, toks, union)
         comps = {}
         for i in idx:
             comps.setdefault(find(i), []).append(i)
@@ -243,9 +264,77 @@ def _duplicate_groups(recs):
     return out
 
 
-def _rid(r):
+def _token_index(members, toks):
+    fm, pm = {}, {}
+    for i in members:
+        full, pre = toks[i]
+        for t in full:
+            fm.setdefault(t, []).append(i)
+        for t in pre:
+            pm.setdefault(t, []).append(i)
+    return fm, pm
+
+
+def _link_path(ents, toks, union):
+    """Union the records of one path (entries (index, canonical repo or None)) that _conflict() relates."""
+    groups, nulls = {}, []
+    for i, rp in ents:
+        if rp is None:
+            nulls.append(i)
+        else:
+            groups.setdefault(rp, []).append(i)
+    for g in groups.values():                       # same stated repo: related unless both state disjoint commits
+        bare = [i for i in g if not toks[i][0]]
+        if bare:
+            for i in g:
+                union(bare[0], i)
+            continue
+        fm, pm = _token_index(g, toks)
+        for t, fl in fm.items():
+            for i in pm[t]:
+                union(fl[0], i)
+    if not nulls:
+        return
+    everyone = [i for i, _ in ents]
+    bare_null = [i for i in nulls if not toks[i][0]]
+    if bare_null:                                   # an unstated repo with no commit is related to every record
+        for i in everyone:
+            union(bare_null[0], i)
+        return
+    bare = [i for i in everyone if not toks[i][0]]
+    if bare:
+        for i in bare:
+            union(nulls[0], i)
+        for i in nulls[1:]:
+            union(i, bare[0])
+    fm, pm = _token_index(everyone, toks)
+    seen_p, seen_f = set(), set()
+    for n in nulls:                                 # an unstated repo is related to every record sharing a commit
+        full, pre = toks[n]
+        for t in full:
+            if t not in seen_p:
+                seen_p.add(t)
+                for i in pm[t]:
+                    union(n, i)
+        for t in pre:
+            if t in fm:
+                if t not in seen_f:
+                    seen_f.add(t)
+                    for i in fm[t]:
+                        union(n, i)
+                else:
+                    union(n, fm[t][0])
+
+
+def _rid(r, pos=None):
+    """The printed name of a record: its record_id as written, or JSON for a non-string id. An id that must be
+    redacted prints with the record's 1-based position in the register ("[credential-shaped text redacted #3]"), so
+    two distinct redacted ids never print as the same text and the record stays traceable."""
     v = r.get("record_id")
-    return _safe(v) if isinstance(v, str) else _hk(v)
+    if not isinstance(v, str):
+        return _hk(v)
+    safe = _safe(v)
+    return safe if safe == v or pos is None else _N.REDACTED[:-1] + f" #{pos}]"
 
 
 def _refs(items):
@@ -254,11 +343,23 @@ def _refs(items):
             if isinstance(e, dict) and not _unk(e.get("ref"))]
 
 
+_BARE_WORD = re.compile(r"[A-Za-z'\u2019-]+[.!]?")
+
+
+def _prose_ref(ref):
+    """A ref is judged as prose when it carries a space or is one bare word (no path, URL, digit or colon):
+    "skipped", "pending" and "Waived" are statements; "tests/failed/run.log" and "a.py:12" are locations."""
+    t = ref.strip()
+    return bool(re.search(r"\s", t)) or bool(_BARE_WORD.fullmatch(t))
+
+
 def _positive_refs(items):
-    """Evidence refs that count as evidence: not UNKNOWN-equivalent and, when they are prose (carry a space), not
-    negated ("not verified", "no test", "failed"). A path-like ref without a space is never judged as prose."""
-    return [(i, e) for i, e in _refs(items) if not (isinstance(e["ref"], str) and re.search(r"\s", e["ref"].strip())
-                                                       and _N.negated(e["ref"]))]
+    """Evidence refs that count as evidence: not UNKNOWN-equivalent and, when they are prose (see _prose_ref), neither
+    negated ("not verified", "no test", "failed") nor a doubt or non-evidence wording (ir_norm NEG_DOUBT: unchecked,
+    skipped, pending, TBD, waived, disproved, invalid, false ...). A zero count of failures ("tests: 0 failed, 12
+    passed") is positive; "0 passed" is not. The word lists are vocabulary, not proof: UNKNOWN is never filled."""
+    return [(i, e) for i, e in _refs(items) if not (isinstance(e["ref"], str) and _prose_ref(e["ref"])
+                                                       and _N.negated(e["ref"], doubt=True))]
 
 
 def _adopted(items):
@@ -292,6 +393,7 @@ def validate(reg, schema, now=None):
     errs = []
     _check(reg, schema, schema, "", errs)
     recs = reg.get("records") if isinstance(reg, dict) and isinstance(reg.get("records"), list) else []
+    pos = {id(r): n for n, r in enumerate(recs, 1)}
     recs = [r for r in recs if isinstance(r, dict)]
     cov = reg.get("coverage") if isinstance(reg, dict) and isinstance(reg.get("coverage"), dict) else {}
     declared = cov.get("declared")
@@ -310,13 +412,19 @@ def validate(reg, schema, now=None):
         add("no-records", "declared all-interfaces-complete with zero enumerated records; coverage is unproven")
 
     seen_ids = Counter()
+    where = {}
     for r in recs:
-        seen_ids[_hk(r.get("record_id"))] += 1
+        k = _hk(r.get("record_id"))
+        seen_ids[k] += 1
+        where.setdefault(k, []).append(pos[id(r)])
     for i, n in seen_ids.items():
         if n > 1:
-            add("duplicate-record", f"record_id {_safe(i)} appears {n} times", _safe(i))
+            shown = _safe(i)
+            if shown != i:                       # a redacted id is told apart by the positions that hold it
+                shown = _N.REDACTED[:-1] + " at records " + ", ".join(f"#{p}" for p in where[i]) + "]"
+            add("duplicate-record", f"record_id {shown} appears {n} times", shown)
     for grp in _duplicate_groups(recs):
-        ids = [_rid(r) for r in grp]
+        ids = [_rid(r, pos[id(r)]) for r in grp]
         add("duplicate-record", f"same family/role/host/component/path_or_command/kind recorded {len(grp)} times "
             f"(an unstated repo or commit is not a difference): {ids}", ",".join(ids))
 
@@ -324,7 +432,7 @@ def validate(reg, schema, now=None):
     fams = {f["id"]: f for f in fl if isinstance(f, dict) and isinstance(f.get("id"), str)}
     on_word = []
     for r in recs:
-        rid = _rid(r)
+        rid = _rid(r, pos[id(r)])
         srcs = _sources(r)
         fb = r.get("fusion_basis")
         if isinstance(fb, str) and "heuristic" in fb.lower():
@@ -415,7 +523,7 @@ def validate(reg, schema, now=None):
                 add("missing-endpoint", f"registered caller {_safe(c)} of {fid} has no record", fid, gap=True)
     for r in recs:
         if not (isinstance(r.get("family"), str) and (r["family"] in fams or r["family"] == UNASSIGNED)):
-            add("unknown-family", f"family {_safe(r.get('family'))} not listed in families", r.get("record_id"), gap=True)
+            add("unknown-family", f"family {_safe(r.get('family'))} not listed in families", _rid(r, pos[id(r)]), gap=True)
 
     counts = {"families": len(fams), "records": len(recs),
               "unassigned": sum(1 for r in recs if r.get("family") == UNASSIGNED),
@@ -471,7 +579,9 @@ def main(argv):
         if res["declared"] == COMPLETE:
             bad = sorted({f"{f['record']}:{f['code']}" for f in res["findings"]
                           if f["severity"] == "error" and f["record"]})
-            print(_safe(f"REFUSED: declared {COMPLETE} but gaps remain in: {', '.join(bad) or 'register-level (see findings)'}"))
+            # each item was redacted where its record id was formed (and again here, item by item): the joined line is
+            # not re-judged as one text, because separators between items read as one long credential-shaped run.
+            print(f"REFUSED: declared {COMPLETE} but gaps remain in: {', '.join(_safe(b) for b in bad) or 'register-level (see findings)'}")
         else:
             print("REFUSED: register has errors")
         return 1
