@@ -1,0 +1,33 @@
+{
+ "id": "F-lost",
+ "claim": "message-lost",
+ "label": "observed-defect",
+ "trace": {
+  "producer": {
+   "ref": "p.sh:10",
+   "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "family": "IF001",
+   "interface": "event",
+   "actor": "bld"
+  },
+  "adapters": [
+   {
+    "ref": "adapter.py:5",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "family": "IF001",
+    "interface": "event",
+    "maps_from": "bld",
+    "maps_to": "ops"
+   }
+  ],
+  "waiter": {
+   "ref": "waiter.sh:28",
+   "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "family": "IF001",
+   "interface": "event",
+   "actor": "ops",
+   "installed_state": "installed",
+   "verdict_for_actor": "refuse"
+  }
+ }
+}

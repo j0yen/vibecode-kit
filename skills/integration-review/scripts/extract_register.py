@@ -5,18 +5,21 @@ Evidence fidelity rules (nothing is invented; every unstated fact stays UNKNOWN 
 - source identity is parsed only from the forms the row states: "path+sha256:<path> <64 hex>" and
   "commit <40 hex>"; anything else is version UNKNOWN, available false. The raw string is kept.
 - a producer/consumer/caller/adapter side is kept only when the row's own evidence states it as
-  "side=<role>" matching the claimed role; otherwise role is UNKNOWN and the claim is kept in
-  claimed_roles.
+  "side=<role>" matching the claimed role and states no other side; otherwise (no mark, or contradictory
+  marks) role is UNKNOWN and the claim is kept in claimed_roles.
 - "loaded" is never emitted (it needs proven process adoption; a unit listing is not that). "installed"
   needs a stated path+sha256, "source-only" needs a stated path+sha256 or commit; otherwise UNKNOWN,
   with the claim kept in claimed_installed_states.
 - every evidence ref is kept verbatim (no truncation); no evidence is recorded as an empty list.
 - a row naming no valid family becomes family UNASSIGNED (kept, counted, blocks a complete claim).
-- unparseable lines and non-object rows are rejected into rejected.json, never repaired.
-- rows with one endpoint key merge (evidence union); rows of one component from different stated
-  repos with different paths become ONE record with a sources list (no component qualifier).
+- unparseable lines, duplicate JSON keys and non-object rows are rejected into rejected.json, never
+  repaired. Lines are split on "\\n" only (U+2028/U+0085 inside a valid row are data); input must be UTF-8.
+- rows with one endpoint key merge (evidence union); rows of one component fuse into ONE record with a
+  sources list (no component qualifier) only on positive evidence of one component: each member row's
+  path is rooted in its own stated repo ("<repo>/..."), each has a stated identity (not UNKNOWN), and the
+  identities differ. Equal names alone stay separate endpoints.
 - labels stay "unclassified"; effect_state/replay are not emitted.
-usage: extract_register.py ENDPOINTS.jsonl OUTDIR   (exit 0 ok, 3 if any row was rejected, 2 unreadable)
+usage: extract_register.py ENDPOINTS.jsonl OUTDIR   (exit 0 ok, 3 if any row was rejected, 2 unreadable input or output)
 Writes register-partial.json, register-declared-complete.json (same records, for refusal checks),
 rejected.json, extraction.json.
 """
@@ -35,6 +38,15 @@ SIDES = ("producer", "consumer", "caller", "adapter")
 PATH_SHA = re.compile(r"^path\+sha256:(\S+) ([0-9a-f]{64})$")
 COMMIT = re.compile(r"^commit ([0-9a-f]{40})\b")
 SIDE_MARK = re.compile(r"\bside=(producer|consumer|caller|adapter)\b")
+
+
+def _pairs(pairs):
+    seen = set()
+    for k, _ in pairs:
+        if k in seen:
+            raise ValueError(f"duplicate JSON key {k!r}")
+        seen.add(k)
+    return dict(pairs)
 
 
 def _s(v):
@@ -74,7 +86,7 @@ def norm_role(row, ev):
     if claimed not in SIDES:
         return "UNKNOWN", None
     marks = {m for t in ev for m in SIDE_MARK.findall(t)}
-    if claimed in marks:
+    if marks == {claimed}:
         return claimed, None
     return "UNKNOWN", claimed
 
@@ -101,10 +113,10 @@ def convert(rows, declared="partial"):
 def convert_lines(lines, declared="partial"):
     items, rejected = [], []
     for n, line in enumerate(lines, 1):
-        if not line.strip():
+        if not line.strip(" \t\r"):
             continue
         try:
-            items.append((n, json.loads(line)))
+            items.append((n, json.loads(line, object_pairs_hook=_pairs)))
         except ValueError as e:
             rejected.append({"line": n, "reason": f"not JSON: {e}"})
     return _build(items, declared, rejected)
@@ -158,7 +170,7 @@ def _build(items, declared, rejected):
         repos = [{s["repo"] for s in m["sources"]} for m in members]
         flat = [r for rs in repos for r in rs]
         fuse = (len(members) > 1 and all(len(rs) == 1 for rs in repos) and "UNKNOWN" not in flat
-                and len(set(flat)) == len(flat))
+                and len(set(flat)) == len(flat) and _one_component(members))
         if fuse:
             stats["fused_multi_source_components"] += 1
             members = [_fuse(members)]
@@ -169,6 +181,21 @@ def _build(items, declared, rejected):
     reg = {"schema_version": 1, "coverage": {"declared": declared},
            "families": [{"id": f} for f in fams], "records": records}
     return {"register": reg, "rejected": rejected, "stats": dict(stats)}
+
+
+def _one_component(members):
+    """Positive evidence that differently-sourced endpoints are one component: every member's path is
+    rooted in its own stated repo and carries a stated identity, and the identities are distinct."""
+    vers = []
+    for m in members:
+        path, repo = m["key"][5], next(iter({s["repo"] for s in m["sources"]}))
+        if not path or not path.startswith(repo + "/"):
+            return False
+        v = {s["version"] for s in m["sources"]}
+        if len(v) != 1 or "UNKNOWN" in v:
+            return False
+        vers += v
+    return len(set(vers)) == len(vers)
 
 
 def _fuse(members):
@@ -218,23 +245,27 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     try:
-        with open(argv[1]) as f:
-            lines = f.read().splitlines()
-    except OSError as e:
-        print(f"UNKNOWN: input unreadable: {e}", file=sys.stderr)
+        with open(argv[1], encoding="utf-8", newline="") as f:
+            lines = f.read().split("\n")
+    except (OSError, ValueError) as e:
+        print(f"UNKNOWN: input unreadable: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
-    os.makedirs(argv[2], exist_ok=True)
     out = convert_lines(lines, "partial")
-    for name, decl in (("register-partial.json", "partial"),
-                       ("register-declared-complete.json", "all-interfaces-complete")):
-        reg = dict(out["register"], coverage={"declared": decl})
-        with open(os.path.join(argv[2], name), "w") as f:
-            json.dump(reg, f, indent=1)
-    with open(os.path.join(argv[2], "rejected.json"), "w") as f:
-        json.dump(out["rejected"], f, indent=1)
-    out["stats"]["rejected_lines"] = len(out["rejected"])
-    with open(os.path.join(argv[2], "extraction.json"), "w") as f:
-        json.dump(out["stats"], f, indent=1, sort_keys=True)
+    try:
+        os.makedirs(argv[2], exist_ok=True)
+        for name, decl in (("register-partial.json", "partial"),
+                           ("register-declared-complete.json", "all-interfaces-complete")):
+            reg = dict(out["register"], coverage={"declared": decl})
+            with open(os.path.join(argv[2], name), "w", encoding="utf-8") as f:
+                json.dump(reg, f, indent=1)
+        with open(os.path.join(argv[2], "rejected.json"), "w", encoding="utf-8") as f:
+            json.dump(out["rejected"], f, indent=1)
+        out["stats"]["rejected_lines"] = len(out["rejected"])
+        with open(os.path.join(argv[2], "extraction.json"), "w", encoding="utf-8") as f:
+            json.dump(out["stats"], f, indent=1, sort_keys=True)
+    except OSError as e:
+        print(f"UNKNOWN: output unwritable: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
     for k, v in sorted(out["stats"].items()):
         print(f"{k}: {v}")
     return 3 if out["rejected"] else 0

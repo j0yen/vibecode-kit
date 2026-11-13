@@ -245,6 +245,12 @@
             "$ref": "#/definitions/source_identity"
           }
         },
+        "adoption_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        },
         "claimed_roles": {
           "type": "array",
           "items": {

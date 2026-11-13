@@ -16,10 +16,14 @@ T = tightened constraint, e.g. enum value removed, type narrowed, pattern added,
   property added: producer-first incompatible only if the old schema is additionalProperties:false
   property removed: producer-first incompatible; consumer-first incompatible if new is closed
   additionalProperties true->false: consumer-first incompatible; false->true: producer-first incompatible
-  incomparable type change, unsupported keyword: incompatible; a pattern that changed text is
+  items constraint added = T, removed = L (an empty items schema is no constraint); a changed items form
+  (schema vs tuple list) is incompatible; enum values compare by JSON type (1 differs from true, 1 equals 1.0)
+  incomparable type change, unsupported keyword in OLD or NEW (so a removed one too): incompatible; a pattern that changed text is
   UNDETERMINED (regexes are not compared) and is never reported compatible.
 Pure comparison of two files; nothing is executed or fetched.
-usage: schema_compat.py OLD.json NEW.json [--direction D] [--consumer C]   (exit 0 compatible, 1 not, 2 usage)
+usage: schema_compat.py OLD.json NEW.json [--direction D] [--consumer C]
+exit 0 compatible, 1 not compatible, 2 usage or unreadable input (missing, not UTF-8, bad JSON, duplicate
+key, not an object); rc 1 is never used for an unreadable input.
 """
 import json
 import sys
@@ -28,6 +32,28 @@ KNOWN = {"$schema", "title", "description", "type", "enum", "required", "propert
          "additionalProperties", "items", "pattern", "minLength", "minItems", "definitions", "$ref"}
 DIRECTIONS = ("producer-first", "consumer-first", "both")
 CONSUMERS = ("closed", "open")
+
+
+def _pairs(pairs):
+    seen = set()
+    for k, _ in pairs:
+        if k in seen:
+            raise ValueError(f"duplicate JSON key {k!r}")
+        seen.add(k)
+    return dict(pairs)
+
+
+def _canon(v):
+    """Hashable identity of an enum value: bool is not int, 1 equals 1.0, containers by sorted JSON."""
+    if isinstance(v, bool):
+        return ("bool", v)
+    if isinstance(v, (int, float)):
+        return ("num", v)
+    return ("json", json.dumps(v, sort_keys=True))
+
+
+def _constrains(it):
+    return isinstance(it, dict) and bool(it)
 
 
 def _types(v):
@@ -91,9 +117,10 @@ def _walk(old, new, path, res, direction, consumer):
     if not isinstance(old, dict) or not isinstance(new, dict):
         return
     cl = lambda *a, **k: _classify(res, path, *a, direction=direction, consumer=consumer, **k)  # noqa: E731
-    for k in new:
+    for k in sorted(set(old) | set(new)):
         if k not in KNOWN:
-            cl(f"unsupported keyword {k!r}", "unsupported")
+            where = "old and new" if k in old and k in new else ("old" if k in old else "new")
+            cl(f"unsupported keyword {k!r} in {where}", "unsupported")
     if "type" in old and "type" in new:
         o, n = _types(old["type"]), _types(new["type"])
         if n > o:
@@ -103,11 +130,12 @@ def _walk(old, new, path, res, direction, consumer):
         elif n != o:
             cl(f"type changed {old['type']!r} -> {new['type']!r}", "incomparable")
     if "enum" in old and "enum" in new:
+        oe, ne = {_canon(v) for v in old["enum"]}, {_canon(v) for v in new["enum"]}
         for v in new["enum"]:
-            if v not in old["enum"]:
+            if _canon(v) not in oe:
                 cl(f"enum value {v!r} added", "loosen")
         for v in old["enum"]:
-            if v not in new["enum"]:
+            if _canon(v) not in ne:
                 cl(f"enum value {v!r} removed", "tighten")
     elif "enum" in new:
         cl("enum constraint added", "tighten")
@@ -152,8 +180,21 @@ def _walk(old, new, path, res, direction, consumer):
                 _walk({}, np_[name], f"{path}/{section}/{name}", {"classified": [], "breaking": [],
                                                                     "additions": [], "undetermined": []},
                       direction, consumer)
-    if "items" in old and "items" in new:
-        _walk(old["items"], new["items"], f"{path}/items", res, direction, consumer)
+    oi, ni = old.get("items"), new.get("items")
+    if isinstance(oi, dict) and isinstance(ni, dict):
+        if oi and ni:
+            _walk(oi, ni, f"{path}/items", res, direction, consumer)
+        elif ni:
+            cl("items constraint added", "tighten")
+        elif oi:
+            cl("items constraint removed", "loosen")
+    elif oi != ni and not (oi in (None, {}) and ni in (None, {})):
+        if _constrains(ni) and oi is None:
+            cl("items constraint added", "tighten")
+        elif _constrains(oi) and ni is None:
+            cl("items constraint removed", "loosen")
+        else:
+            cl("items form changed (schema vs list/other)", "unsupported")
 
 
 def compare(old, new, direction="both", consumer="closed"):
@@ -181,8 +222,23 @@ def main(argv):
     if len(files) != 2 or opts["--direction"] not in DIRECTIONS or opts["--consumer"] not in CONSUMERS:
         print(__doc__, file=sys.stderr)
         return 2
-    with open(files[0]) as a, open(files[1]) as b:
-        res = compare(json.load(a), json.load(b), opts["--direction"], opts["--consumer"])
+    docs = []
+    for fn in files:
+        try:
+            with open(fn, encoding="utf-8") as fh:
+                doc = json.load(fh, object_pairs_hook=_pairs)
+        except (OSError, ValueError, RecursionError) as e:
+            print(f"UNKNOWN: schema unreadable: {fn}: {type(e).__name__}: {e}", file=sys.stderr)
+            return 2
+        if not isinstance(doc, dict):
+            print(f"UNKNOWN: schema unreadable: {fn}: top level is {type(doc).__name__}, not an object", file=sys.stderr)
+            return 2
+        docs.append(doc)
+    try:
+        res = compare(docs[0], docs[1], opts["--direction"], opts["--consumer"])
+    except (TypeError, AttributeError, KeyError, ValueError, RecursionError) as e:
+        print(f"UNKNOWN: schema shape not comparable ({type(e).__name__})", file=sys.stderr)
+        return 2
     print(json.dumps(res, indent=2))
     return 0 if res["compatible"] else 1
 
