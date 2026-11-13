@@ -358,6 +358,8 @@ def _positive_clusters(members):
     # clusters with distinct sets never unite), so a cluster is empty or has exactly one set.
     csets = [{frozenset(_commits(m))} if _commits(m) else set() for m in members]
 
+    marks = [set() for _ in members]     # per cluster root: the buckets it has been through (small-to-large merged)
+
     def union(i, j):
         ri, rj = find(i), find(j)
         if ri == rj:
@@ -367,12 +369,21 @@ def _positive_clusters(members):
             return
         parent[ri] = rj
         csets[rj] = ca | cb
+        if len(marks[ri]) > len(marks[rj]):
+            marks[ri], marks[rj] = marks[rj], marks[ri]
+        marks[rj] |= marks[ri]
+        marks[ri] = set()
+
+    def ckey(i):
+        cs = csets[find(i)]
+        return next(iter(cs)) if cs else None
 
     # Related members are met through buckets (one per content sha256, one per canonical repo + normalized path),
     # not by a pairwise scan; the related pairs are tried in (i, j) order, so the clusters are those of the
-    # pairwise rule. A member already in a cluster that has been through all of a bucket's later members adds
-    # nothing there: every later member was joined to that cluster or is refused for good (cluster commit sets
-    # never change once stated), so it is skipped for that bucket.
+    # pairwise rule. Two shortcuts, neither changes a result: (1) a member whose cluster has already been through
+    # a bucket adds nothing there (every later member was joined to that cluster or is refused for good: a
+    # cluster's commit set never changes once stated); (2) a member whose cluster states commits only meets the
+    # bucket members stating the same commits or none (the others are refused for good).
     bucket_of, hows, mem = {}, [], []
     mine = [[] for _ in members]
     for i in range(len(members)):
@@ -386,22 +397,34 @@ def _positive_clusters(members):
                 hows.append("same-content-sha256" if key[0] == "sha" else "same-repo-identity-and-path")
             mem[bucket_of[key]].append(i)
             mine[i].append(bucket_of[key])
-    seen_roots = [set() for _ in mem]
+    bykey = []
+    for lst in mem:
+        d = {}
+        for i in lst:
+            d.setdefault(next(iter(csets[i])) if csets[i] else None, []).append(i)
+        bykey.append(d)
     for i in range(len(members)):
         cands, used = {}, []
+        ri = find(i)
+        x = ckey(i)
         for b in mine[i]:
-            seen_roots[b] = {find(r) for r in seen_roots[b]}
-            if find(i) in seen_roots[b]:
+            if b in marks[ri]:
                 continue
             used.append(b)
-            lst = mem[b]
-            for j in lst[bisect.bisect_right(lst, i):]:
+            if x is None:
+                partners = mem[b][bisect.bisect_right(mem[b], i):]
+            else:
+                partners = []
+                for k in (x, None):
+                    lst = bykey[b].get(k, [])
+                    partners += lst[bisect.bisect_right(lst, i):]
+            for j in partners:
                 if hows[b] == "same-content-sha256" or j not in cands:
                     cands[j] = hows[b]
         for j in sorted(cands):
             union(i, j)
         for b in used:
-            seen_roots[b].add(find(i))
+            marks[find(i)].add(b)
     # label: the basis of the last related pair, in (i, j) order, inside the final cluster (sha beats repo+path)
     last = {}
     for b, lst in enumerate(mem):
