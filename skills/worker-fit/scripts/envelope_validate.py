@@ -237,25 +237,26 @@ def opaque(label, v):
     return "[opaque %s %08x]" % (label, hash((_OPQ_KEY, label, norm)) & 0xFFFFFFFF)
 
 
-def keep(kind, v):
+def keep(kind, v, label=None):
     """The value to print for an identity field: marked when the field's own format validation accepts it (kind
-    ident | host | path | sha), else the raw value, which then goes through full redaction. The printed text is the value
-    as given; only the validated, credential-free form skips the run rule."""
+    ident | host | path | sha) AND the one trust gate accepts it under the field's own profile (_profile(label): the id
+    shapes this field carries), else the raw value, which then goes through full redaction. The printed text is the value
+    as given; only the validated, trusted form skips the run rule."""
     if not isinstance(v, str):
         return v
     ok = _KINDS[kind](v)
-    if kind != "sha" and ok == v and not _trusted_pieces(v, max_ids=2 if kind == "path" else 1):
+    if kind != "sha" and ok == v and not _trusted_pieces(v, max_ids=2 if kind == "path" else 1, profile=_profile(label)):
         return v
     return v if ok is None or ok != v else _MARK_OPEN + v + _MARK_CLOSE
 
 
 def show(label, v, kind="ident"):
-    """What an identity field prints: the value when it validates against its field's grammar (marked, so the run rule
-    skips it), a placeholder as it is (UNKNOWN stays UNKNOWN), and otherwise an opaque keyed reference, never the raw
-    value."""
+    """What an identity field prints: the value when it validates against its field's grammar and the one trust gate under
+    the field's own profile (marked, so the run rule skips it), a placeholder as it is (UNKNOWN stays UNKNOWN), and otherwise
+    an opaque keyed reference, never the raw value."""
     if not isinstance(v, str) or is_unknown(v) or _OPQ_REF.fullmatch(v):
         return v
-    k = keep(kind, v)
+    k = keep(kind, v, label)
     return k if k != v else opaque(label, v)
 
 
@@ -276,7 +277,7 @@ def show_row(label, v, words=frozenset()):
     toks = s.split()
     if (s == v.strip() and toks and len(s) <= 256 and all(
             redact_credentials(t) == t and not _cred_marked([x for x in _SPLIT.split(t) if x]) for t in toks)
-            and _gate_values(toks, words, 0)):  # a queue row carries no hex id, uuid or ULID
+            and _gate_values(toks, words, 0, _NO_PROFILE)):  # a queue row carries no hex id, uuid or ULID
         return v
     return opaque(label, v)
 
@@ -587,7 +588,7 @@ _STRONG_WORDS = {"token", "tokens", "secret", "secrets", "password", "passwd", "
                  "credential", "credentials", "apikey", "privkey", "passphrase", "passcode"}
 _STRONG_STEMS = ("token", "secret", "passw", "credential", "bearer", "passphrase", "passcode", "apikey", "privkey")
 _SHORT_STRONG = ("pat", "pw", "pwd", "pass")
-_NAME_WORDS = frozenset("service scope socket timer slice mount target path unit worker svc bot api user local prod dev test ci "
+_NAME_WORDS = frozenset("fleet quota ring service scope socket timer slice mount target path unit worker svc bot api user local prod dev test ci "
                         "refresh rotate store watch monitor check sync vault manager helper daemon proxy agent runner job "
                         "server client file cache reader writer fetch probe gate guard lint scan audit".split())
 _TINY = re.compile(r"\d{1,4}")
@@ -627,10 +628,18 @@ def _idplain(seg):
     return _plain_piece(seg)
 
 
+def _vocab_suffix(seg):
+    """A vocabulary word of at least three letters followed by a generated suffix of at most five characters ('tail9z8y7'): the
+    trust gate charges the suffix to the unlisted budget."""
+    low = seg.lower()
+    return seg.isascii() and seg.isalnum() and any(low.startswith(w) and 0 < len(low) - len(w) <= _MAX_SHORT
+                                                     for w in _ID_WORDS if len(w) >= 3 and not _cred_name(w))
+
+
 def _piece_ok(seg):
     """One piece of an identity: plain, an id shape, or word-like; a compact date inside a piece ('r7wfr620261113') is
     checked as its own piece."""
-    if _idplain(seg) or _ID_PIECE.fullmatch(seg) or _wordish(seg):
+    if _idplain(seg) or _ID_PIECE.fullmatch(seg) or _wordish(seg) or _vocab_suffix(seg):
         return True
     parts = [x for x in _DATE_PIECE.split(seg) if x]
     return len(parts) > 1 and all(_idplain(x) or _ID_PIECE.fullmatch(x) or _wordish(x) for x in parts)
@@ -670,7 +679,8 @@ _ID_WORDS = frozenset(("task tasks sess inv invocation run runs build builds wm 
                        "production dev canary shadow backup snapshot snap checkpoint ckpt metrics stats status state github gh remote origin "
                        "upstream tmux pane window screen term pty shell bash sh py python rs rust node npm yarn proc process thread tid name label "
                        "spec specs plan plans diff patch fix fixes test tests suite case cases shift clock "
-                       "wfit impl implementation opus sonnet haiku fable root temp us eu ap west east north south central compute region zone cluster").split())
+                       "wfit impl implementation opus sonnet haiku fable root temp us eu ap west east north south central compute region zone cluster "
+                       "controller carbon hetzner josephsyen aide watch rotate refresh manager daemon runner quota ring monitor sync check").split())
 _ULID_ANY = re.compile(r"[0-7][0-9A-HJKMNP-TV-Z]{25}|[0-7][0-9a-hjkmnp-tv-z]{25}")
 _SHORT_HEX = re.compile(r"[0-9a-fA-F]{1,4}")
 
@@ -697,7 +707,8 @@ _GATE_SPLIT = re.compile(r"[\s\-_./+=:@%~?&#,\\]+")
 _HEX_LENS = frozenset(list(range(7, 13)) + [32, 40, 64])
 _DNS_WORDS = frozenset("net com org io dev local internal lan corp home arpa cloud app ai co".split())
 _NUMERIC_NAMES = frozenset("pid ppid tid uid gid port seq rev revision count n line lines size bytes exit attempt retry retries ms "
-                           "secs seconds epoch offset len length total num number version ver ttl age idx index rc returncode".split())
+                           "secs seconds epoch offset len length total num number version ver ttl age idx index rc returncode timeout wait delay duration "
+                           "interval limit max min depth width height rows cols step steps page pages tries".split())
 
 
 def _hex_id(seg, prev=""):
@@ -709,14 +720,80 @@ def _hex_id(seg, prev=""):
     return bool(re.fullmatch(r"[0-9a-fA-F]+", seg)) and any(c.isdigit() for c in seg) and any(c.isalpha() for c in seg)
 
 
-def _id_grammar(seg, prev=""):
-    """The id grammar a piece is, or ''. A word of the vocabulary glued to a hex id ('rbcca95bf8e2f', 'child' + hex) is one id."""
-    if _hex_id(seg, prev) or _ULID_ANY.fullmatch(seg):
-        return "id"
+_SHAPE_OF_LEN = {32: "h32", 40: "h40", 64: "h64", 17: "inst"}
+
+
+def _id_shape(seg, prev=""):
+    """(shape, id text) of an id piece, or None. Shapes: short (7-12 hex), h32, h40, h64, inst (i-<17 hex>), ulid. A word of
+    the vocabulary glued to a hex id ('rbcca95bf8e2f', 'r' + 32 hex) is that hex id's shape."""
+    if _hex_id(seg, prev):
+        return _SHAPE_OF_LEN.get(len(seg), "short"), seg
+    if _ULID_ANY.fullmatch(seg):
+        return "ulid", seg
     for k in range(1, min(12, len(seg) - 6)):
         if (k >= 2 or seg[0] == "r") and seg[:k].lower() in _ID_WORDS and _hex_id(seg[k:]):  # one-letter prefix: only systemd's 'r'
-            return "id"
-    return ""
+            return _SHAPE_OF_LEN.get(len(seg) - k, "short"), seg[k:]
+    return None
+
+
+def _id_grammar(seg, prev=""):
+    """The id grammar a piece is, or ''."""
+    return "id" if _id_shape(seg, prev) else ""
+
+
+# THE FIELD PROFILES. Each identity field has its OWN grammar: the id shapes it carries, alone (the whole value is that id) or
+# beside other pieces, and for a hash-sized shape beside others the template the value must follow (`~` stands for the id).
+# A grammar-valid id of a shape the field does not carry is opaque there: a 256-bit hex value is an invocation or a head, and
+# a credential shape in an account, model, owner, repo, branch, host or task. An unknown label carries no ids at all. No
+# credential-name list takes part: this is a positive table of what each field is.
+_UNIT_SUFFIX = r"\.(?:service|scope|socket|timer|slice|mount|target|path)"
+_ROLES = "verifier|reviewer|coder|codex|claude|worker|agent|seat"
+_FILE_STEM = "evt|event|result|results|review|report|out|artifact|log|trace|journal|notes|dump"
+
+
+def _prof(alone=(), beside=(), tmpl=None, ip=False, unit_name=False):
+    return {"alone": frozenset(alone), "beside": frozenset(beside), "ip": ip, "unit_name": unit_name,
+            "tmpl": {k: re.compile(v, re.I) for k, v in (tmpl or {}).items()}}
+
+
+_UNIT_FORM = r"[\w.@+:-]*~[\w.@+:-]*" + _UNIT_SUFFIX
+_STEM_FORM = r"(?:.*/)?(?:%s)[-_.]~(?:\.[a-z]{2,5})?" % _FILE_STEM
+_PATH_PROFILE = _prof(beside=("short", "h32", "h40", "uuid"), tmpl={"short": _STEM_FORM, "h32": _STEM_FORM, "h40": _STEM_FORM,
+                                                                      "uuid": r".*/~(?:/.*|\.[a-z]{2,5})?"})
+_SESS_FORM = r"(?:sess|session|sid)[-_:]~"
+_PROFILES = {
+    "host": _prof(beside=("inst",), tmpl={"inst": r"i-~"}, ip=True),
+    "unit": _prof(beside=("short", "h32", "uuid"), tmpl={"short": _UNIT_FORM, "h32": _UNIT_FORM, "uuid": _UNIT_FORM}, unit_name=True),
+    "child": _prof(alone=("short",), beside=("short", "h32", "h40", "uuid"), tmpl={
+        "short": _UNIT_FORM, "h32": r"child[-_.]~|" + _UNIT_FORM, "h40": r"child[-_.]~", "uuid": r"child[-_.]~|" + _UNIT_FORM}),
+    "session": _prof(alone=("short", "h32", "uuid", "ulid"), beside=("short", "h32", "uuid", "ulid"), tmpl={
+        "short": _SESS_FORM, "h32": _SESS_FORM, "uuid": _SESS_FORM, "ulid": _SESS_FORM}),
+    "invocation": _prof(alone=("short", "h32", "h64", "uuid", "ulid"), beside=("short", "h32"), tmpl={
+        "short": r"(?:inv|invocation)[-_:]~", "h32": r"(?:inv|invocation)[-_:]~"}),
+    # a model, an effort, a repo and a host carry no id of a hash-like shape; an account, an owner and a branch carry one only
+    # behind their own instance prefix (acct-<id>, r7-<id>, feat-<id>)
+    "account": _prof(beside=("short", "uuid"), tmpl={k: r"(?:acct|account)[-_.]~" for k in ("short", "uuid")}),
+    "owner": _prof(beside=("short",), tmpl={"short": r"(?:r7|rb|ctl|hermes|orch|aide|controller|acct)[-_.]~"}),
+    "branch": _prof(beside=("short", "h32"), tmpl={k: r"(?:.*/)?(?:feat|feature|fix|hotfix|bug|wip|r7|rb)[-_]~" for k in ("short", "h32")}),
+    "model": _prof(), "effort": _prof(), "repo": _prof(),
+    "named": _prof(beside=("short", "h32"), tmpl={"short": r"(?:%s)[-_.]~" % _ROLES, "h32": r"(?:%s)[-_.]~" % _ROLES}),
+    "task": _prof(alone=("ulid",), beside=("short", "h32", "uuid", "ulid"), tmpl={
+        k: r"(?:task|wf|a|t)[-_]?~" for k in ("short", "h32", "uuid", "ulid")}),
+    "path": _PATH_PROFILE,
+}
+_PROFILE_ALIAS = {"sess-id": "session", "current_owner": "owner", "reviewed_by": "owner", "consumer": "named", "alternate": "named",
+                  "task_id": "task", "result": "path", "artifact": "path", "event": "path", "evidence-ref": "path", "ref": "path",
+                  "target": "path"}
+_NO_PROFILE = _prof()
+_ANY_SHAPES = ("short", "h32", "h40", "h64", "uuid", "ulid", "inst")
+_ANY_PROFILE = _prof(alone=_ANY_SHAPES, beside=_ANY_SHAPES, ip=True)  # the bare gate, no field: only a caller that names none gets it
+_MAX_DIGITS_WITH_ID = 8  # beside an id grammar at most this many digits: an id plus fourteen digits is ~94 bits
+
+
+def _profile(label):
+    """The field profile for a label or field name (see THE FIELD PROFILES); strict (no ids) for an unknown one."""
+    low = (label or "").lower().rsplit(".", 1)[-1]  # a field path (worker.unit, consumer.named) names its last key
+    return _PROFILES.get(_PROFILE_ALIAS.get(low, low), _NO_PROFILE)
 
 
 def _word(low, words):
@@ -779,8 +856,10 @@ def _piece(seg, prev, st):
             return False
         st["digits"] += len(seg)
         return True
-    if _id_grammar(seg, prev):
+    sh = _id_shape(seg, prev)
+    if sh:
         st["ids"] += 1
+        st["found"].append(sh)
         return True
     if not (seg.isascii() and seg.isalnum()):
         return False
@@ -827,7 +906,8 @@ _IPV6_GROUP = re.compile(r"[0-9A-Fa-f]{1,4}")
 
 def _ipv6(core):
     """An IPv6 literal: eight groups of at most four hex digits, with one '::' standing for one or more zero groups, an
-    optional trailing IPv4."""
+    optional trailing IPv4. A compressed literal carries at most four explicit groups; a fully written one at most four
+    non-zero groups (2001:db8:0:0:0:0:0:1), so no 128-bit random value passes as an address."""
     if core.count("::") > 1 or ":::" in core:
         return False
     head, _, tail = core.partition("::")
@@ -836,17 +916,21 @@ def _ipv6(core):
     if "::" not in core and (core.startswith(":") or core.endswith(":")):
         return False
     groups = parts + tail_parts
-    n = 0
+    n = nonzero = 0
     for i, g in enumerate(groups):
         if i == len(groups) - 1 and "." in g:
             if not _IPV4.fullmatch(g):
                 return False
             n += 2
+            nonzero += 1
         elif _IPV6_GROUP.fullmatch(g):
             n += 1
+            nonzero += int(g, 16) != 0
         else:
             return False
-    return "::" in core and len(groups) <= _MAX_IPV6_GROUPS and n <= 7  # a full eight-group form is the shape of a 128-bit key
+    if "::" in core:
+        return len(groups) <= _MAX_IPV6_GROUPS and n <= 7
+    return n == 8 and nonzero <= _MAX_IPV6_GROUPS
 
 
 def _ip_literal(s):
@@ -862,22 +946,49 @@ def _ip_literal(s):
     return bool(_IPV4.fullmatch(core)) or (":" in core and _ipv6(core))
 
 
-def _gate_values(vals, words=frozenset(), max_ids=1):
+_UNIT_END = re.compile(r".*" + _UNIT_SUFFIX)
+
+
+def _unit_name_segments(segs, whole, words):
+    """The pieces of a systemd unit name that still need the gate. A unit may be NAMED for what it manages
+    ('fleet-token-429-watch.service'): one strong credential word is a name word there, and only there, when the value ends in
+    a unit suffix and every other piece is a closed-vocabulary word or a number of at most three digits, so nothing unlisted
+    rides on it ('token-<anything>.service' keeps the word and fails the gate)."""
+    named = [x for x in segs if x.lower() in _STRONG_WORDS]
+    if len(named) != 1 or not _UNIT_END.fullmatch(whole.strip()):
+        return segs
+    rest = [x for x in segs if x is not named[0]]
+    if all(_word(x.lower(), words) or (x.isdigit() and len(x) <= 3) for x in rest):
+        return rest
+    return segs
+
+
+def _gate_values(vals, words=frozenset(), max_ids=1, profile=None):
     """True when every piece of every value in `vals` is trusted and the values together stay inside the budgets (see THE ONE
-    TRUST GATE). The caller's `words` extend the closed vocabulary for one field."""
-    st = {"words": words, "cost": 0, "digits": 0, "ids": 0}
+    TRUST GATE), and every id the values carry is of a shape the field's `profile` names, in the form (alone, or beside
+    other pieces and following the shape's template) the profile allows (see THE FIELD PROFILES). Every output path passes its
+    field's profile (a row field: none, so no ids); only a direct call that names no profile gets the bare gate.
+    The caller's `words` extend the closed vocabulary for one field."""
+    prof = profile or _ANY_PROFILE
+    st = {"words": words, "cost": 0, "digits": 0, "ids": 0, "found": []}
     npieces = 0
     for s in vals:
         if not isinstance(s, str) or not s or len(s) > 512:
             return False
         if "=" in s and not _name_value_ok(s):
             return False
-        if _ip_literal(s):
+        if prof["ip"] and _ip_literal(s):
             continue
-        st["ids"] += len(_UUID.findall(s))
+        st["found"] = []
+        for m in _UUID.finditer(s):
+            st["found"].append(("uuid", m.group(0)))
+        st["ids"] += len(st["found"])
+        whole = s
         s = _UUID.sub(".", s)
         s = _ISO_TS.sub(".", s)
         segs = [x for x in _GATE_SPLIT.split(s) if x]
+        if prof["unit_name"]:
+            segs = _unit_name_segments(segs, whole, words)
         npieces += len(segs)
         prev = ""
         for i, seg in enumerate(segs):
@@ -888,15 +999,24 @@ def _gate_values(vals, words=frozenset(), max_ids=1):
             if not _piece(seg, prev, st):
                 return False
             prev = seg
+        for shape, text in st["found"]:
+            if len(vals) == 1 and whole.strip() == text:
+                if shape not in prof["alone"]:
+                    return False
+                continue
+            rx = prof["tmpl"].get(shape)
+            if shape not in prof["beside"] or (rx is not None and not rx.fullmatch(whole.replace(text, "~", 1))):
+                return False
     return (npieces <= _MAX_PIECES and st["cost"] <= _MAX_UNLISTED and st["digits"] <= _MAX_DIGITS_TOTAL
-            and st["ids"] <= max_ids and not (st["ids"] and st["cost"] > _MAX_UNLISTED_WITH_ID))  # a random id sits beside closed-vocabulary pieces
+            and st["ids"] <= max_ids and not (st["ids"] and (st["cost"] > _MAX_UNLISTED_WITH_ID or st["digits"] > _MAX_DIGITS_WITH_ID)))
 
 
-def _trusted_pieces(s, words=frozenset(), max_ids=1):
-    """True when a grammar-valid identity passes the one trust gate (see THE ONE TRUST GATE). The host grammar is not an
-    exemption: a DNS label is a piece like any other. No credential-name list decides here: a credential word is never a
-    vocabulary word, so it is unlisted material inside the budget, and the ident() layers that look for one only refuse more."""
-    return _gate_values([s], words, max_ids)
+def _trusted_pieces(s, words=frozenset(), max_ids=1, profile=None):
+    """True when a grammar-valid identity passes the one trust gate under the field's profile (see THE ONE TRUST GATE). The
+    host grammar is not an exemption: a DNS label is a piece like any other. No credential-name list decides here: a credential
+    word is never a vocabulary word, so it is unlisted material inside the budget, and the ident() layers that look for one
+    only refuse more."""
+    return _gate_values([s], words, max_ids, profile)
 
 
 def _plain_name(seg):
@@ -1094,25 +1214,40 @@ def _free_words():
 
 _FREE_SPLIT = re.compile(r"[\s\-_./+=:@%~?&#,\\]+")
 _FLAG_TOKEN = re.compile(r"--?[A-Za-z][\w-]*")
-_FREE_DIGITS = 4  # the longest digit-only value that reads as a count, whatever its name
-_FREE_UNLISTED = 6  # the most characters of unlisted material (pieces of at most three characters) one free value may carry
+_FREE_UNLISTED = 4  # the most characters of unlisted material (pieces of at most three characters) one free value may carry
 _FREE_SHORT = 3
-# Ordinary field names whose value is a short plain code or label, never a secret by the field's meaning: a letters-only
-# value of at most eight characters prints under them (re-review 7 positive `code=<8 letters>`). A closed list, not a gate on
-# the name for any other pair; digits and mixed pieces under it follow the ordinary rule (`code=12345678` is hidden).
+_FREE_PIECES = 2  # the most unlisted pieces one free value may carry
+_FREE_WORD_RUN = 3  # vocabulary words joined by '-' or '_' in one free value: fewer than this
+_FREE_DIGITS = 2  # the longest number that reads as a small count under a name outside the closed numeric list
 _CRED_NEXT_OK = frozenset("required missing unset empty rotated rotation expired expires invalid valid stored hidden masked changed "
                           "present absent unknown none null true false ok ready set refresh refreshed service timer file path env "
                           "variable store vault cache check reader fetch sync watch monitor mismatch rejected accepted denied "
                           "granted failed not no yes the a an this that it all any each one two used left remaining count total".split())
-_PLAIN_VALUE_NAMES = frozenset(["code"])  # the whole name, never a qualified one (verify_code, invite_code)
+_PORT_NAMES = frozenset(["p", "publish", "port", "ports", "expose"])
+_NUMERIC_PAIRS = frozenset(["exit_code", "status_code", "return_code", "http_code"])
+_NUMERIC_SUFFIX = ("count", "size", "bytes", "seconds", "lines", "total", "length", "number", "version", "index", "retries", "attempts",
+                   "timeout", "duration")
+
+
+def _numeric_name(name):
+    """True for a name of the closed list of numeric field names (a pid, a port, a line, a count, a timeout, an exit code): the
+    only names under which a number prints. A name outside the list ('mfa', 'mypass', 'code', 'foo') hides any number."""
+    toks = [t.lower() for t in re.split(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])", name) if t]
+    if not toks:
+        return False
+    last = toks[-1]
+    return (last in _NUMERIC_NAMES or (len(toks) > 1 and toks[-2] + "_" + last in _NUMERIC_PAIRS)
+            or any(last.endswith(w) and len(last) > len(w) for w in _NUMERIC_SUFFIX))
 
 
 def _benign_value(raw, name="", cred_context=False):
     """True for a value that reads as a plain closed-vocabulary value, so there is nothing to hide: a small number, a time, a
     state or vocabulary word, a bracketed opaque ref, another flag. The gate is the closed vocabulary (_free_words) plus
-    bounded numbers (at most four digits; ten for a name in the closed list of numeric field names; two after a credential
-    word) and at most four characters of unlisted material in pieces of two characters. A plain word that is not in the
-    vocabulary ('sunshine', 'dragon'), a mixed piece, a long number and any unlisted run are hidden, whatever the NAME is."""
+    numbers under a name of the closed list of numeric field names (_numeric_name: at most ten digits; at most two digits under
+    any other name; two after a credential word), and at most four characters of unlisted material in at most two pieces; no more
+    than two vocabulary words joined by '-' or '_'. A plain word that is not in the vocabulary ('sunshine', 'dragon'), a mixed
+    piece, a number outside the closed list ('mfa=4821', 'code=1234') and any longer unlisted run are hidden, whatever the NAME
+    is: no name is exempt and the name decides nothing but which numbers are counts."""
     if len(raw) > 128:
         return False  # a plain value is short
     v = raw.strip("\"'`").rstrip(".:")
@@ -1124,16 +1259,26 @@ def _benign_value(raw, name="", cred_context=False):
         return True
     if cred_context:  # right after a credential word only a state word may follow (the next-word check of _redact_cred_prose)
         return all(x == "" or x.lower() in _CRED_NEXT_OK or (x.isdigit() and len(x) <= 2) for x in _FREE_SPLIT.split(v))
-    last = re.split(r"[^a-z0-9]+", name.lower())[-1] if name else ""
-    limit = 2 if cred_context else (10 if last in _NUMERIC_NAMES else _FREE_DIGITS)
-    cost = 0
-    for x in _FREE_SPLIT.split(v):
+    numeric = _numeric_name(name)
+    limit = 10 if numeric else _FREE_DIGITS  # long numbers print only under a name of the closed numeric list
+    if re.fullmatch(r"\d{1,5}:\d{1,5}", v) and name.lower().lstrip("-") in _PORT_NAMES:
+        return True  # a port mapping (docker -p 8080:80)
+    cost = pieces = 0
+    run = 0  # vocabulary words joined by '-' or '_'
+    prev_word = False  # the previous piece is a closed-vocabulary word: 'WF-1663', 'task-1663' are ids, not a secret number
+    parts = re.split(r"([\s\-_./+=:@%~?&#,\\]+)", v)
+    for i in range(0, len(parts), 2):
+        x, sep = parts[i], (parts[i - 1] if i else "")
         if not x:
             continue
         low = x.lower()
         stripped = low.rstrip("0123456789")
+        was_word, prev_word = prev_word, low in _free_words()
+        run = run + 1 if prev_word and sep and not sep.strip("-_") else (1 if prev_word else 0)
+        if run >= _FREE_WORD_RUN:
+            return False  # three or more vocabulary words joined by '-' or '_' read as a passphrase
         if x.isdigit():
-            if len(x) > limit:
+            if len(x) > (_MAX_DIGIT_PIECE if was_word else limit):
                 return False
         elif low in _free_words() or (stripped in _free_words() and 0 < len(low) - len(stripped) <= 3) or _DATE_ID.fullmatch(x):
             continue
@@ -1141,11 +1286,10 @@ def _benign_value(raw, name="", cred_context=False):
             continue
         elif len(x) <= 2 or (len(x) <= _FREE_SHORT and x.isalnum()):
             cost += len(x)
-        elif name.lower() in _PLAIN_VALUE_NAMES and x == v and x.isalpha() and len(x) <= 8 and not cred_context:
-            continue
+            pieces += 1
         else:
             return False
-    return cost <= _FREE_UNLISTED
+    return cost <= _FREE_UNLISTED and pieces <= _FREE_PIECES
 
 
 def _trusted_field_value(name, raw):
@@ -1154,7 +1298,7 @@ def _trusted_field_value(name, raw):
     core = raw.rstrip(".:")
     if kind == "hex":
         return bool(re.fullmatch(r"[0-9a-fA-F]{4,64}", core)) and not core.isdigit()
-    return bool(kind) and keep(kind, core) != core
+    return bool(kind) and keep(kind, core, re.split(r"[.\-]", name)[-1].lower()) != core
 
 
 def _open_structure(text, e):

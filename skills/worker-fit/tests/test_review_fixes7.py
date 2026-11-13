@@ -468,7 +468,7 @@ class Def_ShortKeyShapedPiecesAndCompoundNames(unittest.TestCase):
         for name in ("recovery_code", "oauth_verifier", "code_verifier", "backup_codes", "sas"):
             self.assertNotIn(v, ev.redact("%s=%s" % (name, v)), name)
             self.assertNotIn(v, ev.redact('{"%s": "%s"}' % (name, v)), name)
-        for text in ("code=%s" % v, "verifier: hermes", "recovery of the unit"):
+        for text in ("code=ok", "exit_code=2", "verifier: hermes", "recovery of the unit"):
             self.assertEqual(ev.redact(text), text, text)
 
 

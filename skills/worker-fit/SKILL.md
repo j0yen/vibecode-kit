@@ -81,8 +81,14 @@ scheduler, coordinator, task store or mutation CLI.
   (a) a word of the CLOSED vocabulary (`_ID_WORDS`, the caller's reviewed words for one row field, the DNS top-level labels:
   enumerated in the source, no credential word in it), (b) a bounded number (at most 7 digits; at most 14 digits in all), (c) a
   calendar-valid date or compact UTC timestamp, (d) one EXACT id grammar (a uuid 8-4-4-4-12, a hex id of 7-12, 32, 40 or 64
-  characters mixing digits and letters, a ULID, a compressed IP literal of at most four groups; one id per identity, two in a
-  path, none in a queue row, and an id sits only beside closed-vocabulary pieces), or (e) a small amount of unlisted
+  characters mixing digits and letters, a ULID, an instance id `i-<17 hex>`, an IP literal in a host), but ONLY in a field whose
+  OWN profile names that shape, in the form the profile allows (`_PROFILES`): a 32- or 64-hex id or a uuid alone is an
+  `invocation` (a 32-hex id or uuid alone is also a `session`), a 7-64 hex id is a `target.head`; a hash-sized id beside
+  other pieces is trusted only in a field template (`wm-build-<id>.service` and `run-r<id>.scope` in a unit, `child-<id>`,
+  `sess-<id>`, `verifier-<id>`, `task-<id>`, `acct-<id>`, `evt-<id>`, `result-<id>.json`); account, owner, model, effort, repo,
+  branch and host carry no hash-like id otherwise, so the same 256-bit value is an `invocation` and an opaque ref in an account
+  or an owner. An unknown field carries no id at all, and a queue row none. One id per identity, two in a path, at most eight
+  digits beside an id, and an id sits only beside closed-vocabulary pieces), or (e) a small amount of unlisted
   material: pieces of at most five characters with a TOTAL budget of eight characters per value, so no count of short pieces
   adds up to a credential. A vocabulary compound (`wmbuild1663impl2`, `WF1663Impl`, `r7wfitfix2`) is split into vocabulary
   words and bounded numbers. Everything else (random letters, hex groups, digit groups, passphrases, a vocabulary word plus a
@@ -94,9 +100,12 @@ scheduler, coordinator, task store or mutation CLI.
   (`show_row`): row id, owner, wait, status, seq and claim print only when every token passes it; anything else is an opaque
   ref, and a non-string field is never printed. Free text is untrusted narrative: the value of any `name=value`,
   `name: value`, `"name": "value"` or `--name value` pair is hidden unless it is closed vocabulary (a word of the tool's own
-  vocabulary, a time, a bracketed ref, a number of at most 4 digits, or up to 10 under a closed list of numeric names such as
-  `pid` and `seq`, and at most six characters of two-to-three-character pieces) or the name is a schema key whose value is a hex
-  id; whatever the NAME is, a plain word or number under a name nobody listed is hidden (`sessionkey=sunshine`, `code=12345678`).
+  vocabulary, a time, a bracketed ref, a number of at most 2 digits, or up to 10 under a closed list of numeric names such as
+  `pid`, `seq`, `port`, `timeout` and `exit_code`, and at most four characters of unlisted material in at most two pieces, no
+  more than two vocabulary words joined by `-` or `_`) or the name is a schema key whose value is a hex id or a trusted identity of that
+  field; whatever the NAME is, a plain word or a number outside the closed numeric list is hidden (`sessionkey=sunshine`,
+  `code=abcdefgh`, `mfa=4821`, `mypass=1234`, `seedphrase=abc-def`). No name is exempt: `code` is a name like any other.
+  Residual by size: a value of three characters or fewer prints under any name.
   A credential word followed in prose by its value without a separator (`the password is sunshine`, `pass swordfish`, `my pin
   482917`) hides the next word unless it is a state word (`required`, `missing`, `expired`, ...). A credential word joined to
   a value in one token (`token-<v>`, `secret_run_<v>`, `tokenArYYbbah`) is hidden. The credential-name list above is an extra
