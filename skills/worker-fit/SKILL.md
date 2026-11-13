@@ -69,12 +69,24 @@ scheduler, coordinator, task store or mutation CLI.
   pieces) is hidden, a UUID included; (c) URL userinfo is hidden and so are the values of credential-named query
   parameters; (d) a credential-named key hides its whole value, scalar, array, object or YAML block (abbreviations
   `pw pat pin ak sk seed salt hmac privkey ...` count), and the password flags of named commands (`sshpass -p`,
-  `mysql -p`, `unzip -P`, `7z -p`, `--pw`, `--password`) hide their value. Identity fields are validated by their own
-  format, apart from that free-text redaction: a host, unit, scope (`child`), session, invocation, consumer, reviewer
-  or artifact path whose pieces are plain words, digits, hex ids, UUIDs, compact timestamps or ULIDs, and that carries
-  no credential name, flag or provider shape, is printed as given (a hex or UUID unit name stays usable); a long
-  base62 / key-shaped piece, a credential-named pair or a provider shape in such a field is not an identifier and is
-  hidden. A `target.head` that is a 7-64 hex sha prints. The run rule (b) applies to free text only. On top of that
+  `mysql -p`, `unzip -P`, `7z -p`, `--pw`, `--password`) hide their value. Credential pairs are
+  also found inside JSON string escapes (`\"`, `\\`, `\uXXXX`, string-encoded JSON inside a string, up to four layers) and
+  percent-escapes: the text is checked as written and as decoded, and the decoded view with the credential hidden is
+  printed. Identity fields are field-aware and opaque when untrusted: a host, unit, scope (`child`), session,
+  invocation, account, model, effort, owner, task id, repo, branch, consumer, reviewer, artifact/event path, evidence
+  ref (one locator token) or `target.head` is printed only when it validates against its field grammar (plain words,
+  digits, hex ids, UUIDs, compact timestamps, ULIDs, word-like mixed alphanumerics such as `WF1663Impl` or
+  `r7wfr6review`; a host has no `user:password@` userinfo and any `user@` part is a plain name) and nothing marks it as
+  a credential (a credential word joined to a non-trivial piece, `token-<hex>`, `Bearer-<hex>`, `pat_<hex>`,
+  `secret/<hex>`, a credential-named pair or query parameter, a provider shape). A value that does not validate is
+  printed as an opaque keyed reference `[opaque <field> <8 hex>]` (a per-process keyed digest of the field name and the
+  value: equal values give equal refs inside one run, nothing is recoverable, not stable across runs), never as the
+  raw value; a placeholder stays UNKNOWN. A required identity (host, unit, child of a RUNNING record) that does not
+  validate is UNKNOWN evidence, so the record is refused rather than reused. Mismatch findings (wrong task, repo,
+  branch, head; duplicate task; conflicting target; unknown or duplicate key names) name the fields and carry opaque
+  refs, never the raw values; a hex run in an evidence `ref` is read as a commit only after its credential layers are
+  applied, so a hex under a credential name is never a head. Free narrative (coverage gaps, prose evidence refs)
+  has no grammar and is printed through the redaction layers above. A `target.head` that is a 7-64 hex sha prints. The run rule (b) applies to free text only. On top of that
   the named shapes stay: `Authorization:` values (Basic/Bearer/...), `bearer <x>`, `sk-...` keys,
   provider token prefixes as a class (AWS key ids `AKIA/ASIA/AGPA/AIDA/AROA/...`; Slack `xox?-`, `xoxe.`, `xapp-` and
   webhook URLs; Google `ya29.`, `AIza`, `GOCSPX-`, refresh tokens; npm `npm_`; GitLab `glpat-` and siblings; GitHub
@@ -146,7 +158,7 @@ scheduler, coordinator, task store or mutation CLI.
   session identity, not a subscription account. A `reviewed_by` equal (after case, spacing and NFKC normalisation) to the
   worker's own session, invocation, child, actor (`worker.account` name), `current_owner` or `source.owner` is the
   same-author case and is refused (independent verification kept); any other valid identifier is a distinct reviewer.
-  No signing or account boundary is demanded, and the reviewer need not run on a different subscription account. If the consumer is busy or unavailable the terminal stays durable, the named later
+  No signing or account boundary is demanded, and the reviewer need not run on a different subscription account; account names are compared only as strings. If the consumer is busy or unavailable the terminal stays durable, the named later
   consumer (and an *authorized* alternate, if any) is reported, and no ACK is recorded.
 - Duplicate task (task ids compared after normalisation), or a second live task on the same repo+branch -> refusal
   for the newcomer. The decision is state-aware, never positional: the RUNNING record of a task id is the original and

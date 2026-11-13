@@ -72,18 +72,25 @@ def _distinct_reviewer(d):
 
 
 def _evidence(d, marked=False):
-    ev_used = ["state=%s" % d["state"], "work_shape=%s" % d["work_shape"], "owner=%s reachable=%s" % (d["current_owner"], d["owner_reachable"]),
+    """The evidence lines. With marked=True every identity field prints through ev.show: the value when it validates
+    against the field's own grammar, an opaque keyed ref otherwise, a placeholder as it is. Free narrative (coverage gaps,
+    prose evidence refs) goes through full redaction; a locator-shaped evidence ref validates like an identity."""
+    show = ev.show if marked else (lambda label, v, kind="ident": v)
+    show_ref = ev.show_ref if marked else (lambda label, v: v)
+    w, t = d["worker"], d["target"]
+    ev_used = ["state=%s" % d["state"], "work_shape=%s" % d["work_shape"],
+               "owner=%s reachable=%s" % (show("owner", d["current_owner"]), d["owner_reachable"]),
                "effect=%s no_replay=%s" % (d["effect"]["state"], d["effect"]["no_replay"])]
     # the label "sess-id" (not "session"): a credential word in a label would make redaction hide the session id itself
-    # identity fields print by their own format validation (ev.keep); every other value goes through full redaction
-    keep = ev.keep if marked else (lambda kind, v: v)
-    kind = {"host": "ident", "unit": "ident", "child": "ident", "session": "ident", "invocation": "ident"}
-    ev_used += ["worker.%s=%s" % ("sess-id" if k == "session" else k, keep(kind[k], v) if k in kind else v)
-                for k, v in d["worker"].items()]
-    ev_used.append("target=%s@%s head=%s" % (d["target"]["repo"], d["target"]["branch"], keep("sha", d["target"]["head"])))
+    kinds = {"host": "host", "unit": "ident", "child": "ident", "session": "ident", "invocation": "ident", "account": "ident",
+             "model": "ident", "effort": "ident"}
+    ev_used += ["worker.%s=%s" % ("sess-id" if k == "session" else k, show("sess-id" if k == "session" else k, v, kinds[k]))
+                for k, v in w.items()]
+    ev_used.append("target=%s@%s head=%s" % (show("repo", t["repo"]), show("branch", t["branch"]), show("head", t["head"], "sha")))
     if d["result"]["artifact"] or d["result"]["event"]:
-        ev_used.append("result=%s reviewed=%s" % (keep("path", d["result"]["artifact"] or d["result"]["event"]), d["result"]["reviewed"]))
-    ev_used += ["evidence %s (task %s rev %s at %s)" % (e["ref"], e["task_id"], e["revision"], e["observed_at"]) for e in d["evidence"]]
+        ev_used.append("result=%s reviewed=%s" % (show("result", d["result"]["artifact"] or d["result"]["event"], "path"), d["result"]["reviewed"]))
+    ev_used += ["evidence %s (task %s rev %s at %s)" % (show_ref("evidence-ref", e["ref"]), show("task", e["task_id"]), e["revision"], e["observed_at"])
+                for e in d["evidence"]]
     ev_used += ["coverage gap: " + g for g in d["coverage_gaps"]]
     return ev_used
 
@@ -96,10 +103,15 @@ def _base(task_id, revision):
 
 
 def recommend_one(d, findings):
+    """One recommendation for library callers: no identity marks in the result (see _recommend_one)."""
+    return ev.unmark(_recommend_one(d, findings))
+
+
+def _recommend_one(d, findings):
     refusals = [f for f in findings if f["severity"] == "REFUSE"]
     tid = d.get("task_id", UNKNOWN) if isinstance(d, dict) else UNKNOWN
     rev = d.get("revision", UNKNOWN) if isinstance(d, dict) else UNKNOWN
-    r = _base(tid if isinstance(tid, str) and tid else UNKNOWN, rev)
+    r = _base(ev.show("task", tid) if isinstance(tid, str) and tid else UNKNOWN, rev)
     if refusals:
         r.update(refused=True, reason_codes=sorted({f["code"] for f in refusals}),
                  reasons=["%s %s: %s" % (f["code"], f["path"], f["message"]) for f in refusals],
@@ -211,9 +223,9 @@ def recommend_set(obj, now=None):
     res = ev.validate_set(obj, ref)
     recs, _ = ev._records(obj)
     if not isinstance(recs, list):  # structurally null/invalid wrapper: one refusal, never a crash
-        out = [_scrub(recommend_one(None, res["set_findings"]))]
+        out = [_scrub(_recommend_one(None, res["set_findings"]))]
     else:
-        out = [_scrub(recommend_one(d, res["findings_by_index"][i])) for i, d in enumerate(recs)]
+        out = [_scrub(_recommend_one(d, res["findings_by_index"][i])) for i, d in enumerate(recs)]
     for r in out:
         r["reference_clock"] = dict(stamp)
     return out

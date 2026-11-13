@@ -170,26 +170,33 @@ def ref_like(v):
 
 _IDENT = re.compile(r"[A-Za-z0-9%][A-Za-z0-9._:@/+%=-]{0,127}")  # %12 (tmux pane), pid=77, fe80::1%eth0
 _SHA = re.compile(r"[0-9a-fA-F]{7,64}")
+_PATH = re.compile(r"[A-Za-z0-9._/+:@%=~?&#,-]{1,512}")
+_SPLIT = re.compile(r"[-_./+=:@%~?&#,]+")
+_HOST_PORT = re.compile(r"[^:]+:\d{1,5}")
+_IPV6 = re.compile(r"[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%[A-Za-z0-9_.-]{1,32})?")
 
 
-def ident(v):
-    """The value as an identifier (ASCII word characters and . _ : @ / + -, no spaces), or None when it is not one,
-    is a placeholder, or carries a credential (a credential-named pair, a credential flag, a known credential shape: the
-    credential layers of redact() would change it). The random-token run rule does not apply here: a hex or uuid piece is
-    a normal part of a unit, scope, session, invocation or consumer name, validated by this field format.
-    Used wherever a value names a host, unit, child, consumer or reviewer."""
+def ident(v, kind=None):
+    """The value as an identifier (ASCII word characters and . _ : @ / + -, no spaces), or None when it is not one, is a
+    placeholder, or is not a trusted identity: its pieces must read as ids (_id_pieces_ok), no credential word may be
+    joined to a non-trivial piece, a host has no user:password userinfo, and the credential layers of redact() must leave it
+    unchanged. The random-token run rule does not apply here: a hex or uuid piece is a normal part of a unit, scope,
+    session, invocation or consumer name, validated by this field format. kind="host" adds the host grammar.
+    Used wherever a value names a host, unit, child, consumer, reviewer, owner, task, repo or branch."""
     if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v):
         return None
     s = unicodedata.normalize("NFKC", v).strip()
-    return s if _IDENT.fullmatch(s) and _id_pieces_ok(s) and redact_credentials(s) == s else None
-
-
-_PATH = re.compile(r"[A-Za-z0-9._/+:@%=~-]{1,512}")
+    if not (_IDENT.fullmatch(s) and _id_pieces_ok(s) and redact_credentials(s) == s):
+        return None
+    if kind == "host" and ":" in s and not (_IPV6.fullmatch(s) or _HOST_PORT.fullmatch(s.rsplit("@", 1)[-1] if "@" in s else s)):
+        return None
+    return s
 
 
 def path_ident(v):
-    """The value as an artifact / event locator (a path or id with no whitespace), or None: placeholder, assertion word,
-    or carrying a credential (credential-named pair or query parameter, provider shape)."""
+    """The value as an artifact / event / reference locator (a path or id with no whitespace), or None: placeholder,
+    assertion word, a piece that is not an id, a credential word joined to a non-trivial piece, or carrying a credential
+    (credential-named pair or query parameter, provider shape)."""
     if not isinstance(v, str) or is_unknown(v) or is_assertion_word(v):
         return None
     s = unicodedata.normalize("NFKC", v).strip()
@@ -205,14 +212,57 @@ _MARK_RX = re.compile(re.escape(_MARK_OPEN) + r"(.{0,600}?)" + re.escape(_MARK_C
 _HOLD_RX = re.compile("\ue002" + _NONCE + r"(\d+)\ue003")
 
 
+_KINDS = {"ident": ident, "host": lambda x: ident(x, "host"), "path": path_ident,
+          "sha": lambda x: x.strip() if is_sha(x) else None}
+_OPQ_KEY = os.urandom(16)
+
+
+def opaque(label, v):
+    """An opaque reference to a value this tool does not trust enough to print: the field label plus a short digest keyed
+    with a per-process random 128-bit key (the interpreter's own keyed string hash over key, label and value: equal values
+    give equal refs inside one run, different fields give different refs, a guess cannot be confirmed from the output, and
+    nothing of the value is recoverable from 32 bits). Never the raw value. Refs are not stable across runs."""
+    norm = unicodedata.normalize("NFKC", v if isinstance(v, str) else repr(v))
+    return "[opaque %s %08x]" % (label, hash((_OPQ_KEY, label, norm)) & 0xFFFFFFFF)
+
+
 def keep(kind, v):
     """The value to print for an identity field: marked when the field's own format validation accepts it (kind
-    ident | path | sha), else the raw value, which then goes through full redaction. The printed text is the value as
-    given; only the validated, credential-free form skips the run rule."""
+    ident | host | path | sha), else the raw value, which then goes through full redaction. The printed text is the value
+    as given; only the validated, credential-free form skips the run rule."""
     if not isinstance(v, str):
         return v
-    ok = {"ident": ident, "path": path_ident, "sha": lambda x: x.strip() if is_sha(x) else None}[kind](v)
+    ok = _KINDS[kind](v)
     return v if ok is None or ok != v else _MARK_OPEN + v + _MARK_CLOSE
+
+
+def show(label, v, kind="ident"):
+    """What an identity field prints: the value when it validates against its field's grammar (marked, so the run rule
+    skips it), a placeholder as it is (UNKNOWN stays UNKNOWN), and otherwise an opaque keyed reference, never the raw
+    value."""
+    if not isinstance(v, str) or is_unknown(v):
+        return v
+    k = keep(kind, v)
+    return k if k != v else opaque(label, v)
+
+
+def show_ref(label, v):
+    """A free-text reference (evidence ref): a single locator-shaped token prints when it validates and is otherwise an
+    opaque ref; prose (whitespace) is narrative and goes through full redaction."""
+    if not isinstance(v, str) or is_unknown(v) or any(c.isspace() for c in v.strip()):
+        return v
+    return show(label, v, "path")
+
+
+def unmark(v):
+    """The value with every identity mark removed (no redaction): for results handed to library callers."""
+    if isinstance(v, str):
+        return _MARK_RX.sub(lambda m: m.group(1), v)
+    if isinstance(v, list):
+        return [unmark(x) for x in v]
+    if isinstance(v, dict):
+        return {k: unmark(x) for k, x in v.items()}
+    return v
 
 
 def is_sha(v):
@@ -256,7 +306,14 @@ _KEY_COMPOUND = re.compile(r"(?:api|access|account|secret|private|ssh|auth|signi
                            r"app|client|consumer|service|storage|public)key")
 
 
+_CRED_COMPOUNDS = ("oauth_verifier", "code_verifier", "recovery_code", "recovery_codes", "backup_code", "backup_codes",
+                   "unlock_code", "unlock_key", "sas")
+
+
 def _cred_name(name):
+    flat = "_" + re.sub(r"[^a-z0-9]+", "_", re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()).strip("_") + "_"
+    if any("_" + c + "_" in flat for c in _CRED_COMPOUNDS):
+        return True
     for seg in re.split(r"[^A-Za-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name).lower()):
         if seg and (seg in _CRED_WORDS or any(w in seg for w in _CRED_STEMS) or _KEY_COMPOUND.fullmatch(seg)):
             return True
@@ -364,19 +421,47 @@ def _redact_flag_values(text):
     return "".join(out)
 
 
-# short password flags whose meaning belongs to the command (-p is a port for ssh, a path switch for mkdir): keyed by command
+# short password flags whose meaning belongs to the command (-p is a port for ssh, a path switch for mkdir): keyed by command.
+# Each entry is (command word, flag pattern, value-after-flag pattern). The command word is found once, its command (up to
+# the next newline, | ; or &) is read once and every matching flag in it is redacted in that single pass, so repeated
+# command words cost linear time.
+_CMD_SEG_END = re.compile(r"[\n|;&]")
 _CMD_PW_FLAGS = [
-    re.compile(r"(?<![\w-])(sshpass(?:\s+-[A-Za-z]\S*)*\s+-p[ \t]*)" + _NOT_DONE + _QUOTED_OR_WORD),
-    re.compile(r"(?<![\w-])((?:mysql|mysqldump|mysqladmin|mariadb)[^\n|;&]*?\s-p)" + _NOT_DONE + r"(?=\S)" + _QUOTED_OR_WORD),
-    re.compile(r"(?<![\w-])((?:mysql|mysqldump|mysqladmin|mariadb)[^\n|;&]*?\s-p[ \t]+)" + _NOT_DONE + _QUOTED_OR_WORD),
-    re.compile(r"(?<![\w-])((?:unzip|zip)[^\n|;&]*?\s-P[ \t]*)" + _NOT_DONE + _QUOTED_OR_WORD),
-    re.compile(r"(?<![\w-])((?:7z|7za|7zr)[^\n|;&]*?\s-p)" + _NOT_DONE + r"(?=\S)" + _QUOTED_OR_WORD),
+    (re.compile(r"(?<![\w-])sshpass\b"), re.compile(r"(?<![\w-])-p[ \t]*" + _NOT_DONE)),
+    (re.compile(r"(?<![\w-])(?:mysql|mysqldump|mysqladmin|mariadb)\b"),
+     re.compile(r"(?<=\s)-p(?:(?=\S)|[ \t]+)" + _NOT_DONE)),
+    (re.compile(r"(?<![\w-])(?:unzip|zip)\b"), re.compile(r"(?<=\s)-P[ \t]*" + _NOT_DONE)),
+    (re.compile(r"(?<![\w-])(?:7z|7za|7zr)\b"), re.compile(r"(?<=\s)-p(?=\S)" + _NOT_DONE)),
 ]
 
 
+def _redact_one_command(text, cmd_rx, flag_rx):
+    out, pos, scan = [], 0, 0
+    for m in cmd_rx.finditer(text):
+        if m.start() < scan:
+            continue  # inside a command already read
+        e = _CMD_SEG_END.search(text, m.end())
+        seg_end = e.start() if e else len(text)
+        scan = seg_end
+        i = m.end()
+        while i < seg_end:
+            f = flag_rx.search(text, i, seg_end)
+            if f is None:
+                break
+            v = _VALUE.match(text, f.end())
+            if v is None:
+                i = f.end()
+                continue
+            out.append(text[pos:f.end()] + REDACTED)
+            pos = i = v.end()
+            scan = max(scan, pos)
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def _redact_command_pw_flags(text):
-    for rx in _CMD_PW_FLAGS:
-        text = rx.sub(lambda m: m.group(1) + REDACTED, text)
+    for cmd_rx, flag_rx in _CMD_PW_FLAGS:
+        text = _redact_one_command(text, cmd_rx, flag_rx)
     return text
 
 
@@ -397,13 +482,95 @@ def _plain_piece(seg):
 
 
 # Pieces an identity field may carry beyond the plain ones: a hex id (invocation, build, digest), a lower-case word with a
-# hex suffix (tail1a2b3, r<hex32>), a compact UTC timestamp, a ULID. A long piece that is none of these (a base62 key)
-# is not an identifier by field format, whatever field it sits in.
+# hex suffix (tail1a2b3, r<hex32>), a compact UTC timestamp, a ULID, and a "word-like" mixed alphanumeric name
+# (WF1663Impl, r7wfr6review, wmbuild1663impl2). A long piece that is none of these (a base62 key) is not an identifier by
+# field format, whatever field it sits in.
 _ID_PIECE = re.compile(r"[0-9a-fA-F]{9,64}|[a-z]{1,12}[0-9a-f]{1,64}|\d{8}T\d{6}Z?|[0-9A-HJKMNP-TV-Z]{26}")
+_TOKENS = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
+_STRONG_WORDS = {"token", "tokens", "secret", "secrets", "password", "passwd", "pass", "pwd", "pw", "pat", "bearer",
+                 "credential", "credentials", "apikey", "privkey", "passphrase", "passcode"}
+_STRONG_STEMS = ("token", "secret", "passw", "credential", "bearer", "passphrase", "passcode", "apikey", "privkey")
+_SHORT_STRONG = ("pat", "pw", "pwd", "pass")
+_NAME_WORDS = frozenset("service scope socket timer slice mount target path unit worker svc bot api user local prod dev test ci "
+                        "refresh rotate store watch monitor check sync vault manager helper daemon proxy agent runner job "
+                        "server client file cache reader writer fetch probe gate guard lint scan audit".split())
+_TINY = re.compile(r"\d{1,4}")
+
+
+_VOWELS = frozenset("aeiouyAEIOUY")
+_DATE_PIECE = re.compile(r"(\d{8}T\d{6}Z?|20\d{6})")
+
+
+def _wordish(seg):
+    """A mixed letter/digit name that reads as words, not as a key: at most 32 ASCII alphanumerics in at most six letter or
+    digit groups (at most two digit groups), where >= 60 % of the letters sit in alphabetic tokens of 4+ letters, at most
+    two tokens have 1-2 letters, and every long token has vowels (>= 20 % of the letters of the long tokens). 'WF1663Impl',
+    'r7wfr6review', 'wmbuild1663impl2' read as names; a random base62 key does, by measurement, in under 4 % of cases."""
+    if not (seg.isascii() and seg.isalnum() and len(seg) <= 32):
+        return False
+    groups = _TOKENS.findall(seg)
+    toks = [t for t in groups if not t.isdigit()]
+    if "".join(groups) != seg or not toks or len(groups) > 6 or len(groups) - len(toks) > 2:
+        return False
+    letters = sum(map(len, toks))
+    long_ = "".join(t for t in toks if len(t) >= 4)
+    return (len(long_) * 100 >= letters * 60 and sum(1 for t in toks if len(t) <= 2) <= 2
+            and sum(c in _VOWELS for c in long_) * 100 >= len(long_) * 20 and all(set(t) & _VOWELS for t in toks if len(t) >= 4))
+
+
+def _class(c):
+    return 0 if c.isdigit() else 1 if c.islower() else 2
+
+
+def _idplain(seg):
+    """A plain identity piece. Up to eight characters any short word, number or hex id reads as plain, but a short mixed
+    piece with many digit/letter/case changes ('Zq9Xk3Lm') is key-shaped, not a name ('r7wfr6', 'WF1663', 'x7k2p' pass)."""
+    if len(seg) <= 8 and not (seg.isdigit() or re.fullmatch(r"[0-9a-fA-F]+", seg)):
+        if sum(1 for a, b in zip(seg, seg[1:]) if _class(a) != _class(b)) > 4:
+            return False
+    return _plain_piece(seg)
+
+
+def _piece_ok(seg):
+    """One piece of an identity: plain, an id shape, or word-like; a compact date inside a piece ('r7wfr620261113') is
+    checked as its own piece."""
+    if _idplain(seg) or _ID_PIECE.fullmatch(seg) or _wordish(seg):
+        return True
+    parts = [x for x in _DATE_PIECE.split(seg) if x]
+    return len(parts) > 1 and all(_idplain(x) or _ID_PIECE.fullmatch(x) or _wordish(x) for x in parts)
+
+
+def _cred_marked(segs):
+    """True when the id carries a credential word beside a non-trivial piece ('token-<hex>', 'Bearer-<hex>', 'pat_<hex>',
+    'secret/<hex>'), or a credential word glued to a hex or digit tail ('token9f8e7d6c', 'pat9f8e7d6c5b4a'): a credential
+    word names a credential, so the identity is not trusted. A bare word ('token-service') is a name."""
+    marks = []
+    for seg in segs:
+        low = seg.lower()
+        if low in _STRONG_WORDS:
+            marks.append(seg)
+        elif any(w in low for w in _STRONG_STEMS) and any(c.isdigit() for c in low):
+            return True
+        elif any(low.startswith(w) and re.fullmatch(r"(?=.*\d)[0-9a-f]{6,}", low[len(w):]) for w in _SHORT_STRONG):
+            return True
+    return bool(marks) and any(seg not in marks and not (_TINY.fullmatch(seg) or seg.lower() in _NAME_WORDS) for seg in segs)
+
+
+def _plain_name(seg):
+    return _idplain(seg) and not _ID_PIECE.fullmatch(seg) or bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,7}", seg) and _idplain(seg))
 
 
 def _id_pieces_ok(s):
-    return all(_plain_piece(seg) or _ID_PIECE.fullmatch(seg) for seg in re.split(r"[-_./+=:@%~]+", s))
+    """True when every piece of an identity reads as an id piece, no credential word is joined to a non-trivial piece, and
+    a part before '@' (a user or a systemd template name) is plain names only, with no ':password'."""
+    segs = [x for x in _SPLIT.split(s) if x]
+    if _cred_marked(segs):
+        return False
+    if "@" in s:
+        left = s.split("@", 1)[0]
+        if ":" in left or any(c in left for c in "?&#,") or not all(_plain_name(x) for x in _SPLIT.split(left) if x):
+            return False
+    return all(_piece_ok(seg) for seg in segs)
 
 
 def _run_repl(text):
@@ -463,6 +630,7 @@ _REDACTIONS = [
                 r"|sntrys_[A-Za-z0-9+/=_-]{16,}|PMAK-[A-Za-z0-9-]{16,}|sq0[a-z]{3}-[A-Za-z0-9_-]{16,}"  # Sentry, Postman, Square
                 r"|EAA[A-Za-z0-9]{20,}|AGE-SECRET-KEY-1[A-Z0-9]{16,}|fo1_[A-Za-z0-9_-]{16,}"       # Facebook, age, Fly
                 r"|\d{6,12}:AA[A-Za-z0-9_-]{20,}"                                                  # Telegram bot token
+                r"|HRKU-[A-Za-z0-9_-]{20,}"                                                         # Heroku
                 r")"), REDACTED),
     (re.compile(r"(?<![/:])1//0[A-Za-z0-9_-]{20,}"), REDACTED),                          # Google refresh token
     # webhook URLs carry their secret in the path
@@ -471,14 +639,54 @@ _REDACTIONS = [
 ]
 
 
-def redact_credentials(text):
-    """The credential layers of redact(): everything except the random-token run rule. A value this leaves unchanged
-    carries no credential name, flag or known credential shape."""
-    if not isinstance(text, str):
-        return text
+_ESC = re.compile(r"\\(?:u([0-9a-fA-F]{4})|([\"'\\/bfnrt]))")
+_ESC_MAP = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+_PCT = re.compile(r"%([0-9a-fA-F]{2})")
+_SURR = re.compile("[\ud800-\udbff][\udc00-\udfff]")
+
+
+def _unescape(text):
+    """The text with JSON string escapes decoded to a fixpoint (at most four layers): \\" \\\\ \\/ \\n \\uXXXX. A
+    credential pair inside a string-encoded JSON value reads as the pair it is."""
+    for _ in range(4):
+        if "\\" not in text:
+            break
+        t = _ESC.sub(lambda m: chr(int(m.group(1), 16)) if m.group(1) else _ESC_MAP.get(m.group(2), m.group(2)), text)
+        t = _SURR.sub(lambda m: chr(0x10000 + ((ord(m.group(0)[0]) - 0xD800) << 10) + (ord(m.group(0)[1]) - 0xDC00)), t)
+        if t == text:
+            break
+        text = t
+    return text
+
+
+def _pct_decode(text):
+    return _PCT.sub(lambda m: chr(int(m.group(1), 16)), text) if "%" in text else text
+
+
+def _layers(text):
     for rx, rep in _REDACTIONS:
         text = rep(text) if rx is None else rx.sub(rep, text)
     return text
+
+
+def redact_credentials(text):
+    """The credential layers of redact(): everything except the random-token run rule. A value this leaves unchanged
+    carries no credential name, flag or known credential shape. The layers run on the text and on its decoded views (JSON
+    string escapes, then percent-escapes): when a decoded view shows a credential the text hides, the deepest decoded view
+    with its credential hidden is the result, so an escaped, \\u-encoded or string-encoded pair is hidden like a plain one."""
+    if not isinstance(text, str):
+        return text
+    best = _layers(text)
+    view = text
+    for dec in (_unescape, _pct_decode):
+        d = dec(view)
+        if d == view:
+            continue
+        view = d
+        r = _layers(view)
+        if r != view:
+            best = r
+    return best
 
 
 def redact(text):
@@ -526,7 +734,8 @@ def scrub(v):
     if isinstance(v, dict):
         # a credential-named key hides its whole value, whatever structure it has (string, list, object, number)
         return {k: (REDACTED if isinstance(x, (str, list, dict, int, float)) and not isinstance(x, bool)
-                    and isinstance(k, str) and _cred_name(k) else scrub(x)) for k, x in v.items()}
+                    and isinstance(k, str) and _cred_name(k) and not (isinstance(x, str) and is_unknown(x)) else scrub(x))
+                for k, x in v.items()}
     return v
 
 
@@ -546,8 +755,8 @@ def find_dups(obj, path="$"):
         node, link = stack.pop()
         if isinstance(node, dict):
             if getattr(node, "dups", ()):
-                out.append("%s (%s)" % (_render_path(link), ",".join(node.dups)))
-            kids = [(v, (link, ".%s" % k)) for k, v in node.items()]
+                out.append("%s (%s)" % (_render_path(link), ",".join(safe_key(k) for k in node.dups)))
+            kids = [(v, (link, ".%s" % safe_key(k))) for k, v in node.items()]
         elif isinstance(node, list):
             kids = [(v, (link, "[%d]" % i)) for i, v in enumerate(node)]
         else:
@@ -562,6 +771,17 @@ def _render_path(link):
         parts.append(link[1])
         link = link[0]
     return "".join(reversed(parts))
+
+
+_KEY_OK = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,40}")
+
+
+def safe_key(k):
+    """A JSON key as it may appear in a finding: a plain name that carries no credential word and no random piece prints,
+    any other key is an opaque ref. Key names come from the envelope and are not trusted."""
+    if isinstance(k, str) and _KEY_OK.fullmatch(k) and not _cred_name(k) and ident(k) == k:
+        return k
+    return opaque("key", k)
 
 
 def load_json_file(path):
@@ -611,7 +831,7 @@ def _shape(d):
             out.append(finding("SCHEMA_MISSING", k, "required field missing"))
     for k in d:
         if k not in REQUIRED_TOP and k not in OPTIONAL_TOP:
-            out.append(finding("UNKNOWN_KEY", k, "field not in schema"))
+            out.append(finding("UNKNOWN_KEY", safe_key(k), "field not in schema"))
     if d.get("schema", SCHEMA_ID) != SCHEMA_ID:
         out.append(finding("SCHEMA_ENUM", "schema", "expected " + SCHEMA_ID))
     for k, kind in (("parent", "s"), ("task_id", "s"), ("revision", "i"), ("current_owner", "s"),
@@ -644,7 +864,7 @@ def _shape(d):
                 out.append(finding(code, k + "." + f, "wrong type, value or empty"))
         for f in o:
             if f not in spec and f not in SUB_OPTIONAL.get(k, []):
-                out.append(finding("UNKNOWN_KEY", k + "." + f, "field not in schema"))
+                out.append(finding("UNKNOWN_KEY", k + "." + safe_key(f), "field not in schema"))
             elif (k + "." + f) in OPTIONAL_KIND and not _kind_ok(OPTIONAL_KIND[k + "." + f], o[f]):
                 out.append(finding("SCHEMA_TYPE", k + "." + f, "wrong type or empty"))
     ev = d.get("evidence")
@@ -667,7 +887,7 @@ def _shape(d):
                         if not _kind_ok("s", e[f]):
                             out.append(finding("SCHEMA_TYPE", p + "." + f, "wrong type or empty"))
                     elif f not in ("ref", "task_id", "revision", "observed_at"):
-                        out.append(finding("UNKNOWN_KEY", p + "." + f, "field not in schema"))
+                        out.append(finding("UNKNOWN_KEY", p + "." + safe_key(f), "field not in schema"))
     return out
 
 
@@ -793,7 +1013,8 @@ def _validate(d, ref_now):
     tid, rev = d["task_id"], d["revision"]
     for i, e in enumerate(d["evidence"]):
         if e["task_id"] != tid:
-            out.append(finding("WRONG_TASK", "evidence[%d].task_id" % i, "evidence is for task " + e["task_id"]))
+            out.append(finding("WRONG_TASK", "evidence[%d].task_id" % i, "evidence task_id differs from task_id (%s vs %s)" %
+                               (opaque("task", e["task_id"]), opaque("task", tid))))
         elif e["revision"] != rev:
             out.append(finding("STALE_REVISION", "evidence[%d].revision" % i,
                                "evidence cites rev %d, envelope is rev %d" % (e["revision"], rev)))
@@ -802,18 +1023,22 @@ def _validate(d, ref_now):
             for h in evidence_heads(e):
                 if not same_head(h, tg["head"]):
                     out.append(finding("WRONG_TASK", "evidence[%d].head" % i,
-                                       "evidence names head %s, target.head is %s" % (h, tg["head"])))
+                                       "evidence names a head that differs from target.head (%s vs %s)" %
+                                       (opaque("head", h), opaque("head", tg["head"]))))
         if "repo" in e and not is_unknown(tg["repo"]) and norm_repo(e["repo"]) != norm_repo(tg["repo"]):
-            out.append(finding("WRONG_TASK", "evidence[%d].repo" % i, "evidence is for repo " + e["repo"]))
+            out.append(finding("WRONG_TASK", "evidence[%d].repo" % i, "evidence repo differs from target.repo (%s vs %s)" %
+                               (opaque("repo", e["repo"]), opaque("repo", tg["repo"]))))
         if "branch" in e and not is_unknown(tg["branch"]) and norm_branch(e["branch"]) != norm_branch(tg["branch"]):
-            out.append(finding("WRONG_TASK", "evidence[%d].branch" % i, "evidence is for branch " + e["branch"]))
+            out.append(finding("WRONG_TASK", "evidence[%d].branch" % i, "evidence branch differs from target.branch (%s vs %s)" %
+                               (opaque("branch", e["branch"]), opaque("branch", tg["branch"]))))
     r, w, st = d["result"], d["worker"], d["state"]
     if r["task_id"] is not None and r["task_id"] != tid:
-        out.append(finding("WRONG_TASK", "result.task_id", "result is for task " + r["task_id"]))
+        out.append(finding("WRONG_TASK", "result.task_id", "result task_id differs from task_id (%s vs %s)" %
+                           (opaque("task", r["task_id"]), opaque("task", tid))))
     elif r["revision"] is not None and r["revision"] != rev:
         out.append(finding("STALE_REVISION", "result.revision", "result cites rev %d, envelope is rev %d" % (r["revision"], rev)))
     if st == "RUNNING":
-        missing = [k for k in ("host", "unit", "child") if ident(w[k]) is None]
+        missing = [k for k in ("host", "unit", "child") if ident(w[k], "host" if k == "host" else None) is None]
         if missing or d["observed_at"]["worker"] == UNKNOWN:
             out.append(finding("RUNNING_NO_EVIDENCE", "worker",
                                "RUNNING needs observed host+unit+child (missing: %s)" %
@@ -848,7 +1073,7 @@ def _validate(d, ref_now):
                 unk.append(k)
         for k in ("worker.host", "worker.unit", "worker.child", "worker.session", "worker.invocation", "worker.account",
                   "worker.model", "worker.effort", "consumer.named"):
-            if k not in unk and ident(req[k]) is None:
+            if k not in unk and ident(req[k], "host" if k == "worker.host" else None) is None:
                 unk.append(k)
         unk.sort()
         if unk or d["coverage_gaps"] or st != "DONE":
@@ -873,7 +1098,9 @@ _HEAD_BARE = re.compile(r"(?i)(?<![\w-])([0-9a-f]{7,64})(?![\w-])")
 def evidence_heads(e):
     """Head shas an evidence entry names: its head field and every commit-like name in its ref."""
     heads = [e["head"]] if "head" in e else []
-    ref = unicodedata.normalize("NFKC", e["ref"])
+    # a hex run that sits under a credential name, flag or header is a secret, never a commit: candidates come from the ref
+    # with its credential layers applied
+    ref = redact_credentials(unicodedata.normalize("NFKC", e["ref"]))
     for m in _HEAD_KEYWORD.finditer(ref):
         h = m.group(1).lower()
         if len(h) >= 7 or any(c in "abcdef" for c in h):
@@ -921,7 +1148,7 @@ def validate_set(obj, now=None):
     by_idx = [validate(r, ref_now) for r in recs]  # validate() never raises for a malformed record
     sets = []
     if isinstance(obj, dict) and getattr(obj, "dups", ()):
-        f = finding("DUPLICATE_KEY", "$", "duplicate JSON key in the set wrapper: " + ",".join(obj.dups))
+        f = finding("DUPLICATE_KEY", "$", "duplicate JSON key in the set wrapper: " + ",".join(safe_key(k) for k in obj.dups))
         sets.append(f)
         for fs in by_idx:
             fs.append(f)
@@ -932,7 +1159,7 @@ def validate_set(obj, now=None):
             ids.setdefault(norm_text(r["task_id"]), []).append(i)
     for tid, idx in ids.items():
         if len(idx) > 1:
-            f = finding("DUPLICATE_TASK", "task_id", "task %s appears %d times" % (recs[idx[0]]["task_id"], len(idx)))
+            f = finding("DUPLICATE_TASK", "task_id", "task %s appears %d times" % (opaque("task", recs[idx[0]]["task_id"]), len(idx)))
             sets.append(f)
             # state-aware, never positional: the first RUNNING record is the original and stays undisturbed;
             # with no RUNNING record the first listed keeps its place. Every other record of the id is refused.
@@ -956,13 +1183,15 @@ def validate_set(obj, now=None):
             continue
         running = [i for i in idx if recs[i]["state"] == "RUNNING"]
         refused = [i for i in idx if recs[i]["state"] != "RUNNING"] if len(running) == 1 else idx
-        f = finding("CONFLICTING_TARGET", "target", "%d live tasks share %s@%s" % (len(tasks), key[0], key[1]))
+        f = finding("CONFLICTING_TARGET", "target", "%d live tasks share %s@%s" % (len(tasks), opaque("repo", key[0]), opaque("branch", key[1])))
         sets.append(f)
         for i in refused:
             by_idx[i].append(f)
     if declared is not None and declared != len(recs):
         sets.append(finding("DECLARED_COUNT_MISMATCH", "declared_total",
-                            "declared %r, enumerated %d (enumerated count is used)" % (declared, len(recs)), "WARN"))
+                            "declared %s, enumerated %d (enumerated count is used)" %
+                            (declared if isinstance(declared, int) and not isinstance(declared, bool) else "a non-integer value",
+                             len(recs)), "WARN"))
     return {"derived_count": len(recs), "findings_by_index": by_idx, "set_findings": sets}
 
 

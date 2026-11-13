@@ -96,6 +96,10 @@ def main(argv):
     except (OSError, ValueError) as e:
         ev.emit(ev.redact("UNREADABLE %s: %s" % (argv[0], e)))
         return 2
+    for env in envs:  # an ask id that validates as an identifier prints; anything else goes through full redaction
+        env["task_id"] = ev.keep("ident", env["task_id"])
+        for e in env["evidence"]:
+            e["task_id"] = ev.keep("ident", e["task_id"])
     ev.emit(json.dumps(ev.scrub({"envelopes": envs}), indent=1))
     return 0
 
