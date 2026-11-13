@@ -686,12 +686,14 @@ _SHORT_HEX = re.compile(r"[0-9a-fA-F]{1,4}")
 
 # THE ONE TRUST GATE (_gate_values). A piece of a value prints only when it is (a) a word of the CLOSED vocabulary
 # (_ID_WORDS, the caller's reviewed words, the DNS top-level labels: enumerated in this file), (b) a bounded number, (c) a
-# validated calendar timestamp or date, (d) one of the EXACT id grammars (a uuid 8-4-4-4-12, a hex id of 7-12, 32, 40 or 64
-# characters that mixes digits and letters, a ULID, an IP literal), or (e) a small amount of unlisted material: a piece of at
-# most five characters, or one unlisted token of at most three letters inside a vocabulary compound. Unlisted material has a
-# TOTAL budget per value (_MAX_UNLISTED characters), so no count of short pieces adds up to a credential, and an id grammar
-# is allowed once (twice in a path) so groups of hex do not concatenate into a key. Everything else is opaque.
-# No class of piece is trusted whatever its length, no denylist word decides anything here.
+# validated calendar timestamp or date, (d) one of the EXACT id shapes (a uuid 8-4-4-4-12, a hex id of 7-12, 32, 40 or 64
+# characters that mixes digits and letters, an instance id, a ULID, an IP literal in a host) AND the shape is one the FIELD'S
+# OWN PROFILE names, alone or beside other pieces in the field's template (_PROFILES, below), or (e) a small amount of unlisted
+# material: a piece of at most five characters, or one unlisted token of at most three letters inside a vocabulary compound.
+# Unlisted material has a TOTAL budget per value (_MAX_UNLISTED characters), so no count of short pieces adds up to a
+# credential, and an id grammar is allowed once (twice in a path) so groups of hex do not concatenate into a key. Everything
+# else is opaque. A grammar-valid id is never trusted for its grammar alone: a field that does not carry the shape prints an
+# opaque ref, and no denylist word decides anything here.
 _MAX_DIGIT_PIECE = 7  # the longest digit-only piece (a pid, a sequence number, a compact date)
 _MAX_DIGITS_TOTAL = 14  # the most digits outside timestamps and ids one value may carry
 _MAX_UNLISTED = 8  # the most characters of unlisted material one value may carry
