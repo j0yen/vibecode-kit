@@ -505,7 +505,7 @@ class TestD12Fusion(unittest.TestCase):
         recs, _ = self.recs(self.two("src/a.py", "src/./a.py", r1="github.com/o/r1", r2="https://github.com/O/r1.git/", i1=same, i2=same))
         self.assertEqual(len(recs), 1)
         self.assertEqual(recs[0]["fusion_basis"], "same-repo-identity-and-path")
-        recs, _ = self.recs(self.two("src/a.py", "src/./a.py", r1="github.com/o/r1", r2="git@github.com:o/r2.git"))
+        recs, _ = self.recs(self.two("src/a.py", "src/./a.py", r1="github.com/o/r1", r2="git@github.com:o/r2.git", i1=same, i2=same))   # repair 5 (D3): same commit, so only repo identity separates
         self.assertEqual(len(recs), 2)
         recs, _ = self.recs(self.two("src/a.py", "src/./a.py", r1="github.com/o/r1", r2="git@github.com:o/r1.git", i1=same, i2=same))
         self.assertEqual(len(recs), 1)
