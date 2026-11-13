@@ -316,17 +316,24 @@ class D3_UnencodableTextNeverTraces(unittest.TestCase):
 
 class D4_OneFileOrUsageError(unittest.TestCase):
     def test_extra_files_are_a_usage_error_naming_them(self):
-        a = tmp_json([running()], "a.json")
-        b = tmp_json([running("SYN-2", "synthetic/r2", "b2")], "b.json")
-        for fmt in ("json", "text"):
-            r = cli(RECOMMEND, "--format", fmt, "--now", NOW, a, b)
-            self.assertEqual(r.returncode, 2, fmt)
-            self.assertIn(b, r.stdout + r.stderr)
-            self.assertNotIn("Traceback", r.stderr)
-            self.assertNotIn("SYN-2", r.stdout.replace(b, ""))  # no partial evaluation is printed as a result
-        r = cli(RECOMMEND, "--now", NOW, b, a)
-        self.assertEqual(r.returncode, 2)
-        self.assertIn(a, r.stdout + r.stderr)
+        # The files live in a temp directory used as the cwd and are named by FIXED relative names: a random mkdtemp path suffix is
+        # sometimes key-shaped and legitimately redacted from the echo (about 1 in 10), which made this test fail about 1 run in 6.
+        with tempfile.TemporaryDirectory(prefix="wf3-") as cwd:
+            a, b = "a.json", "b.json"
+            pathlib.Path(cwd, a).write_text(json.dumps([running()]))
+            pathlib.Path(cwd, b).write_text(json.dumps([running("SYN-2", "synthetic/r2", "b2")]))
+
+            def run(*args):
+                return subprocess.run([sys.executable, "-I", RECOMMEND, *args], capture_output=True, text=True, cwd=cwd)
+            for fmt in ("json", "text"):
+                r = run("--format", fmt, "--now", NOW, a, b)
+                self.assertEqual(r.returncode, 2, fmt)
+                self.assertIn(b, r.stdout + r.stderr)
+                self.assertNotIn("Traceback", r.stderr)
+                self.assertNotIn("SYN-2", r.stdout.replace(b, ""))  # no partial evaluation is printed as a result
+            r = run("--now", NOW, b, a)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn(a, r.stdout + r.stderr)
 
     def test_single_file_still_works_either_position(self):
         a = tmp_json([running()], "a.json")

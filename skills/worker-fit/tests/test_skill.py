@@ -45,7 +45,7 @@ class SkillSource(unittest.TestCase):
             self.assertIsNone(bad.search(txt), p.name)
 
     def test_scripts_use_only_the_standard_library(self):
-        allowed = {"json", "sys", "os", "re", "string", "datetime", "unicodedata", "envelope_validate", "queue_adapter"}
+        allowed = {"json", "sys", "os", "re", "string", "datetime", "unicodedata", "hmac", "envelope_validate", "queue_adapter"}
         for p in (SKILL / "scripts").glob("*.py"):
             mods = set(re.findall(r"^(?:import|from)\s+(\w+)", p.read_text(), re.M))
             self.assertLessEqual(mods, allowed, p.name)

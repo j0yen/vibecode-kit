@@ -91,8 +91,25 @@ scheduler, coordinator, task store or mutation CLI.
   digits beside an id, and an id sits only beside closed-vocabulary pieces), or (e) a small amount of unlisted
   material: pieces of at most five characters with a TOTAL budget of eight characters per value, so no count of short pieces
   adds up to a credential. A vocabulary compound (`wmbuild1663impl2`, `WF1663Impl`, `r7wfitfix2`) is split into vocabulary
-  words and bounded numbers. Everything else (random letters, hex groups, digit groups, passphrases, a vocabulary word plus a
-  random piece) is an opaque ref, whatever the field. A field grammar (no `user:password@` userinfo, ids as characters) makes a
+  words and bounded numbers. A value carries at most six vocabulary words (`_MAX_VOCAB_WORDS`; a path's directory words and a
+  final file extension or unit type such as `.json` or `.service` are structure and do not count), so a passphrase of seven or
+  more vocabulary words is an opaque ref in every field. Each field also has its OWN grammar (`_PROFILES`): `effort` is a closed
+  set (`none minimal low medium normal default standard auto high xhigh max`); a `model` may end in a context tag (`[1m]`);
+  a `unit`, `child`, `owner`, consumer, `branch`, `repo`, task id and path may carry name words beyond the vocabulary: lower-case
+  pronounceable words of 6-12 letters (`decide`, `regrade`, `bootstrap`; a syllable grammar, not a list) or a task slug (one to
+  three letters, two to five digits, at most two more groups of one or two letters and one digit, at most ten characters:
+  `a1303rv8`, `wfr11`; at most one slug), at most two such pieces per value and twenty letters in all; a shorter piece is charged
+  to the unlisted budget above. Name words never sit beside a hash-sized id and never appear in an account, model, session, invocation, host or queue
+  row. A repo is `owner/name` with the owner one short piece of at most five characters; a `session` and a unit may carry the
+  literal of their own id template (`session-<uuid>`, `tmux-spawn-<uuid>.scope`); a host with colons is an exact IP literal (a
+  literal of random 16-bit groups is not one: at most two wide groups after the first). A pronounceable-looking random run is
+  not excluded by grammar: a random lower-case word of 6 to 8 letters passes in 4-8 % of draws, of 10 in about 2 %, of 12 in under
+  1 %, of 13 or more never, and a value carries at most two. That is the stated residual of the name grammar, next to the
+  short-value residual below. The cap on vocabulary words and the name budgets apply to every field of the recommender and the
+  adapter (each passes its own profile); only a library call that names no profile gets the bare gate. A value of up to six
+  vocabulary words prints (about 46 bits when drawn at random from the public list): that size is the stated residual of the cap.
+  Everything else (random letters, hex groups, digit groups, longer passphrases, a vocabulary word plus a random piece) is an opaque
+  ref, whatever the field. A field grammar (no `user:password@` userinfo, ids as characters) makes a
   value VALID, never TRUSTED; the credential-name layers only refuse more and never let a value print. The envelope is never
   a trusted source. An identity that is itself a `name=value` pair needs a vocabulary name and a plain value (`pid=77` prints,
   `pswd=hunter2x` does not). A secret shorter than the budget (a few characters) and a bare hex id are indistinguishable from
@@ -100,25 +117,37 @@ scheduler, coordinator, task store or mutation CLI.
   (`show_row`): row id, owner, wait, status, seq and claim print only when every token passes it; anything else is an opaque
   ref, and a non-string field is never printed. Free text is untrusted narrative: the value of any `name=value`,
   `name: value`, `"name": "value"` or `--name value` pair is hidden unless it is closed vocabulary (a word of the tool's own
-  vocabulary, a time, a bracketed ref, a number of at most 2 digits, or up to 10 under a closed list of numeric names such as
-  `pid`, `seq`, `port`, `timeout` and `exit_code`, and at most four characters of unlisted material in at most two pieces, no
-  more than two vocabulary words joined by `-` or `_`) or the name is a schema key whose value is a hex id or a trusted identity of that
-  field; whatever the NAME is, a plain word or a number outside the closed numeric list is hidden (`sessionkey=sunshine`,
-  `code=abcdefgh`, `mfa=4821`, `mypass=1234`, `seedphrase=abc-def`). No name is exempt: `code` is a name like any other.
-  Residual by size: a value of three characters or fewer prints under any name.
-  A credential word followed in prose by its value without a separator (`the password is sunshine`, `pass swordfish`, `my pin
-  482917`) hides the next word unless it is a state word (`required`, `missing`, `expired`, ...). A credential word joined to
+  vocabulary, a time, a bracketed ref, a number of at most 2 digits, or up to 7 (up to 10 for a measurement such as `bytes`,
+  `size`, `epoch`, `timeout`) under a closed list of numeric names, and at most four characters of unlisted material in at most
+  two pieces, no more than two vocabulary words joined by `-` or `_`; plain JSON data of such keys and values; a closed MIME type
+  under `Accept` / `Content-Type`; a percent-escaped value is read as what it decodes to) or the name is a schema field (`head`,
+  `target.head`, a hex name such as `sha256`) whose value is a hex id or a trusted identity of that field; a name that merely ends
+  in such a word (`mfa-hash`, `signing-rev`) is not the field. The closed numeric names are WHOLE names: a numeric word (`pid`, `seq`,
+  `port`, `line`, `count`, `size`, `timeout`, `number`, ...) after at most three qualifier words from a closed list (`line`, `file`,
+  `max`, `retry`, `exit`, `status`, `byte`, ...): `line_number`, `retry_count`, `file_size`, `exit_code` print their number,
+  while `recovery_number`, `mfacount`, `unlock_limit` and `totp_index` do not, because ending in a numeric word is not being
+  on the list. Whatever the NAME is, a plain word or a number outside the closed numeric list is hidden (`sessionkey=sunshine`,
+  `code=abcdefgh`, `mfa=4821`, `mypass=1234`, `seedphrase=abc-def`, `mfa_number=482917`). No name is exempt: `code` is a name like any other.
+  Residual by size: a value of three characters or fewer prints under any name, and so does a number of at most two digits.
+  A credential name followed in prose by its value (`the password is sunshine`, `pass swordfish`, `my pin 482917`, `the api_key is
+  Xk9fQ2mP7zab`, `private key X`, `client_secret X`, `X-Auth-Token X`; a name is any word run whose last word is a credential noun
+  such as key, token, secret, pass, auth, creds) hides the next word, of any length, unless it is a state word (`required`,
+  `missing`, `expired`, ...); the separator may be a space, `is`, `:`, `=`, `:=` or a quote, and a run of nouns (`secret key`)
+  is one name. A bare `key`, `auth`, `bearer` or `code` is also an ordinary word (`key point`, `exit code 2`): after one of them
+  (and no credential qualifier such as api, private, client, recovery) a plain lower-case word, a closed-vocabulary word or a number
+  of two digits reads as prose and prints, and anything else (a capital, a digit run, a mixed piece) is hidden; that is a stated residual. A credential word joined to
   a value in one token (`token-<v>`, `secret_run_<v>`, `tokenArYYbbah`) is hidden. The credential-name list above is an extra
   layer that hides more; it is never what lets a value print. Key names: only keys the schema defines print; any other key is an opaque
   `[opaque key <8 hex>]`, whatever it looks like. A value that does not validate is
-  printed as an opaque keyed reference `[opaque <field> <8 hex>]` (a per-process keyed digest of the field name and the
-  value: equal values give equal refs inside one run, nothing is recoverable, not stable across runs), never as the
+  printed as an opaque keyed reference `[opaque <field> <8 hex>]` (HMAC-SHA256 over the field name and the value with a
+  per-process random 256-bit key, 32 bits shown: equal values give equal refs inside one run, nothing is recoverable, the ref
+  does not depend on `PYTHONHASHSEED`, not stable across runs), never as the
   raw value; a placeholder stays UNKNOWN. A required identity (host, unit, child of a RUNNING record) that does not
   validate is UNKNOWN evidence, so the record is refused rather than reused. Mismatch findings (wrong task, repo,
   branch, head; duplicate task; conflicting target; unknown or duplicate key names) name the fields and carry opaque
   refs, never the raw values; a hex run in an evidence `ref` is read as a commit only after its credential layers are
   applied, so a hex under a credential name is never a head. Free narrative (coverage gaps, prose evidence refs)
-  has no grammar and is printed through the redaction layers above. A `target.head` that is a 7-64 hex sha prints. The run rule (b) applies to free text only. On top of that
+  has no grammar and is printed through the redaction layers above. A `target.head` prints when it is 7-64 hex characters of one case with at least one letter: a run of digits is a number, never a head. The run rule (b) applies to free text only. On top of that
   the named shapes stay: `Authorization:` values (Basic/Bearer/...), `bearer <x>`, `sk-...` keys,
   provider token prefixes as a class (AWS key ids `AKIA/ASIA/AGPA/AIDA/AROA/...`; Slack `xox?-`, `xoxe.`, `xapp-` and
   webhook URLs; Google `ya29.`, `AIza`, `GOCSPX-`, refresh tokens; npm `npm_`; GitLab `glpat-` and siblings; GitHub

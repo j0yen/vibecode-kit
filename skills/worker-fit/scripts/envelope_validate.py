@@ -9,6 +9,7 @@ Credential-shaped values are redacted from every printed line.
 Counts are derived from the enumerated records; a declared total is only compared, never used.
 A pass is a statement about the envelope's shape and internal consistency, not about production.
 """
+import hmac
 import json
 import os
 import re
@@ -223,18 +224,29 @@ _MARK_RX = re.compile(re.escape(_MARK_OPEN) + r"(.{0,600}?)" + re.escape(_MARK_C
 _HOLD_RX = re.compile("\ue002" + _NONCE + r"(\d+)\ue003")
 
 
-_KINDS = {"ident": ident, "host": lambda x: ident(x, "host"), "path": path_ident,
-          "sha": lambda x: x.strip() if is_sha(x) else None}
+def head_ident(v):
+    """A commit id as the `target.head` field carries it: 7-64 hex characters of ONE case with at least one letter. A run of
+    digits is a number (a card, a phone, an account), never a commit id, whatever its length."""
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    ok = bool(_SHA.fullmatch(s)) and (s.islower() or s.isupper() or s.isdigit()) and not s.isdigit()
+    return s if ok else None
+
+
+_KINDS = {"ident": ident, "host": lambda x: ident(x, "host"), "path": path_ident, "sha": head_ident}
 _OPQ_KEY = os.urandom(16)
 
 
 def opaque(label, v):
     """An opaque reference to a value this tool does not trust enough to print: the field label plus a short digest keyed
-    with a per-process random 128-bit key (the interpreter's own keyed string hash over key, label and value: equal values
-    give equal refs inside one run, different fields give different refs, a guess cannot be confirmed from the output, and
-    nothing of the value is recoverable from 32 bits). Never the raw value. Refs are not stable across runs."""
+    with a per-process random 128-bit key (HMAC-SHA256 over label and value: equal values give equal refs inside one run,
+    different fields give different refs, a guess cannot be confirmed from the output, and nothing of the value is
+    recoverable from 32 bits). The ref does not depend on the interpreter's string hash, so a fixed PYTHONHASHSEED does not
+    help a guess. Never the raw value. Refs are not stable across runs."""
     norm = unicodedata.normalize("NFKC", v if isinstance(v, str) else repr(v))
-    return "[opaque %s %08x]" % (label, hash((_OPQ_KEY, label, norm)) & 0xFFFFFFFF)
+    mac = hmac.digest(_OPQ_KEY, (label + "\0" + norm).encode("utf-8", "surrogatepass"), "sha256")
+    return "[opaque %s %08x]" % (label, int.from_bytes(mac[:4], "big"))
 
 
 def keep(kind, v, label=None):
@@ -244,10 +256,15 @@ def keep(kind, v, label=None):
     as given; only the validated, trusted form skips the run rule."""
     if not isinstance(v, str):
         return v
-    ok = _KINDS[kind](v)
-    if kind != "sha" and ok == v and not _trusted_pieces(v, max_ids=2 if kind == "path" else 1, profile=_profile(label)):
+    prof = _profile(label)
+    core = v
+    if prof["ctx"]:
+        m = _CTX_SUFFIX.search(v)
+        core = v[:m.start()] if m else v  # a model's context-window tag ('claude-opus-5-5[1m]') is outside the identity
+    ok = _KINDS[kind](core)
+    if kind != "sha" and ok == core and not _trusted_pieces(core, max_ids=2 if kind == "path" else 1, profile=prof):
         return v
-    return v if ok is None or ok != v else _MARK_OPEN + v + _MARK_CLOSE
+    return v if ok is None or ok != core else _MARK_OPEN + v + _MARK_CLOSE
 
 
 def show(label, v, kind="ident"):
@@ -261,6 +278,9 @@ def show(label, v, kind="ident"):
 
 
 _OPQ_REF = re.compile(r"\[opaque [a-z-]{1,12} [0-9a-f]{8}\]")
+_CTX_SUFFIX = re.compile(r"\[\d{1,4}[km]\]$")
+
+
 def show_row(label, v, words=frozenset()):
     """What a queue-row field prints (a row id, owner, wait, status or claim): the SAME trust gate as every identity
     (_gate_values: closed vocabulary, bounded numbers, exact id grammars, a small budget of unlisted characters). Each
@@ -329,7 +349,7 @@ REDACTED = "[REDACTED]"
 # a credential-named query parameter. The named provider patterns remain as an extra layer.
 _NOT_DONE = r"(?!\[REDACTED\])"
 # name/value separators: = : => -> and their full-width / small-form look-alikes
-_SEP = r"(?:=>|->|[:=\uff1a\uff1d\ufe55\ufe66\u2236])"
+_SEP = r"(?:=>|->|:=|==|[:=\uff1a\uff1d\ufe55\ufe66\u2236])"
 _QUOTED_OR_WORD = r"""(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s,;&)"'\]}]+)"""
 # name words: a segment (split on non-alphanumerics and camelCase) equal to one of these, or holding one of the stems, or
 # a '<qualifier>key' compound (apikey, accountkey, ...), marks a credential-carrying name
@@ -396,7 +416,7 @@ def _cred_name_uncached(name):
 _SEP_AT = re.compile(r"[\"']?\s{0,8}" + _SEP + r"\s{0,8}")
 _NAME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")
 _VALUE = re.compile(_QUOTED_OR_WORD)
-_FLAG_AT = re.compile(r"(?<![\w-])(?P<flag>--?[A-Za-z][\w-]{0,60})(?P<mid>[ \t]+)" + _NOT_DONE)
+_FLAG_AT = re.compile(r"(?<![\w-])(?P<flag>--?[A-Za-z][\w.-]{0,60})(?P<mid>[ \t]+)" + _NOT_DONE)  # a dotted flag (--db.pass) is a flag
 _USER_FLAG = re.compile(r"(?<![\w-])(?P<flag>--?(?:u|user|proxy-user|U))(?P<mid>[ \t]+)" + _NOT_DONE +
                         r"""(?P<val>(?:"[^"]*:[^"]*"|'[^']*:[^']*'|[^\s"']+:[^\s"']*))""")
 _RUN = re.compile(r"(?<![A-Za-z0-9_\-+/.])[A-Za-z0-9_\-+/.]{20,}=*(?![A-Za-z0-9_\-+/.])")
@@ -639,7 +659,7 @@ def _vocab_suffix(seg):
 def _piece_ok(seg):
     """One piece of an identity: plain, an id shape, or word-like; a compact date inside a piece ('r7wfr620261113') is
     checked as its own piece."""
-    if _idplain(seg) or _ID_PIECE.fullmatch(seg) or _wordish(seg) or _vocab_suffix(seg):
+    if _idplain(seg) or _ID_PIECE.fullmatch(seg) or _wordish(seg) or _vocab_suffix(seg) or _slug(seg.lower()):
         return True
     parts = [x for x in _DATE_PIECE.split(seg) if x]
     return len(parts) > 1 and all(_idplain(x) or _ID_PIECE.fullmatch(x) or _wordish(x) for x in parts)
@@ -700,6 +720,41 @@ _MAX_UNLISTED = 8  # the most characters of unlisted material one value may carr
 _MAX_SHORT = 5  # the longest unlisted piece
 _MAX_UNLISTED_WITH_ID = 0  # beside an id grammar nothing unlisted: a random id sits only beside closed-vocabulary pieces
 _MAX_PIECES = 40
+# DEF-5: a value made of closed-vocabulary words alone is a passphrase when it has many of them. At most this many vocabulary
+# words in one identity value (a path's directories and a unit's type suffix are structure, not words, and do not count).
+_MAX_VOCAB_WORDS = 6
+_STRUCT_WORDS = frozenset("mnt ssd cargo target tmp var home usr opt src out json log logs txt md service scope socket timer slice "
+                          "mount path unit units scripts script".split())
+# DEF-4: the NAME grammar of the fields that carry names (unit, child, owner, consumer, branch, repo, task, path): up to a few
+# pronounceable lower-case words (_pronounceable) and one task slug (_slug) per value, with a total letter budget. Never beside
+# a hash-sized id, never in a field that carries no name (account, model, session, invocation, host, row fields).
+_LANG_WORD_MIN, _LANG_WORD_MAX = 6, 12  # a shorter piece is charged to the unlisted budget instead
+_PRON_ONS = (r"(?:squ|str|spr|spl|scr|shr|thr|chr|sch|bl|br|ch|cl|cr|dr|fl|fr|gl|gr|gn|kn|ph|pl|pr|qu|sc|sh|sk|sl|sm|sn|sp|st|sw|th|tr|"
+             r"tw|wh|wr|[bcdfghjklmnprstvwz])")
+_PRON_NUC = r"(?:ai|au|aw|ay|ea|ee|ei|eu|ew|ey|ia|ie|io|oa|oi|oo|ou|ow|oy|ua|ue|ui|[aeiouy])"
+_PRON_COD = (r"(?:ght|tch|nch|dge|ng|nk|nt|nd|ns|nc|ck|ct|ft|ld|lf|lk|lm|lp|lt|ls|lb|mp|mb|ms|pt|rd|rk|rm|rn|rp|rs|rt|rb|rg|rl|rc|"
+             r"sk|sp|st|ss|ll|ff|tt|nn|rr|mm|pp|dd|gg|bb|sh|ch|th|[bcdfgklmnprstxz])")
+_PRON = re.compile(r"(?:%s?%s%s?){1,5}" % (_PRON_ONS, _PRON_NUC, _PRON_COD))
+_SLUG = re.compile(r"[a-z]{1,3}\d{2,5}(?:[a-z]{1,2}\d)?(?:[a-z]{1,2}\d)?")
+_MAX_SLUG = 10
+
+
+def _pronounceable(w):
+    """A lower-case word of 6-12 letters that parses as syllables (onset, nucleus, coda from closed English clusters), has a vowel
+    share of 20-70 % and no letter three times in a row: 'decide', 'regrade', 'witness', 'agorabus', 'bootstrap'. A random
+    lower-case run of 10 letters passes in about 2 % of draws, of 12 in under 1 %."""
+    if not (_LANG_WORD_MIN <= len(w) <= _LANG_WORD_MAX and w.isascii() and w.isalpha() and w.islower()):
+        return False
+    vowels = sum(c in "aeiouy" for c in w)
+    return (_PRON.fullmatch(w) is not None and 0.2 <= vowels / len(w) <= 0.7 and re.search(r"(.)\1\1", w) is None)
+
+
+def _slug(low):
+    """A task slug as the fleet names a run: letters, a number of two to five digits, and at most two more groups of one or two letters and one digit
+    ('a1303rv8', 'a1296p5rv5', 'wfr11'), at most ten characters."""
+    return len(low) <= _MAX_SLUG and low.isascii() and _SLUG.fullmatch(low) is not None
+
+
 _UUID = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z])")
 _DATE_OK = r"20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])"
 _TS_ID = re.compile(_DATE_OK + r"T(?:[01]\d|2[0-3])[0-5]\d[0-5]\dZ?")
@@ -710,7 +765,7 @@ _HEX_LENS = frozenset(list(range(7, 13)) + [32, 40, 64])
 _DNS_WORDS = frozenset("net com org io dev local internal lan corp home arpa cloud app ai co".split())
 _NUMERIC_NAMES = frozenset("pid ppid tid uid gid port seq rev revision count n line lines size bytes exit attempt retry retries ms "
                            "secs seconds epoch offset len length total num number version ver ttl age idx index rc returncode timeout wait delay duration "
-                           "interval limit max min depth width height rows cols step steps page pages tries".split())
+                           "interval limit max min depth width height rows cols step steps page pages tries attempts".split())
 
 
 def _hex_id(seg, prev=""):
@@ -753,34 +808,43 @@ _ROLES = "verifier|reviewer|coder|codex|claude|worker|agent|seat"
 _FILE_STEM = "evt|event|result|results|review|report|out|artifact|log|trace|journal|notes|dump"
 
 
-def _prof(alone=(), beside=(), tmpl=None, ip=False, unit_name=False):
-    return {"alone": frozenset(alone), "beside": frozenset(beside), "ip": ip, "unit_name": unit_name,
+def _prof(alone=(), beside=(), tmpl=None, ip=False, unit_name=False, lang=0, lang_letters=20, enum=None, literals=(), ctx=False, slash=False, free_struct=False):
+    """One field's grammar: the id shapes it carries and the form each takes, whether it is a unit name, how many name words
+    (`lang`, at most `lang_letters` letters) a value may carry, a closed `enum` of values (the whole grammar of the field), the
+    template `literals` its own id templates use, whether a model's context tag `[1m]` may follow, and whether the value is an
+    `owner/name` pair (a repo) whose owner is gated on its own with the short budget."""
+    return {"alone": frozenset(alone), "beside": frozenset(beside), "ip": ip, "unit_name": unit_name, "lang": lang,
+            "lang_letters": lang_letters, "enum": None if enum is None else frozenset(enum), "literals": frozenset(literals), "ctx": ctx, "slash": slash, "free_struct": free_struct,
             "tmpl": {k: re.compile(v, re.I) for k, v in (tmpl or {}).items()}}
 
 
 _UNIT_FORM = r"[\w.@+:-]*~[\w.@+:-]*" + _UNIT_SUFFIX
 _STEM_FORM = r"(?:.*/)?(?:%s)[-_.]~(?:\.[a-z]{2,5})?" % _FILE_STEM
-_PATH_PROFILE = _prof(beside=("short", "h32", "h40", "uuid"), tmpl={"short": _STEM_FORM, "h32": _STEM_FORM, "h40": _STEM_FORM,
+_EFFORTS = ("none", "minimal", "low", "medium", "normal", "default", "standard", "auto", "high", "xhigh", "max")
+_PATH_PROFILE = _prof(beside=("short", "h32", "h40", "uuid"), lang=2, free_struct=True, tmpl={"short": _STEM_FORM, "h32": _STEM_FORM, "h40": _STEM_FORM,
                                                                       "uuid": r".*/~(?:/.*|\.[a-z]{2,5})?"})
 _SESS_FORM = r"(?:sess|session|sid)[-_:]~"
 _PROFILES = {
     "host": _prof(beside=("inst",), tmpl={"inst": r"i-~"}, ip=True),
-    "unit": _prof(beside=("short", "h32", "uuid"), tmpl={"short": _UNIT_FORM, "h32": _UNIT_FORM, "uuid": _UNIT_FORM}, unit_name=True),
+    "unit": _prof(beside=("short", "h32", "uuid"), tmpl={"short": _UNIT_FORM, "h32": _UNIT_FORM, "uuid": _UNIT_FORM}, unit_name=True,
+                  lang=2, literals=("spawn",)),
     "child": _prof(alone=("short",), beside=("short", "h32", "h40", "uuid"), tmpl={
-        "short": _UNIT_FORM, "h32": r"child[-_.]~|" + _UNIT_FORM, "h40": r"child[-_.]~", "uuid": r"child[-_.]~|" + _UNIT_FORM}),
+        "short": _UNIT_FORM, "h32": r"child[-_.]~|" + _UNIT_FORM, "h40": r"child[-_.]~", "uuid": r"child[-_.]~|" + _UNIT_FORM}, lang=2,
+        literals=("spawn",)),
     "session": _prof(alone=("short", "h32", "uuid", "ulid"), beside=("short", "h32", "uuid", "ulid"), tmpl={
-        "short": _SESS_FORM, "h32": _SESS_FORM, "uuid": _SESS_FORM, "ulid": _SESS_FORM}),
+        "short": _SESS_FORM, "h32": _SESS_FORM, "uuid": _SESS_FORM, "ulid": _SESS_FORM}, literals=("session",)),
     "invocation": _prof(alone=("short", "h32", "h64", "uuid", "ulid"), beside=("short", "h32"), tmpl={
         "short": r"(?:inv|invocation)[-_:]~", "h32": r"(?:inv|invocation)[-_:]~"}),
     # a model, an effort, a repo and a host carry no id of a hash-like shape; an account, an owner and a branch carry one only
     # behind their own instance prefix (acct-<id>, r7-<id>, feat-<id>)
     "account": _prof(beside=("short", "uuid"), tmpl={k: r"(?:acct|account)[-_.]~" for k in ("short", "uuid")}),
-    "owner": _prof(beside=("short",), tmpl={"short": r"(?:r7|rb|ctl|hermes|orch|aide|controller|acct)[-_.]~"}),
-    "branch": _prof(beside=("short", "h32"), tmpl={k: r"(?:.*/)?(?:feat|feature|fix|hotfix|bug|wip|r7|rb)[-_]~" for k in ("short", "h32")}),
-    "model": _prof(), "effort": _prof(), "repo": _prof(),
-    "named": _prof(beside=("short", "h32"), tmpl={"short": r"(?:%s)[-_.]~" % _ROLES, "h32": r"(?:%s)[-_.]~" % _ROLES}),
+    "owner": _prof(beside=("short",), tmpl={"short": r"(?:r7|rb|ctl|hermes|orch|aide|controller|acct)[-_.]~"}, lang=2),
+    "branch": _prof(beside=("short", "h32"), tmpl={k: r"(?:.*/)?(?:feat|feature|fix|hotfix|bug|wip|r7|rb)[-_]~" for k in ("short", "h32")},
+                    lang=2),
+    "model": _prof(ctx=True), "effort": _prof(enum=_EFFORTS), "repo": _prof(lang=2, slash=True),
+    "named": _prof(beside=("short", "h32"), tmpl={"short": r"(?:%s)[-_.]~" % _ROLES, "h32": r"(?:%s)[-_.]~" % _ROLES}, lang=2),
     "task": _prof(alone=("ulid",), beside=("short", "h32", "uuid", "ulid"), tmpl={
-        k: r"(?:task|wf|a|t)[-_]?~" for k in ("short", "h32", "uuid", "ulid")}),
+        k: r"(?:task|wf|a|t)[-_]?~" for k in ("short", "h32", "uuid", "ulid")}, lang=2),
     "path": _PATH_PROFILE,
 }
 _PROFILE_ALIAS = {"sess-id": "session", "current_owner": "owner", "reviewed_by": "owner", "consumer": "named", "alternate": "named",
@@ -815,6 +879,15 @@ def _segment(low, words):
     return best[-1] if best[-1] and best[-1] <= 4 else 0
 
 
+def _count_word(low, st):
+    """Charge one closed-vocabulary word to the per-value cap (_MAX_VOCAB_WORDS). Free: DNS labels, the directory words of a path
+    (a path field), and a final file extension or unit type after a dot ('.json', '.service'): they are structure, not words."""
+    if low in _STRUCT_WORDS and (st["free_struct"] or low == st["tail"]):
+        return
+    if low in _ID_WORDS or low in st["words"]:
+        st["vocab"] += 1
+
+
 def _compound(seg, words, st):
     """A mixed piece that reads as vocabulary joined with numbers ('wmbuild1663impl2', 'WF1663Impl', 'r7wfitfix2'): every
     alphabetic token is a vocabulary word (or splits into up to four of them), digits are bounded numbers, and at most ONE
@@ -832,7 +905,12 @@ def _compound(seg, words, st):
             digits += len(t)
             continue
         low = t.lower()
-        if _word(low, st["words"]) or _segment(low, st["words"]):
+        if _word(low, st["words"]):
+            _count_word(low, st)
+            continue
+        k = _segment(low, st["words"])
+        if k:
+            st["vocab"] += k
             continue
         if len(t) <= 3 and not _cred_name(low):
             unl += 1
@@ -850,7 +928,10 @@ def _piece(seg, prev, st):
     words = st["words"]
     low = seg.lower()
     if _word(low, words):
+        _count_word(low, st)
         return True
+    if low in st["literals"]:
+        return True  # a literal of the field's own id template ('session-<uuid>', 'tmux-spawn-<uuid>.scope')
     if _TS_ID.fullmatch(seg) or _DATE_ID.fullmatch(seg):
         return True
     if seg.isdigit():
@@ -866,6 +947,12 @@ def _piece(seg, prev, st):
     if not (seg.isascii() and seg.isalnum()):
         return False
     if _compound(seg, words, st):
+        return True
+    if st["lang_max"] and not _cred_name(low) and (_slug(low) or (seg.isalpha() and (seg.islower() or seg.istitle()) and _pronounceable(low))):
+        st["lang"] += 1  # a name word or a task slug: counted against the field's own name budget
+        st["lang_letters"] += len(seg)
+        if _slug(low):
+            st["slugs"] += 1
         return True
     for w in sorted((x for x in set(_ID_WORDS) | set(words) if len(x) >= 3 and not _cred_name(x)), key=len, reverse=True):
         rest = seg[len(w):]
@@ -902,6 +989,7 @@ def _vocab(seg):
 
 
 _IPV4 = re.compile(r"(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)")
+_MAX_IPV6_WIDE = 2  # groups of 3-4 non-zero hex digits besides the leading one
 _MAX_IPV6_GROUPS = 4  # explicit groups of a compressed IPv6 literal (fe80::1, 2001:db8::1)
 _IPV6_GROUP = re.compile(r"[0-9A-Fa-f]{1,4}")
 
@@ -909,7 +997,8 @@ _IPV6_GROUP = re.compile(r"[0-9A-Fa-f]{1,4}")
 def _ipv6(core):
     """An IPv6 literal: eight groups of at most four hex digits, with one '::' standing for one or more zero groups, an
     optional trailing IPv4. A compressed literal carries at most four explicit groups; a fully written one at most four
-    non-zero groups (2001:db8:0:0:0:0:0:1), so no 128-bit random value passes as an address."""
+    non-zero groups (2001:db8:0:0:0:0:0:1), so no 128-bit random value passes as an address; of the groups
+    after the first at most two are wide (_MAX_IPV6_WIDE), so no 64-bit random value does either."""
     if core.count("::") > 1 or ":::" in core:
         return False
     head, _, tail = core.partition("::")
@@ -918,6 +1007,11 @@ def _ipv6(core):
     if "::" not in core and (core.startswith(":") or core.endswith(":")):
         return False
     groups = parts + tail_parts
+    # at most two groups of three or more hex digits besides the leading one (a prefix such as 2001 or fe80): a literal whose
+    # groups are random 16-bit values is a value, not an address
+    wide = [g for g in groups[1 if parts else 0:] if len(g) >= 3 and "." not in g and _IPV6_GROUP.fullmatch(g) and int(g, 16) != 0]
+    if len(wide) > _MAX_IPV6_WIDE:
+        return False
     n = nonzero = 0
     for i, g in enumerate(groups):
         if i == len(groups) - 1 and "." in g:
@@ -965,14 +1059,21 @@ def _unit_name_segments(segs, whole, words):
     return segs
 
 
-def _gate_values(vals, words=frozenset(), max_ids=1, profile=None):
+def _gate_values(vals, words=frozenset(), max_ids=1, profile=None, max_cost=_MAX_UNLISTED):
     """True when every piece of every value in `vals` is trusted and the values together stay inside the budgets (see THE ONE
     TRUST GATE), and every id the values carry is of a shape the field's `profile` names, in the form (alone, or beside
     other pieces and following the shape's template) the profile allows (see THE FIELD PROFILES). Every output path passes its
     field's profile (a row field: none, so no ids); only a direct call that names no profile gets the bare gate.
     The caller's `words` extend the closed vocabulary for one field."""
     prof = profile or _ANY_PROFILE
-    st = {"words": words, "cost": 0, "digits": 0, "ids": 0, "found": []}
+    if prof["enum"] is not None:  # a field whose whole grammar is a closed set of values
+        return all(isinstance(v, str) and v.lower() in prof["enum"] for v in vals)
+    if prof["slash"] and len(vals) == 1 and isinstance(vals[0], str) and vals[0].count("/") == 1:
+        owner, name = vals[0].split("/")  # owner/name: the owner is one short piece of its own, the name a name
+        flat = dict(prof, slash=False, lang=0)
+        return (_gate_values([owner], words, max_ids, flat, _MAX_SHORT) and _gate_values([name], words, max_ids, dict(prof, slash=False)))
+    st = {"words": words, "cost": 0, "digits": 0, "ids": 0, "found": [], "vocab": 0, "lang": 0, "lang_letters": 0,
+          "lang_max": prof["lang"], "literals": prof["literals"], "free_struct": prof["free_struct"], "tail": None, "slugs": 0}
     npieces = 0
     for s in vals:
         if not isinstance(s, str) or not s or len(s) > 512:
@@ -981,11 +1082,14 @@ def _gate_values(vals, words=frozenset(), max_ids=1, profile=None):
             return False
         if prof["ip"] and _ip_literal(s):
             continue
+        if profile is not None and prof["ip"] and s.count(":") >= 2:
+            return False  # a host with colons is an IP literal (grammar above) or host:port, never a run of hex groups
         st["found"] = []
         for m in _UUID.finditer(s):
             st["found"].append(("uuid", m.group(0)))
         st["ids"] += len(st["found"])
         whole = s
+        st["tail"] = whole.strip().rsplit(".", 1)[-1].lower() if "." in whole else None
         s = _UUID.sub(".", s)
         s = _ISO_TS.sub(".", s)
         segs = [x for x in _GATE_SPLIT.split(s) if x]
@@ -1009,8 +1113,10 @@ def _gate_values(vals, words=frozenset(), max_ids=1, profile=None):
             rx = prof["tmpl"].get(shape)
             if shape not in prof["beside"] or (rx is not None and not rx.fullmatch(whole.replace(text, "~", 1))):
                 return False
-    return (npieces <= _MAX_PIECES and st["cost"] <= _MAX_UNLISTED and st["digits"] <= _MAX_DIGITS_TOTAL
-            and st["ids"] <= max_ids and not (st["ids"] and (st["cost"] > _MAX_UNLISTED_WITH_ID or st["digits"] > _MAX_DIGITS_WITH_ID)))
+    return (npieces <= _MAX_PIECES and st["cost"] <= max_cost and st["digits"] <= _MAX_DIGITS_TOTAL
+            and (profile is None or st["vocab"] <= _MAX_VOCAB_WORDS) and st["slugs"] <= 1 and st["lang"] <= prof["lang"] and st["lang_letters"] <= prof["lang_letters"]
+            and st["ids"] <= max_ids and not (st["ids"] and (st["cost"] > _MAX_UNLISTED_WITH_ID or st["digits"] > _MAX_DIGITS_WITH_ID
+                                                              or st["lang"])))
 
 
 def _trusted_pieces(s, words=frozenset(), max_ids=1, profile=None):
@@ -1067,7 +1173,8 @@ _REDACTIONS = [
     # a multi-parameter scheme (Digest username=..., response=...) keeps no parameter
     (re.compile(r"(?i)(\bauthorization[\"']?\s*" + _SEP + r"\s*[\"']?(?:digest|negotiate|oauth|hmac)\s+)" + _NOT_DONE + r"[^\r\n]+"),
      r"\1" + REDACTED),
-    (re.compile(r"(?i)\b(bearer)(?:\s*" + _SEP + r"\s*|\s+)" + _NOT_DONE + r"[^\s\"',;)]+"), r"\1 " + REDACTED),
+    (re.compile(r"(?i)\b(bearer)(?:\s+(?:is|are|was|were|set|to|equals|of))*(?:\s*" + _SEP + r"\s*|\s+)(?:bearer(?:\s*" + _SEP + r"\s*|\s+))?[\"'`(]?" + _NOT_DONE +
+                r"[^\s\"',;)]+"), r"\1 " + REDACTED),
     # curl -u / --user user:password
     (_USER_FLAG, _user_flag),
     # name = value / name: value (JSON, YAML, env, headers, query strings): the name holds a credential word
@@ -1227,19 +1334,99 @@ _CRED_NEXT_OK = frozenset("required missing unset empty rotated rotation expired
                           "granted failed not no yes the a an this that it all any each one two used left remaining count total".split())
 _PORT_NAMES = frozenset(["p", "publish", "port", "ports", "expose"])
 _NUMERIC_PAIRS = frozenset(["exit_code", "status_code", "return_code", "http_code"])
-_NUMERIC_SUFFIX = ("count", "size", "bytes", "seconds", "lines", "total", "length", "number", "version", "index", "retries", "attempts",
-                   "timeout", "duration")
+# The closed numeric names are WHOLE names: a final numeric word (_NUMERIC_NAMES) after at most a few qualifier words from this
+# closed list ('line_number', 'retry_count', 'file_size', 'max_retries', 'exit_code'). A qualifier is a measurement word, never a
+# credential-ish word: 'recovery_number', 'mfacount', 'unlock_limit', 'totp_index' name no number of the list, so a number under
+# them is hidden like a number under any unlisted name.
+_NUMERIC_QUALIFIERS = frozenset("line file max min total retry exit status http return child parent task row batch queue step page pid "
+                                "ppid open current last first next prev elapsed wait poll tick byte request req run attempt build "
+                                "commit event evt worker cpu mem disk start end soft hard avg peak used free idle".split())
+_MAX_QUALIFIERS = 3
+
+
+# Names whose number may be long (a byte count, an epoch, a millisecond clock, an offset); every other numeric name (a pid, a
+# port, a seq, a line, an exit code) carries at most _NUMERIC_SHORT digits.
+_NUMERIC_WIDE = frozenset("bytes size epoch ms offset length len total count secs seconds duration timeout delay interval age ttl".split())
+_NUMERIC_SHORT = 7
+
+
+def _numeric_digits(name):
+    """The most digits a number may have under `name`: 0 for a name outside the closed numeric list, else 10 for a measurement
+    that can be long (_NUMERIC_WIDE) and 7 for a counter or an id-like number (pid, seq, line)."""
+    if not _numeric_name(name):
+        return 0
+    toks = [t.lower() for t in re.split(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])", name) if t]
+    last = toks[-1]
+    if last not in _NUMERIC_NAMES:  # glued ('filesize'): the numeric word is the tail
+        last = next((last[k:] for k in range(2, len(last) - 1) if last[:k] in _NUMERIC_QUALIFIERS and last[k:] in _NUMERIC_NAMES), last)
+    return 10 if last in _NUMERIC_WIDE else _NUMERIC_SHORT
 
 
 def _numeric_name(name):
     """True for a name of the closed list of numeric field names (a pid, a port, a line, a count, a timeout, an exit code): the
-    only names under which a number prints. A name outside the list ('mfa', 'mypass', 'code', 'foo') hides any number."""
+    only names under which a number prints. The final word is a numeric word and every word before it a closed qualifier
+    ('line_number', 'retryCount', 'filesize'); a name outside the list ('mfa', 'mfa_number', 'mfacount', 'code') hides any number."""
     toks = [t.lower() for t in re.split(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])", name) if t]
-    if not toks:
+    if not toks or len(toks) > _MAX_QUALIFIERS + 1:
         return False
     last = toks[-1]
-    return (last in _NUMERIC_NAMES or (len(toks) > 1 and toks[-2] + "_" + last in _NUMERIC_PAIRS)
-            or any(last.endswith(w) and len(last) > len(w) for w in _NUMERIC_SUFFIX))
+    if len(toks) > 1 and toks[-2] + "_" + last in _NUMERIC_PAIRS:
+        return all(t in _NUMERIC_QUALIFIERS for t in toks[:-2])
+    if last not in _NUMERIC_NAMES:  # a glued final token ('filesize', 'retrycount'): a qualifier then a numeric word
+        glued = [(last[:k], last[k:]) for k in range(2, len(last) - 1)]
+        if not any(a in _NUMERIC_QUALIFIERS and b in _NUMERIC_NAMES for a, b in glued):
+            return False
+    return all(t in _NUMERIC_QUALIFIERS or t in _NUMERIC_NAMES for t in toks[:-1])
+
+
+_MIME = re.compile(r"(?:text|application|image|audio|video|multipart|font)/(?:plain|html|json|xml|csv|markdown|octet-stream|"
+                   r"x-www-form-urlencoded|javascript|yaml|pdf|zip|gzip|png|jpeg|gif|svg\+xml|event-stream|form-data|mixed|alternative|\*)"
+                   r"(?:;\s*(?:charset=(?:utf-8|ascii|iso-8859-1)|q=[01](?:\.\d)?))?", re.I)
+_MIME_NAMES = frozenset(["accept", "content-type", "content_type", "contenttype"])
+_STRUCT_MAX = 600  # characters of a JSON value read as data
+_STRUCT_DEPTH = 4
+
+
+def _benign_json(node, name, depth=0):
+    """A parsed JSON value whose every key is a plain name (words of the closed vocabulary, no credential word) and whose every
+    leaf is a benign value under its own key: a small number, a state word, a time, a closed numeric name's number. Strings that
+    are themselves JSON are read the same way."""
+    if depth > _STRUCT_DEPTH:
+        return False
+    if isinstance(node, dict):
+        for k, x in node.items():
+            toks = [t.lower() for t in re.split(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])", k) if t] if isinstance(k, str) else []
+            if (not toks or len(k) > 40 or _cred_name(k) or not all(t in _free_words() or t in _NUMERIC_NAMES or t.isdigit()
+                                                                   for t in toks) or not _benign_json(x, k, depth + 1)):
+                return False
+        return True
+    if isinstance(node, list):
+        return len(node) <= 40 and all(_benign_json(x, name, depth + 1) for x in node)
+    if node is None or isinstance(node, bool):
+        return True
+    if isinstance(node, (int, float)):
+        return _benign_value(repr(node), name)
+    if isinstance(node, str):
+        return _benign_value(node, name) if node[:1] not in ("{", "[") else _benign_struct(node, name, depth + 1)
+    return False
+
+
+def _json_parses(text):
+    try:
+        json.loads(text)
+        return True
+    except (ValueError, RecursionError):
+        return False
+
+
+def _benign_struct(text, name, depth=0):
+    """True when `text` is a JSON object or array of benign keys and values (see _benign_json)."""
+    if len(text) > _STRUCT_MAX or text[:1] not in ("{", "["):
+        return False
+    try:
+        return _benign_json(json.loads(text), name, depth)
+    except (ValueError, RecursionError):
+        return False
 
 
 def _benign_value(raw, name="", cred_context=False):
@@ -1255,14 +1442,25 @@ def _benign_value(raw, name="", cred_context=False):
     v = raw.strip("\"'`").rstrip(".:")
     if not v or v.startswith("\ue002"):
         return True
+    if not cred_context:
+        if "%" in v and _PCT.search(v):
+            dv = _pct_decode(v)
+            if dv != v and "%" not in dv:
+                return _benign_value(dv, name)  # a percent-escaped value is read as what it decodes to
+        u = _unescape(v) if "\\" in v else v
+        if u[:1] in ("{", "[") and len(u) > 2:
+            ok = _benign_struct(u, name)
+            if ok or _json_parses(u):
+                return ok
+        if name.lower().lstrip("-") in _MIME_NAMES and _MIME.fullmatch(v):
+            return True
     if v.startswith("["):
         return v.startswith(("[opaque", "[REDACTED"))
     if _ISO_TS.fullmatch(v) or _CLOCK.fullmatch(v) or _FLAG_TOKEN.fullmatch(v):
         return True
     if cred_context:  # right after a credential word only a state word may follow (the next-word check of _redact_cred_prose)
         return all(x == "" or x.lower() in _CRED_NEXT_OK or (x.isdigit() and len(x) <= 2) for x in _FREE_SPLIT.split(v))
-    numeric = _numeric_name(name)
-    limit = 10 if numeric else _FREE_DIGITS  # long numbers print only under a name of the closed numeric list
+    limit = _numeric_digits(name) or _FREE_DIGITS  # long numbers print only under a name of the closed numeric list
     if re.fullmatch(r"\d{1,5}:\d{1,5}", v) and name.lower().lstrip("-") in _PORT_NAMES:
         return True  # a port mapping (docker -p 8080:80)
     cost = pieces = 0
@@ -1294,13 +1492,24 @@ def _benign_value(raw, name="", cred_context=False):
     return cost <= _FREE_UNLISTED and pieces <= _FREE_PIECES
 
 
+def _schema_field(name):
+    """The field a free-text name IS: a field word on its own or after a dotted path of schema keys ('head', 'target.head',
+    'evidence[0].head', '--head', 'sha256'). A name that merely ENDS in a field word ('mfa-hash', 'signing-rev', 'x.digest') is not one."""
+    parts = name.lstrip("-").split(".")
+    keys = {k.lower() for k in _schema_keys()}
+    if not all(re.sub(r"\[\d+\]$", "", p).lower() in keys for p in parts[:-1]):
+        return None
+    return parts[-1].lower() if parts[-1].lower() in _FIELD_KIND else None
+
+
 def _trusted_field_value(name, raw):
     """True when `name` is a schema key and `raw` validates as that field's identity and is trusted (see keep())."""
-    kind = _FIELD_KIND.get(re.split(r"[.\-]", name)[-1].lower())
+    field = _schema_field(name)
+    kind = _FIELD_KIND.get(field) if field else None
     core = raw.rstrip(".:")
     if kind == "hex":
         return bool(re.fullmatch(r"[0-9a-fA-F]{4,64}", core)) and not core.isdigit()
-    return bool(kind) and keep(kind, core, re.split(r"[.\-]", name)[-1].lower()) != core
+    return bool(kind) and keep(kind, core, field) != core
 
 
 def _open_structure(text, e):
@@ -1331,6 +1540,9 @@ def _redact_free_pairs(text, protect):
         if k is not None:
             end = _structure_end(text, e, j)
             if end is not None:
+                if _benign_struct(text[k:end], text[j:m.start()]):
+                    seen = end  # plain data under a plain name: nothing to hide
+                    continue
                 out.append(text[pos:e] + REDACTED)
                 pos = end
                 continue
@@ -1409,23 +1621,88 @@ def _redact_composites(text):
     return _COMPOSITE.sub(repl, text)
 
 
-_CRED_PROSE = re.compile(
-    r"(?i)(?<![A-Za-z0-9_.-])(?P<w>pass|passwd|password|passwords|passphrase|passcode|pwd|pw|pswd|pwrd|pin|otp|token|tokens|secret|"
-    r"secrets|credential|credentials|apikey|passkey)(?P<mid>(?:\s+(?:is|are|was|were|to|with|as|be|set|use|using|[:=]))*\s+)"
-    r"(?P<v>[^\s,;)\]}\"'\ue002\[]+)")
+# A credential NOUN ends a credential name in prose: 'password', 'the api_key', 'client secret', 'X-Auth-Token', 'private key', 'creds'.
+# The name is a run of name characters; its last word (split on non-alphanumerics and camelCase, trailing digits dropped) is one of
+# these. The value follows it with a bare space, 'is', ':', '=', or a quote; the next word is hidden unless it is a state word.
+# This list is an extra layer of free-text redaction (it hides more); it is never what lets a value print.
+_STRONG_NOUNS = frozenset("pass|passwd|password|passwords|passphrase|passcode|pwd|pw|pswd|pwrd|pin|otp|token|tokens|secret|secrets|"
+                          "credential|credentials|cred|creds|apikey|passkey|jwt|cookie|mfa|totp|hotp|2fa|seed|seedphrase|mnemonic|privatekey|privkey|"
+                          "signingkey|accesskey|secretkey|sshkey|hmac".split("|"))
+# 'key', 'keys', 'auth' and 'bearer' are also ordinary words ('key point', 'auth service'): after one of them only a word of the
+# closed vocabulary may follow; after a strong noun only a state word.
+_WEAK_NOUNS = frozenset("key|keys|auth|bearer|code|codes|phrase".split("|"))
+_CRED_NOUNS = _STRONG_NOUNS | _WEAK_NOUNS
+_PROSE_NAME = re.compile(r"(?<![A-Za-z0-9_.-])[A-Za-z][A-Za-z0-9_.-]{0,60}")
+_PROSE_HINT = re.compile(r"(?i)pass|pw|pin|otp|token|secret|cred|key|auth|jwt|cookie|bearer|pswd|mfa|2fa|seed|mnemonic|code|phrase|hmac")
+_CRED_TAIL = re.compile(r"""(?P<mid>(?:\s+(?:is|are|was|were|to|with|as|be|set|use|using|equals|of))*(?:\s*[:=]+\s*|\s+)["'`(]?)"""
+                        r"""(?P<v>[^\s,;)\]}"'`\ue002\[]+)""")
+_NAME_WORDS_RX = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+")
+_EXPLICIT_SEP = re.compile(r"\s*[:=]")
+_MAX_NAME_CHAIN = 4  # credential nouns in a row ('secret key', 'api key secret')
+
+
+def _cred_noun(word):
+    parts = _NAME_WORDS_RX.findall(word.strip(".-_"))
+    return bool(parts) and parts[-1].lower() in _CRED_NOUNS
+
+
+# A bare 'key' or 'auth' reads as a credential only beside a credential qualifier: 'api key', 'private key', 'ssh_key', 'client auth'.
+_PROSE_QUALIFIERS = frozenset(("api|access|client|private|secret|signing|ssh|master|shared|hmac|license|encryption|refresh|"
+                              "session|user|admin|root|db|aws|gcp|mfa|oauth|service|app|auth|bearer|token|pass|recovery|backup|"
+                              "unlock|verification|reset|security|sms|activation|invite|magic").split("|"))
+_PREV_WORD = re.compile(r"([A-Za-z]+)[ \t]+$")
+
+
+def _strong_name(word):
+    """True when a prose name leaves no doubt that a credential follows: its last word is a strong noun ('password', 'creds') or a
+    credential qualifier stands before a weak noun ('api_key', 'X-Auth-Token', 'client_secret'). A bare 'key' or 'auth' is weak."""
+    parts = _NAME_WORDS_RX.findall(word.strip(".-_"))
+    if not parts:
+        return False
+    return parts[-1].lower() in _STRONG_NOUNS or any(p.lower() in _PROSE_QUALIFIERS for p in parts[:-1])
+
+
+def _qualified_before(text, start):
+    """True when the word right before `start` is a credential qualifier ('api key', 'private key')."""
+    m = _PREV_WORD.search(text, max(0, start - 24), start)
+    return bool(m) and m.group(1).lower() in _PROSE_QUALIFIERS
+
+
+def _plain_word(v):
+    """A lower-case alphabetic word or a short dotted/dashed run of them ('key point', 'auth service', 'worker.extra'): after a bare
+    weak noun it is prose, not a value."""
+    return re.fullmatch(r"[a-z]+(?:[._/-][a-z]+){0,3}", v.rstrip(".:;,")) is not None
 
 
 def _redact_cred_prose(text):
-    """A credential word followed, in prose with no separator, by its value ('the password is sunshine', 'pass swordfish',
-    'my pin 482917'): the next word is hidden unless it is a closed-vocabulary word (no number longer than two digits)."""
-    if not _CRED_PROSE.search(text):
+    """A credential name followed, in prose, by its value ('the password is sunshine', 'pass swordfish', 'my pin 482917', 'the
+    api_key is Xk9fQ2mP7zab', 'private key Xk9fQ2mP7zab', 'client_secret Xk9fQ2mP7zab'): the next word is hidden unless it is a
+    closed-vocabulary state word, whatever its length. A run of credential nouns ('secret key') is one name."""
+    if not _PROSE_HINT.search(text):
         return text
-
-    def repl(m):
-        if _benign_value(m.group("v"), "", True):
-            return m.group(0)
-        return m.group("w") + m.group("mid") + REDACTED
-    return _CRED_PROSE.sub(repl, text)
+    out, pos = [], 0
+    for m in _PROSE_NAME.finditer(text):
+        if m.start() < pos or not _cred_noun(m.group(0)):
+            continue
+        e = m.end()
+        strong = _strong_name(m.group(0)) or _qualified_before(text, m.start())
+        for _ in range(_MAX_NAME_CHAIN):
+            t = _CRED_TAIL.match(text, e)
+            if t is None:
+                break
+            if _EXPLICIT_SEP.match(t.group("mid")):
+                break  # 'name=value', 'name: value': the pair layers above decide (a credential name hides it whatever it is)
+            v = t.group("v")
+            if _cred_noun(v) and v.isalpha():
+                e = t.end()  # 'secret key X': the value comes after the whole name
+                strong = strong or _strong_name(v)
+                continue
+            if not (_benign_value(v, "", True) or (not strong and _plain_word(v))):
+                out.append(text[pos:t.start("v")] + REDACTED)
+                pos = t.end("v")
+            break
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _free_layers(protect):
