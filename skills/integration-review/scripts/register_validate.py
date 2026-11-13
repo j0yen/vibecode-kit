@@ -57,14 +57,13 @@ _PROC_PATH = re.compile(r"/proc/[1-9][0-9]*/(?:exe|cmdline|comm|status|stat|cwd|
 _PID_NUM = re.compile(r"\bpid(?:[\s:=#_]*|-)[1-9][0-9]*(?![0-9a-z_]|\.[0-9])")
 _PID_FACT = re.compile(r"\b(?:exe|cmdline|comm|command)\b")
 _TOOL_SAYS = re.compile(r"\b(?:ps|pgrep|pidof|lsof|fuser|top)\b[^\n]*?\b(?:shows|lists|reports|names|found)\s+(?:a\s+)?process\s+(?P<n>[^\s,;]+)")
-_NEGATED = re.compile(r"\b(?:no|not|none|never|without|absent|missing|nonexistent|dead|exited|gone|stopped|terminated|killed"
-                      r"|inactive|failed|unknown|unk|undefined|null|nil|tbd|unavailable|cannot|unable|nothing)\b|\bn\s*/\s*a\b")
+_NEGATED = _N.NEG_STATE            # the one negation rule (scripts/ir_norm.py): negations, failures and non-running process states
 _UNIT = re.compile(r"\bsystemctl\b|\blist-units?\b|\blist-unit-files\b|\.(?:service|timer|socket|target|mount|path|slice|scope)\b")
 
 
 def _observed_process(ref):
     t = _N.canon(ref)
-    if _NEGATED.search(_N.canon(ref, slashes=True)) or _UNIT.search(t):
+    if _N.negated(ref, state=True) or _UNIT.search(t):
         return False
     if _PROC_PATH.search(t) or (_PID_NUM.search(t) and _PID_FACT.search(t)):
         return True
@@ -165,15 +164,83 @@ def _ts(s):
 
 
 def _key(r):
-    """Endpoint identity. A record with a path also carries the canonical repos its sources state: the same
-    path in two different repos, or at distinct commits, is two endpoints (SKILL.md), never a duplicate."""
-    k = tuple(_hk(r.get(k)) for k in ("family", "role", "host", "component", "path_or_command", "interface_kind"))
-    if not r.get("path_or_command"):
-        return k
-    repos = sorted({_N.repo_id(si["repo"]) for _, si in _sources(r)
-                    if isinstance(si.get("repo"), str) and not _unk(si["repo"])})
-    commits = sorted({si["commit"] for _, si in _sources(r) if isinstance(si.get("commit"), str)})
-    return k + (tuple(repos), tuple(commits))
+    """Endpoint base key: the fields that name an endpoint. Whether two records with one base key are ONE endpoint
+    is _conflict()'s question (the stated repos and commits), never a part of the key."""
+    return tuple(_hk(r.get(k)) for k in ("family", "role", "host", "component", "path_or_command", "interface_kind"))
+
+
+def _ident(r):
+    """(the (canonical repo, path) endpoints the sources state, the commits they state). A source's own
+    path_or_command wins over the record's (a fused record lists the path of each member; a member without one
+    has none); a record with no source states a repo of None, which is not a difference."""
+    own = None if r.get("fusion_basis") else r.get("path_or_command")
+    srcs = [si for _, si in _sources(r)] or [{}]
+    ends, commits = set(), set()
+    for si in srcs:
+        repo = si.get("repo")
+        rid = _N.repo_id(repo) if isinstance(repo, str) and not _unk(repo) else None
+        ends.add((rid, si.get("path_or_command", own)))
+        if isinstance(si.get("commit"), str):
+            commits.add(si["commit"])
+    if any(rp is not None for rp, _ in ends):
+        ends = {e for e in ends if e[0] is not None}      # an unstated source beside a stated repo adds no wildcard
+    return frozenset(ends), frozenset(commits)
+
+
+def _conflict(a, b):
+    """Two records of one base key are one endpoint (a duplicate) unless they PROVE they differ: no (repo, path)
+    endpoint is shared (an unstated repo matches any repo on the same path), or both state commits and none is
+    shared. A record that omits its repo or commit, or one side of a pair that does, is therefore never provably
+    different, as in the extractor."""
+    (ea, ca), (eb, cb) = a, b
+    if ca and cb and not ca & cb:
+        return False
+    return any(pa == pb and (ra is None or rb is None or ra == rb) for ra, pa in ea for rb, pb in eb)
+
+
+def _duplicate_groups(recs):
+    """Groups (record lists, size > 1) of records that are one endpoint: connected records under _conflict()
+    within one base key. Records stating both repo and commit meet through their repo buckets; a record that omits
+    either is compared with every record of its base key."""
+    by = {}
+    for i, r in enumerate(recs):
+        by.setdefault(_key(r), []).append(i)
+    out = []
+    for idx in by.values():
+        if len(idx) < 2:
+            continue
+        ids = {i: _ident(recs[i]) for i in idx}
+        parent = {i: i for i in idx}
+
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        def join(i, j):
+            if _conflict(ids[i], ids[j]):
+                parent[find(i)] = find(j)
+        full = [i for i in idx if ids[i][1] and all(rp is not None for rp, _ in ids[i][0])]
+        fset = set(full)
+        loose = [i for i in idx if i not in fset]
+        repo_bucket = {}
+        for i in full:
+            for rp, _ in ids[i][0]:
+                repo_bucket.setdefault(rp, []).append(i)
+        for lst in repo_bucket.values():
+            for n, i in enumerate(lst):
+                for j in lst[:n]:
+                    join(j, i)
+        for i in loose:
+            for j in idx:
+                if j != i:
+                    join(i, j)
+        comps = {}
+        for i in idx:
+            comps.setdefault(find(i), []).append(i)
+        out += [[recs[i] for i in c] for c in comps.values() if len(c) > 1]
+    return out
 
 
 def _rid(r):
@@ -185,6 +252,13 @@ def _refs(items):
     """Evidence refs among items that are not UNKNOWN-equivalent, as (index, item)."""
     return [(i, e) for i, e in enumerate(items if isinstance(items, list) else [])
             if isinstance(e, dict) and not _unk(e.get("ref"))]
+
+
+def _positive_refs(items):
+    """Evidence refs that count as evidence: not UNKNOWN-equivalent and, when they are prose (carry a space), not
+    negated ("not verified", "no test", "failed"). A path-like ref without a space is never judged as prose."""
+    return [(i, e) for i, e in _refs(items) if not (isinstance(e["ref"], str) and re.search(r"\s", e["ref"].strip())
+                                                       and _N.negated(e["ref"]))]
 
 
 def _adopted(items):
@@ -235,17 +309,16 @@ def validate(reg, schema, now=None):
     if complete and not recs:
         add("no-records", "declared all-interfaces-complete with zero enumerated records; coverage is unproven")
 
-    seen_ids, seen_keys = Counter(), Counter()
+    seen_ids = Counter()
     for r in recs:
         seen_ids[_hk(r.get("record_id"))] += 1
-        seen_keys[_key(r)] += 1
     for i, n in seen_ids.items():
         if n > 1:
             add("duplicate-record", f"record_id {_safe(i)} appears {n} times", _safe(i))
-    for k, n in seen_keys.items():
-        if n > 1:
-            ids = [_rid(r) for r in recs if _key(r) == k]
-            add("duplicate-record", f"same family/role/host/component/path_or_command/kind recorded {n} times: {ids}", ",".join(ids))
+    for grp in _duplicate_groups(recs):
+        ids = [_rid(r) for r in grp]
+        add("duplicate-record", f"same family/role/host/component/path_or_command/kind recorded {len(grp)} times "
+            f"(an unstated repo or commit is not a difference): {ids}", ",".join(ids))
 
     fl = reg.get("families") if isinstance(reg, dict) and isinstance(reg.get("families"), list) else []
     fams = {f["id"]: f for f in fl if isinstance(f, dict) and isinstance(f.get("id"), str)}
@@ -260,8 +333,8 @@ def validate(reg, schema, now=None):
                              "message": f"record is a heuristic fusion ({_safe(fb.strip())}), a guess and not proof that its sources are one component"})
         if ("sources" in r) == ("source_identity" in r):
             add("source-form", "a record needs exactly one of source_identity or sources", rid)
-        if not _refs(r.get("evidence")):
-            add("missing-evidence", "no evidence recorded", rid, gap=True)
+        if not _positive_refs(r.get("evidence")):
+            add("missing-evidence", "no evidence recorded (a negated ref such as \"not verified\" or \"failed\" is not evidence)", rid, gap=True)
         if r.get("family") == UNASSIGNED:
             add("unassigned", "family UNASSIGNED: row not claimed by any family; coverage unproven", rid, gap=True)
         if _unk(r.get("role")):

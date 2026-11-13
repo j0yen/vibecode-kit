@@ -25,7 +25,10 @@ production state, and it opens no tasks or PRs; findings go to their existing ca
 - Coverage is derived from the enumerated endpoint records, never from a declared number.
 - Credential-shaped evidence lines (token=, sk-ant, password, key headers) are referred to by
   file and index only; never print or quote them. The validator never prints an evidence ref: it names
-  the record and `evidence[i]`, and redacts any credential-shaped text in a message.
+  the record and `evidence[i]`, and redacts any credential-shaped text in a message. Redaction covers every printed
+  file name, path, option value, record id, property/required/enum name and message in all five scripts (a prefixed
+  AWS key id inside a name, a URL credential whatever its scheme separator is spelled or percent-encoded, and an
+  e-mail address, which is masked as well, though it is not a credential).
 - UNKNOWN-equivalents count as UNKNOWN everywhere the complete check reads a field (role, component, host,
   installed state, label, source repo, version, evidence and adoption refs). One shared rule
   (`scripts/ir_norm.py`): not a string, or after Unicode NFKD, removal of combining marks and variation
@@ -90,11 +93,14 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    `/proc/<n>/exe|cmdline|comm|status|stat|cwd|fd` path, or `pid` with a positive integer (no sign, no `+`/`-` before the digits,
    no `0`, `1e3`, `1.5` or `0x1f`; `pid=-1` is the no-process sentinel; `pid-1` joined by a hyphen is the one accepted spelling) plus `exe`, `cmdline`,
    `comm` or `command`, or a listing tool (`ps pgrep pidof lsof fuser top`) with `shows|lists|reports|names|found
-   process <name>`. It is refused when it carries a negation or placeholder word (`no not none never dead exited
-   unknown n/a tbd ...`), or names a unit (`systemctl`, `list-units`, `*.service|timer|socket|...`), and a tool name,
+   process <name>`. It is refused when it carries a negation, failure, non-running-state or placeholder word (`no not none never dead exited
+   defunct zombie esrch died crashed aborted failed fails n't unknown n/a tbd ...`; one list, `ir_norm.NEG_STATE`), or names a unit (`systemctl`, `list-units`, `*.service|timer|socket|...`), and a tool name,
    `pid=` with no number, or a bare keyword is not an observation. The rule is textual and conservative (a
    cmdline that itself contains `no` is refused: restate it); it does not prove the observed process is the right
-   one, the reviewer still owns that.
+   one, the reviewer still owns that. A negated statement is never counted as evidence anywhere: a prose evidence ref
+   (one with a space) carrying a negation (`not verified`, `no test`, `failed`) does not count as evidence for the
+   complete check (`missing-evidence` names the record; a warning under `partial`), and a negated side mark
+   (`not side=producer`, `side=producer failed`) is no side mark in the extractor (role UNKNOWN, claim kept).
    Scope: the `installed` rule (stated path and 64-hex sha256) is enforced by the extractor only. A
    hand-written register states `installed` on the reviewer's word, so the validator's OK line names every
    installed record taken on that word ("installed state of N record(s) taken on the declarer's word"); a
@@ -108,8 +114,12 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    components in different repos, or with distinct commits, stay separate, also when the path text is identical: rows with
    one endpoint key and a path join one record only when their stated repos (canonical) and stated commits do not differ
    (an unstated repo or commit is not a difference); otherwise each is its own record with its own record_id, and the
-   validator's duplicate-record key then includes the canonical repos and commits the record's sources state. Path-less
-   rows of one component still merge into one record (there is no path to tell them apart). Distinct commits never fuse, whatever the basis
+   validator reads two records of one family/role/host/component/path/kind as one endpoint (`duplicate-record`) unless they
+   prove they differ: both state repos (canonical) and share none, or both state commits and share none. A record that omits its
+   commit or repo is never provably different, so a pair where one side omits it is refused (a `complete` claim is REFUSED
+   naming both records), exactly as the extractor joins them. Path-less rows follow the same rule: different repos or
+   distinct commits stay separate records, and path-less rows never fuse across repos (only path-less rows of the same
+   repo and commit, or one that states neither, merge). Distinct commits never fuse, whatever the basis
    (same sha256 or same repo identity and path), directly or through a chain of other members. A path-less member beside a
    fused cluster keeps its own record_id and key (the fused record then carries its first member path, or `fused:<rows>`),
    so the extractor's output always passes the validator's duplicate-record check. The old guess (paths rooted in their

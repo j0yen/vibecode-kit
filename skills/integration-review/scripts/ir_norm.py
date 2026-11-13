@@ -5,10 +5,11 @@ sys.path). is_unknown() is the ONE definition of an UNKNOWN-equivalent: missing 
 Unicode NFKC folding, removal of format/control characters (zero-width space, BOM, joiners) and
 surrounding whitespace of any kind, lower-casing and removal of trailing/leading punctuation, one of
 the placeholders unknown, unk, ?, tbd, -, n/a, na, none, null, nil or empty.
-redact() replaces text shaped like a credential by a fixed marker; the original is never kept.
+redact() replaces text shaped like a credential (or an e-mail address) by a fixed marker; the original is never kept.
 """
 import re
 import unicodedata
+from urllib.parse import unquote
 
 PLACEHOLDERS = frozenset({"", "unknown", "unk", "?", "tbd", "-", "--", "n/a", "na", "none", "null", "nil"})
 _EDGE = " \t\r\n.,;:!'\"`()[]{}<>*_~|\\/="
@@ -22,12 +23,31 @@ _SLASHES = "\u2215\u2044\u29f8\u29f9\uff0f\u2571\u27cb\u27cd\u2216\u29f5\u29f7\u
 _DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u2043\u207b\u208b\u2e3a\u2e3b\u058a\u05be\u1806\ufe58\ufe63\uff0d\u30fc"
 CRED = re.compile(
     r"(token|secret|passw|bearer|api[_-]?key|sk-ant|sk-[A-Za-z0-9]{8}|sk_(?:live|test)_|rk_(?:live|test)_|-----BEGIN"
-    r"|authorization\s*[:=]|://[^/\s]*:[^/\s]*@|\b[a-z][a-z0-9+.-]*:_{1,3}[^/\s]*:[^/\s]*@|gh[pousr]_[A-Za-z0-9]|github_pat_|glpat-|npm_[A-Za-z0-9]{8}"
+    r"|authorization\s*[:=]|://[^/\s]*:[^/\s]*@|\b[a-z][a-z0-9+.-]{0,30}:[^A-Za-z0-9\s@]{0,6}[^/\s@:]{0,100}:[^/\s@]{0,200}@|gh[pousr]_[A-Za-z0-9]|github_pat_|glpat-|npm_[A-Za-z0-9]{8}"
     r"|pypi-[A-Za-z0-9_-]{8}|hf_[A-Za-z0-9]{8}|dop_v1_|shp(?:at|ss|ca|pa)_|SG\.[A-Za-z0-9_-]{8}|ya29\.|"
-    r"\b(?:AKIA|ASIA)[A-Z0-9]{8}|eyJ[A-Za-z0-9_-]{6}|xox[abprs]-|AIza[0-9A-Za-z_-]{8}"
+    r"(?-i:AKIA|ASIA)[A-Za-z0-9]{8}|[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,8}|eyJ[A-Za-z0-9_-]{6}|xox[abprs]-|AIza[0-9A-Za-z_-]{8}"
     r"|\b(?:key|auth|pwd|cred\w*)\s*[:=]\s*\S{6})", re.I)
 _RUN = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
 REDACTED = "[credential-shaped text redacted]"
+
+# Negation, one definition for the scripts. NEG_CORE: words that deny or fail a statement ("not verified", "no test",
+# "failed", contractions). NEG_STATE adds the process-state words that say a process is not running (an adoption
+# observation must not carry one). A word is matched whole, so "notify" or "diesel" never counts.
+_NEG_CORE = (r"no|not|none|never|without|nothing|cannot|unable|fail|fails|failed|failing|failure|unverified|unconfirmed|"
+             r"untested|nonexistent|absent|missing")
+_NEG_STATE = (r"dead|exited|gone|stopped|terminated|killed|inactive|unknown|unk|undefined|null|nil|tbd|unavailable|"
+              r"defunct|zombie|esrch|died|dies|crashed|aborted|reaped|unreachable|refused|denied|timeout")
+_CONTR = r"\b[a-z]+n['\u2019]t\b|\bcan['\u2019]t\b"
+NEG_CORE = re.compile(r"\b(?:%s)\b|%s|\bn\s*/\s*a\b" % (_NEG_CORE, _CONTR))
+NEG_STATE = re.compile(r"\b(?:%s|%s)\b|%s|\bn\s*/\s*a\b|\btimed\s+out\b" % (_NEG_CORE, _NEG_STATE, _CONTR))
+
+
+def negated(text, state=False):
+    """True when the text carries a negation word (NEG_CORE; with state=True the process-state words too)."""
+    if not isinstance(text, str):
+        return False
+    t = canon(text, slashes=True).replace("\u2019", "'")
+    return bool((NEG_STATE if state else NEG_CORE).search(t))
 
 
 def fold(v):
@@ -107,7 +127,7 @@ def _json_escapes(t):
     """Decode the JSON escapes (\\n, \\t, \\r ...) that json.dumps leaves in a printed key or count, however many
     times the text was escaped (each dumps doubles the backslashes), so an escaped newline or tab inside a token
     does not hide it."""
-    return re.sub(r"\\+([ntrbf])", lambda m: _ESC[m.group(1)], t)
+    return re.sub(r"\\{1,64}([ntrbf])", lambda m: _ESC[m.group(1)], t)
 
 
 def _plain(t):
@@ -130,7 +150,8 @@ def redact(text):
     e = re.sub(r"\s*[\r\n\t]\s*", "", e) if re.search(r"[\r\n\t]", e) else e
     n = unicodedata.normalize("NFKC", e)
     plain = _plain(e)
-    if any(_credential_view(v) for v in (t, e, n, plain)) or CRED.search(re.sub(r"\s+", "", plain)):
+    u = unquote(t)                              # a percent-encoded scheme separator ("%3A%2F%2F") hides nothing
+    if any(_credential_view(v) for v in (t, e, n, plain, u)) or CRED.search(re.sub(r"\s+", "", plain)):
         return REDACTED
     return t
 

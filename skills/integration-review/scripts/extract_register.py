@@ -5,7 +5,7 @@ Evidence fidelity rules (nothing is invented; every unstated fact stays UNKNOWN 
 - source identity is parsed only from the forms the row states, matched in full (no trailing newline or
   qualifier text): "path+sha256:<path> <64 hex>" and "commit <40 hex>"; anything else is version UNKNOWN, available false. The raw string is kept.
 - a producer/consumer/caller/adapter side is kept only when the row's own evidence states it as
-  "side=<role>" matching the claimed role and states no other side; otherwise (no mark, or contradictory
+  "side=<role>" (not negated: "not side=producer" and "side=producer failed" are no mark) matching the claimed role and states no other side; otherwise (no mark, or contradictory
   marks) role is UNKNOWN and the claim is kept in claimed_roles.
 - "loaded" is never emitted (it needs proven process adoption; a unit listing is not that). "installed"
   needs a stated path+sha256, "source-only" needs a stated path+sha256 or commit; otherwise UNKNOWN,
@@ -14,7 +14,8 @@ Evidence fidelity rules (nothing is invented; every unstated fact stays UNKNOWN 
 - a row naming no valid family becomes family UNASSIGNED (kept, counted, blocks a complete claim).
 - unparseable lines, duplicate JSON keys and non-object rows are rejected into rejected.json, never
   repaired. Lines are split on "\\n" only (U+2028/U+0085 inside a valid row are data); input must be UTF-8.
-- rows with one endpoint key merge (evidence union). Equally named endpoints with different paths fuse into ONE
+- rows with one endpoint key merge (evidence union) unless they prove different sources (stated repos or commits that
+  differ; path-less rows too: they never fuse across repos). Equally named endpoints with different paths fuse into ONE
   record (a sources list, no component qualifier) only on direct proof that they are one component: the same
   content sha256, or the same canonical repo identity (URL/scp/.git/trailing-slash spellings folded) with the same
   normalized path. Same-named records in different repos, or with distinct commits, stay separate. The fused
@@ -27,6 +28,7 @@ usage: extract_register.py [--heuristic-fusion] ENDPOINTS.jsonl OUTDIR   (exit 0
 Writes register-partial.json, register-declared-complete.json (same records, for refusal checks),
 rejected.json, extraction.json.
 """
+import bisect
 import hashlib
 import importlib.util
 import json
@@ -101,11 +103,32 @@ def evidence_text(row):
     return out
 
 
+_CLAUSE_END = re.compile(r"[;\n]|\.\s")
+
+
+def _marks(t):
+    """Side marks of one evidence ref that are stated positively. A mark is negated by a negation word among the two
+    words before it ("not side=producer", "isn't side=producer"), or one later in its clause (; newline or a full
+    stop ends the clause) that does not itself head another side mark ("side=producer failed", "side=producer is
+    not verified"; but "side=producer, not side=consumer" keeps the producer mark)."""
+    out = set()
+    for m in SIDE_MARK.finditer(t):
+        a = max([c.end() for c in _CLAUSE_END.finditer(t, 0, m.start())] or [0])
+        c = _CLAUSE_END.search(t, m.end())
+        z = c.start() if c else len(t)
+        before = t[a:m.start()].split()[-2:]
+        after = SIDE_MARK.sub(" ", re.sub(r"(?i)\b(?:not|no|never|without|isn['\u2019]t)\s+(?=side=)", " ", t[m.end():z]))
+        if _N.negated(" ".join(before)) or _N.negated(after):
+            continue
+        out.add(m.group(1))
+    return out
+
+
 def norm_role(row, ev):
     claimed = row.get("role")
     if claimed not in SIDES:
         return "UNKNOWN", None
-    marks = {m for t in ev for m in SIDE_MARK.findall(t)}
+    marks = {m for t in ev for m in _marks(t)}
     if marks == {claimed}:
         return claimed, None
     return "UNKNOWN", claimed
@@ -146,7 +169,7 @@ def convert_lines(lines, declared="partial", heuristic_fusion=False):
 
 def _build(items, declared, rejected, heuristic_fusion=False):
     stats = Counter()
-    eps = {}  # (family, role, host, component, kind, path) -> endpoint
+    index = {}  # (family, role, host, component, kind, path) -> _KeyIndex of its endpoints
     order = []
     for n, row in items:
         if not isinstance(row, dict):
@@ -165,22 +188,30 @@ def _build(items, declared, rejected, heuristic_fusion=False):
         comp = _s(row.get("component")) or "UNKNOWN"
         path = _s(row.get("path_or_command"))
         k = (fam, role, host, comp, kind, path)
-        ep = next((e for e in eps.get(k, ()) if not path or _same_endpoint(e, si)), None)
+        ix = index.get(k)
+        rid = None if si["repo"] == "UNKNOWN" else _repo_id(si["repo"])
+        ep = ix.find(rid, si.get("commit")) if ix else None
         if ep is None:
             ep = {"key": k, "rows": [], "sources": [], "evidence": [], "states": [],
-                  "claimed_roles": [], "claimed_states": []}
-            if k in eps:
+                  "claimed_roles": [], "claimed_states": [], "seen_src": set(), "seen_ev": set(), "rid": rid, "cm": si.get("commit")}
+            if ix:
                 ep["salt"] = n          # same key, different repo or commit: its own record, id salted by first row
-            eps.setdefault(k, []).append(ep)
+            else:
+                ix = index[k] = _KeyIndex()
+            ix.add(ep, len(order))
             order.append(ep)
         ep["rows"].append(n)
-        if (si["repo"], si["raw"]) not in [(s["repo"], s["raw"]) for s in ep["sources"]]:
+        ix.update(ep, rid, si.get("commit"))
+        if (si["repo"], si["raw"]) not in ep["seen_src"]:
+            ep["seen_src"].add((si["repo"], si["raw"]))
             ep["sources"].append(si)
         for t in ev:
             e = {"ref": t}
             if _s(row.get("observed_at")):
                 e["observed_at"] = row["observed_at"]
-            if e not in ep["evidence"]:
+            ek = (t, e.get("observed_at"))
+            if ek not in ep["seen_ev"]:
+                ep["seen_ev"].add(ek)
                 ep["evidence"].append(e)
         ep["states"].append(state)
         for lst, v in ((ep["claimed_roles"], claimed_role), (ep["claimed_states"], claimed_state)):
@@ -204,15 +235,15 @@ def _build(items, declared, rejected, heuristic_fusion=False):
             used = {i for idx, _ in clusters for i in idx}
             fused = []
             rest = [m for i, m in enumerate(members) if i not in used]
-            taken = {_ident(m) for m in rest}            # a record key (and so its record_id) is never shared
+            taken = {m["key"] for m in rest}             # a fused record never takes the key of a record beside it
             for n, (idx, basis) in enumerate(clusters):
                 stats["fused_multi_source_components"] += 1
                 f = _fuse([members[i] for i in idx], basis)
-                if n or _ident(f) in taken:
+                if n or f["key"] in taken:
                     paths = [members[i]["key"][5] for i in idx if members[i]["key"][5]]
                     cands = paths + ["fused:" + ",".join(str(r) for r in f["rows"])]
-                    f["key"] = next(f["key"][:5] + (c,) for c in cands if (f["key"][:5] + (c,), None) not in taken)
-                taken.add(_ident(f))
+                    f["key"] = next(f["key"][:5] + (c,) for c in cands if f["key"][:5] + (c,) not in taken)
+                taken.add(f["key"])
                 fused.append(f)
             members = fused + rest
         records += [_record(m, stats) for m in members]
@@ -224,18 +255,69 @@ def _build(items, declared, rejected, heuristic_fusion=False):
     return {"register": reg, "rejected": rejected, "stats": dict(stats)}
 
 
-def _ident(ep):
-    return (ep["key"], ep.get("salt"))
+class _KeyIndex:
+    """The endpoints of one key, found by the stated repo and commit instead of a rescan of every endpoint.
+    A row joins the FIRST endpoint (creation order) it does not provably differ from: both state a repo and the
+    canonical identities differ, or both state commits and the commits differ; unstated is not different. An
+    endpoint holds at most one canonical repo and one commit (a row joins only when it does not differ, and then
+    fills what the endpoint left unstated), so ordered buckets by (repo, commit), repo and commit answer every
+    lookup. An entry whose endpoint has since gained a repo or commit is stale for its old bucket and is dropped
+    when met."""
 
+    def __init__(self):
+        self.first = None
+        self.rc, self.r, self.c = {}, {}, {}
 
-def _same_endpoint(ep, si):
-    """A row joins an endpoint of its key unless the two PROVE different sources: both state a repo and the
-    canonical identities differ, or both state commits and the commit sets differ. Unstated is not different."""
-    rr = {_repo_id(s["repo"]) for s in ep["sources"] if s["repo"] != "UNKNOWN"}
-    if si["repo"] != "UNKNOWN" and rr and _repo_id(si["repo"]) not in rr:
-        return False
-    cs = _commits(ep)
-    return not (cs and "commit" in si and si["commit"] not in cs)
+    def __bool__(self):
+        return self.first is not None
+
+    @staticmethod
+    def _put(d, key, ep):
+        bisect.insort(d.setdefault(key, []), (ep["seq"], id(ep), ep))
+
+    def add(self, ep, seq):
+        ep["seq"] = seq
+        if self.first is None:
+            self.first = ep
+        self._put(self.rc, (ep["rid"], ep["cm"]), ep)
+        self._put(self.r, ep["rid"], ep)
+        self._put(self.c, ep["cm"], ep)
+
+    def update(self, ep, rid, commit):
+        old = (ep["rid"], ep["cm"])
+        if rid is not None and ep["rid"] is None:
+            ep["rid"] = rid
+        if commit is not None and ep["cm"] is None:
+            ep["cm"] = commit
+        if (ep["rid"], ep["cm"]) != old:
+            self._put(self.rc, (ep["rid"], ep["cm"]), ep)
+            if ep["rid"] != old[0]:
+                self._put(self.r, ep["rid"], ep)
+            if ep["cm"] != old[1]:
+                self._put(self.c, ep["cm"], ep)
+
+    @staticmethod
+    def _head(lst, live):
+        while lst and not live(lst[0][2]):
+            lst.pop(0)
+        return lst[0][2] if lst else None
+
+    def find(self, rid, commit):
+        if rid is not None and commit is not None:
+            probes = [(self.rc, (r, c), (lambda ep, r=r, c=c: (ep["rid"], ep["cm"]) == (r, c)))
+                      for r in (rid, None) for c in (commit, None)]
+        elif rid is not None:
+            probes = [(self.r, r, (lambda ep, r=r: ep["rid"] == r)) for r in (rid, None)]
+        elif commit is not None:
+            probes = [(self.c, c, (lambda ep, c=c: ep["cm"] == c)) for c in (commit, None)]
+        else:
+            return self.first
+        best = None
+        for d, key, live in probes:
+            ep = self._head(d.get(key, []), live)
+            if ep is not None and (best is None or ep["seq"] < best["seq"]):
+                best = ep
+        return best
 
 
 def _repo_id(repo):
@@ -269,39 +351,75 @@ def _positive_clusters(members):
             parent[i] = parent[parent[i]]
             i = parent[i]
         return i
-    basis = {}
     sha = [{s["sha256"] for s in m["sources"] if "sha256" in s} for m in members]
     repos = [{_repo_id(s["repo"]) for s in m["sources"] if s["repo"] != "UNKNOWN"} for m in members]
     paths = [_path_id(m["key"][5]) for m in members]
-    # per cluster root: the distinct commit sets of its members that state commits. Two clusters hold
-    # distinct commits exactly when both are non-empty and they are not one and the same single set.
+    # per cluster root: its commit sets (members that state commits). A cluster holds at most one set (two
+    # clusters with distinct sets never unite), so a cluster is empty or has exactly one set.
     csets = [{frozenset(_commits(m))} if _commits(m) else set() for m in members]
+
+    def union(i, j):
+        ri, rj = find(i), find(j)
+        if ri == rj:
+            return
+        ca, cb = csets[ri], csets[rj]
+        if ca and cb and ca != cb:
+            return
+        parent[ri] = rj
+        csets[rj] = ca | cb
+
+    # Related members are met through buckets (one per content sha256, one per canonical repo + normalized path),
+    # not by a pairwise scan; the related pairs are tried in (i, j) order, so the clusters are those of the
+    # pairwise rule. A member already in a cluster that has been through all of a bucket's later members adds
+    # nothing there: every later member was joined to that cluster or is refused for good (cluster commit sets
+    # never change once stated), so it is skipped for that bucket.
+    bucket_of, hows, mem = {}, [], []
+    mine = [[] for _ in members]
     for i in range(len(members)):
-        for j in range(i + 1, len(members)):
-            how = None
-            if sha[i] & sha[j]:
-                how = "same-content-sha256"
-            elif repos[i] & repos[j] and paths[i] and paths[i] == paths[j]:
-                how = "same-repo-identity-and-path"
-            if how:
-                ri, rj = find(i), find(j)
-                ca, cb = csets[ri], csets[rj]
-                if ri == rj:
-                    basis[ri] = how     # already one cluster: its members were checked when they were joined
-                    continue
-                if ca and cb and not (len(ca) == 1 and ca == cb):
-                    continue
-                parent[ri] = rj
-                csets[rj] = ca | cb
-                basis[rj] = how
+        keys = [("sha", h) for h in sha[i]]
+        if paths[i]:
+            keys += [("rp", r, paths[i]) for r in repos[i]]
+        for key in keys:
+            if key not in bucket_of:
+                bucket_of[key] = len(mem)
+                mem.append([])
+                hows.append("same-content-sha256" if key[0] == "sha" else "same-repo-identity-and-path")
+            mem[bucket_of[key]].append(i)
+            mine[i].append(bucket_of[key])
+    seen_roots = [set() for _ in mem]
+    for i in range(len(members)):
+        cands, used = {}, []
+        for b in mine[i]:
+            seen_roots[b] = {find(r) for r in seen_roots[b]}
+            if find(i) in seen_roots[b]:
+                continue
+            used.append(b)
+            lst = mem[b]
+            for j in lst[bisect.bisect_right(lst, i):]:
+                if hows[b] == "same-content-sha256" or j not in cands:
+                    cands[j] = hows[b]
+        for j in sorted(cands):
+            union(i, j)
+        for b in used:
+            seen_roots[b].add(find(i))
+    # label: the basis of the last related pair, in (i, j) order, inside the final cluster (sha beats repo+path)
+    last = {}
+    for b, lst in enumerate(mem):
+        by_root = {}
+        for i in lst:
+            by_root.setdefault(find(i), []).append(i)
+        for root, g in by_root.items():
+            if len(g) > 1:
+                cand = (g[-2], g[-1], hows[b] == "same-content-sha256", hows[b])
+                if root not in last or cand[:3] > last[root][:3]:
+                    last[root] = cand
     out = {}
     for i in range(len(members)):
         out.setdefault(find(i), []).append(i)
     res = []
     for root, idx in out.items():
         if len(idx) > 1:
-            hows = {basis.get(k) for k in (find(i) for i in idx)} - {None}
-            res.append((idx, "same-content-sha256" if "same-content-sha256" in hows else "same-repo-identity-and-path"))
+            res.append((idx, last[root][3] if root in last else "same-repo-identity-and-path"))
     return res
 
 
@@ -335,13 +453,18 @@ def _one_component(members):
 def _fuse(members, basis):
     out = {"key": members[0]["key"][:5] + (None,), "rows": [], "sources": [], "evidence": [], "states": [],
            "claimed_roles": [], "claimed_states": [], "fused": True, "fusion_basis": basis}
+    seen = {"evidence": set(), "claimed_roles": set(), "claimed_states": set()}
     for m in members:
         out["rows"] += m["rows"]
         for s in m["sources"]:
             s = dict(s, path_or_command=m["key"][5]) if m["key"][5] else dict(s)
             out["sources"].append(s)
         for key in ("evidence", "claimed_roles", "claimed_states"):
-            out[key] += [x for x in m[key] if x not in out[key]]
+            for x in m[key]:
+                xk = json.dumps(x, sort_keys=True)
+                if xk not in seen[key]:
+                    seen[key].add(xk)
+                    out[key].append(x)
         out["states"] += m["states"]
     return out
 

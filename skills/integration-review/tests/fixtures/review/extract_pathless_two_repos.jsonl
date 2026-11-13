@@ -1,0 +1,2 @@
+{"family": "IF001", "role": "producer", "host": "h", "component": "svc-a", "interface_kind": "http", "source_repo": "example/one", "source_identity": "commit 1111111111111111111111111111111111111111", "installed_state": "source-only", "evidence": "side=producer synthetic row one"}
+{"family": "IF001", "role": "producer", "host": "h", "component": "svc-a", "interface_kind": "http", "source_repo": "example/two", "source_identity": "commit 2222222222222222222222222222222222222222", "installed_state": "source-only", "evidence": "side=producer synthetic row two"}

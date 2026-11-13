@@ -1,0 +1,123 @@
+{
+ "schema_version": 1,
+ "coverage": {
+  "declared": "all-interfaces-complete",
+  "declared_counts": {
+   "records": 999
+  }
+ },
+ "families": [
+  {
+   "id": "IF001",
+   "registered_callers": [
+    "cli-a"
+   ]
+  }
+ ],
+ "records": [
+  {
+   "record_id": "r1",
+   "family": "IF001",
+   "role": "producer",
+   "host": "ryzen7",
+   "component": "svc-a",
+   "interface_kind": "event",
+   "source_identity": {
+    "version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "available": true,
+    "captured_at": "2026-11-12T09:00:00Z",
+    "repo": "o/r",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "raw": "commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "installed_state": "source-only",
+   "label": "positive-control",
+   "evidence": [
+    {
+     "ref": "file:x#1",
+     "observed_at": "2026-11-12T11:00:00Z"
+    }
+   ],
+   "owner_row": null,
+   "path": "a.py",
+   "path_or_command": "a.py"
+  },
+  {
+   "record_id": "r2",
+   "family": "IF001",
+   "role": "producer",
+   "host": "ryzen7",
+   "component": "svc-a",
+   "interface_kind": "event",
+   "source_identity": {
+    "version": "v1",
+    "available": true,
+    "captured_at": "2026-11-12T09:00:00Z",
+    "repo": "o/r"
+   },
+   "installed_state": "installed",
+   "label": "positive-control",
+   "evidence": [
+    {
+     "ref": "file:x#1",
+     "observed_at": "2026-11-12T11:00:00Z"
+    }
+   ],
+   "owner_row": null,
+   "path": "a.py",
+   "path_or_command": "a.py"
+  },
+  {
+   "record_id": "R2",
+   "family": "IF001",
+   "role": "consumer",
+   "host": "ryzen7",
+   "component": "svc-b",
+   "interface_kind": "event",
+   "source_identity": {
+    "repo": "j0yen/x",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "bin/x",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": "1.0.0",
+    "captured_at": "2026-11-12T10:00:00Z",
+    "available": true
+   },
+   "installed_state": "installed",
+   "label": "positive-control",
+   "evidence": [
+    {
+     "ref": "file:x#1",
+     "observed_at": "2026-11-12T11:00:00Z"
+    }
+   ],
+   "owner_row": null
+  },
+  {
+   "record_id": "R3",
+   "family": "IF001",
+   "role": "caller",
+   "host": "ryzen7",
+   "component": "cli-a",
+   "interface_kind": "event",
+   "source_identity": {
+    "repo": "j0yen/x",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "bin/x",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": "1.0.0",
+    "captured_at": "2026-11-12T10:00:00Z",
+    "available": true
+   },
+   "installed_state": "installed",
+   "label": "positive-control",
+   "evidence": [
+    {
+     "ref": "file:x#1",
+     "observed_at": "2026-11-12T11:00:00Z"
+    }
+   ],
+   "owner_row": null
+  }
+ ]
+}
