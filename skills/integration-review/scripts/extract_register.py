@@ -109,7 +109,8 @@ _CLAUSE_END = re.compile(r"[;\n]|\.\s")
 def _marks(t):
     """Side marks of one evidence ref that are stated positively. A mark is negated, as a class and at any distance,
     by a negation or doubt word (ir_norm NEG_CORE and NEG_DOUBT: "no evidence that side=producer", "never really
-    established that side=producer", "unverified: side=producer", "side=producer is false") between the start of its
+    established that side=producer", "unverified: side=producer", "side=producer is false") or a hedge or alternative (ir_norm.hedged:
+    "maybe side=producer", "side=producer?", "side=producer or consumer") between the start of its
     clause and the mark, counted from the end of the previous side mark, or one after it up to the end of its clause
     (; newline or a full stop ends the clause). A negation that heads another side mark does not reach this one
     ("side=producer, not side=consumer" keeps the producer mark); a zero count of failures is no negation."""
@@ -122,7 +123,7 @@ def _marks(t):
         before = t[max(a, prev_end):m.start()]
         prev_end = m.end()
         after = SIDE_MARK.sub(" ", re.sub(r"(?i)\b(?:not|no|never|without|isn['\u2019]t)\s+(?=side=)", " ", t[m.end():z]))
-        if _N.negated(before, doubt=True) or _N.negated(after, doubt=True):
+        if _N.negated(before, doubt=True) or _N.negated(after, doubt=True) or _N.hedged(before) or _N.hedged(after):
             continue
         out.add(m.group(1))
     return out

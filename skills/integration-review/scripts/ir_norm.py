@@ -77,6 +77,28 @@ def negated(text, state=False, doubt=False):
     return bool((NEG_STATE if state else NEG_CORE).search(t))
 
 
+# HEDGE (hedged(): the one rule for a side mark): a clause that doubts or alternates its claim does not state it. Three kinds: (1)
+# a hedge word, read by its STEM so a derived form is caught too (probably, probability; any -edly adverb such as reportedly; presumed, presumably; supposed, supposedly;
+# a modal verb might / could / would / should / may; "i think", "i guess", "sort of", "not sure", "needs verification"); (2) a
+# question mark that ends a word ("side=producer?"; "a?b=1" in a URL is no hedge); (3) an ALTERNATIVE or a second side: a
+# connective (or, and, nor, either, vs, / & + |) beside another side word ("side=producer or consumer"). English only; an
+# unlisted wording of doubt is read as plain (SKILL.md states the limit).
+_SIDE_WORDS = r"(?:producer|consumer|caller|adapter)s?"
+_HEDGE = re.compile(
+    r"\b(?:(?:probab|possib|perhap|maybe|mayb|presum|apparent|seem|appear|suppos|alleg|reput|purport|ostensib|conceiv|plausib|putativ|"
+    r"arguab|likel|unlikel|assum|tentativ|hopeful|guess|suspect|believ|roughl|approx|might|could|would|should|iirc|afaik|imo|kinda|sorta)\w*"
+    r"|\w+edly|may(?!\s+\d)|ish|(?:kind|sort) of|i think|(?:need|needs|needed|to be|to) (?:verif|confirm|check|valid)\w*"
+    r"|not (?:sure|certain|clear|confirmed))\b"
+    r"|\?(?![\w=&/#.%:-])"
+    r"|(?:\b(?:or|and|nor|vs\.?|versus|either|plus)\b|[/&+|])\s*(?:the |a )?(?:side\s*[=:]?\s*)?" + _SIDE_WORDS + r"\b"
+    r"|\b" + _SIDE_WORDS + r"\s*(?:\b(?:or|and|nor|vs\.?|versus|plus)\b|[/&+|])")
+
+
+def hedged(text):
+    """True when the text hedges or alternates the claim it belongs to (see _HEDGE)."""
+    return isinstance(text, str) and bool(_HEDGE.search(canon(text, slashes=True)))
+
+
 def fold(v):
     """Comparable form of a string: NFKC, no format/control/space characters at the edges, lower case."""
     t = unicodedata.normalize("NFKC", v)
@@ -145,7 +167,8 @@ _NE_PLACEHOLDER = frozenset(
     "unknown unk unknowable unverifiable unverified undetermined undefined unspecified unstated unavailable unconfirmed "
     "unresolved null nil none nothing nada na tbd tba tbc todo fixme missing absent empty blank vacant pending placeholder "
     "dummy fake stub mock lorem ipsum xxx draft incomplete unfinished unnamed unset notset undone tentative provisional "
-    "later unclear inconclusive dunno redacted withheld awaiting await waiting".split())
+    "later unclear inconclusive dunno redacted withheld awaiting await waiting unrecorded unreported unlogged undocumented "
+    "unmeasured unassigned".split())
 _NE_FILLER = frozenset(
     "status result results evidence value values source owner output data answer check reviewer review reviewed "
     "is are was were be been being the a an of for to this that it its still yet currently now not "
@@ -210,6 +233,11 @@ _NUMBER = re.compile(r"[#v]?[0-9][0-9:.,/-]*")
 # any other word it is a date, a count, a version or an ordinal ("since 2026-11-12", "after 3 retries", "sprint 14") beside a
 # STATE word (unknown, pending, tbd ...), and a fact about the artifact beside a descriptor word only ("stub took 3 retries").
 _LOCATION_NOUNS = frozenset("line lines row rows col cols column columns page pages step steps offset position index char".split())
+# Beside a STATE word a result ("unknown returned 200", "tbd 3 passed"), a result count and any location other than these four is
+# decoration too unless the ref also holds a content word of its own (_has_content): a state word plus only a number or a count
+# says nothing. The four singular nouns are the one tolerated exception
+# ("unknown line 3": a stated position, pinned since the DS1 ruling of re-review 11); "not known line 12" is the same shape.
+_STATE_LOCATION = frozenset("line row page step".split())
 _RESULT_BEFORE = frozenset("returns returned return got exit code http https errno rc".split())
 _RESULT_AFTER = frozenset("passed passing failed failing fail fails errors error warnings warning tests test assertions ok "
                           "succeeded skipped failures".split())
@@ -341,18 +369,33 @@ def _commit_id(c):
     return t
 
 
-_PREPOSITIONS = frozenset("for of from to onto on in by at with".split())
+_PREPOSITIONS = frozenset("for of from to onto on in by at as with".split())
+# THE DIRECTION OF A RELATION (the one rule): a relation word then in / by / at / as points AT the sha that follows ("fixed in
+# <hex>", "merged at <hex>", "reverted by <hex>", "superseded by <hex>", "replaced by <hex>": the fixing, merging, reverting
+# commit is the sha itself); bare, or with of / for / from / to / onto / on / with, it points to a different commit ("parent
+# <hex>", "fix <hex>", "cherry-picked from <hex>", "hotfix for <hex>"). The bare forms are ambiguous and read as different.
+_POINTS_AT = frozenset("in by at as".split())
 _LABEL_WORDS = frozenset(_LABELS.split("|"))
 
 
 def _relates(before):
-    """True when the words just BEFORE a hex name a relation to it (_RELATION, optionally followed by a preposition or a label word:
-    "parent <hex>", "revert commit <hex>", "cherry-picked from <hex>", "hotfix for <hex>"): the text is about another commit. A word
-    after the hex is the commit's own subject ("<hex> Revert foo", "<hex> fix typo") and leaves the text the sha."""
+    """True when the words just BEFORE a hex name a relation that points AWAY from it (_RELATION, optionally followed by a label
+    word and a preposition other than in / by / at / as: "parent <hex>", "revert commit <hex>", "cherry-picked from <hex>", "hotfix
+    for <hex>"): the text is about another commit. A relation that points AT the hex ("fixed in <hex>") or a word after the hex ("<hex>
+    Revert foo", "<hex> fix typo") leaves the text the sha."""
     toks = [w for w in (x.strip(_TOK_EDGE).lower() for x in before.split()) if w]
+    prep = None
     while toks and (toks[-1] in _PREPOSITIONS or toks[-1] in _LABEL_WORDS):
-        toks.pop()
-    return bool(toks) and toks[-1] in _RELATION
+        w = toks.pop()
+        if w in _PREPOSITIONS:
+            prep = w                                  # the last one popped stands next to the relation word
+    return bool(toks) and toks[-1] in _RELATION and prep not in _POINTS_AT
+
+
+def _has_content(t):
+    """True when the text holds a word that is no state, framing, location or result word (a statement about something)."""
+    return any(len(w) > 1 and w not in _NE_PLACEHOLDER and w not in _NE_FILLER and w not in _LOCATION_NOUNS
+               and w not in _RESULT_BEFORE and w not in _RESULT_AFTER for w in re.findall(r"[a-z]+", t))
 
 
 def _anchored(t):
@@ -380,11 +423,16 @@ def _anchored(t):
     stated = bool(_PH_PHRASE.search(t)) or any(w in _NE_STATE for w in re.findall(r"[a-z]+", t))
     for i, tok in enumerate(toks):
         core = tok.strip(_EDGE + "?-")
-        if _NUMBER.fullmatch(core) and (prev in _LOCATION_NOUNS or prev in _RESULT_BEFORE
-                                        or (i + 1 < len(toks) and (re.findall(r"[a-z]+", toks[i + 1]) or [""])[0] in _RESULT_AFTER)
-                                        or (not stated and prev is not None and prev not in _NE_PLACEHOLDER
-                                            and prev not in _NE_FILLER and len(prev) > 1)):
-            return True
+        if _NUMBER.fullmatch(core):
+            nxt = (re.findall(r"[a-z]+", toks[i + 1]) or [""])[0] if i + 1 < len(toks) else ""
+            if stated:                      # a state word beside a number: the pinned location nouns anchor it; a result or another
+                if prev in _STATE_LOCATION:  # location only with a content word of its own ("null handling test passes: 3 passed")
+                    return True
+                if (prev in _LOCATION_NOUNS or prev in _RESULT_BEFORE or nxt in _RESULT_AFTER) and _has_content(t):
+                    return True
+            elif (prev in _LOCATION_NOUNS or prev in _RESULT_BEFORE or nxt in _RESULT_AFTER
+                  or (prev is not None and prev not in _NE_PLACEHOLDER and prev not in _NE_FILLER and len(prev) > 1)):
+                return True
         m = re.findall(r"[a-z]+", core)
         if m:
             prev = m[-1]
