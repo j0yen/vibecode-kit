@@ -14,21 +14,40 @@ Evidence fidelity rules (nothing is invented; every unstated fact stays UNKNOWN 
 - a row naming no valid family becomes family UNASSIGNED (kept, counted, blocks a complete claim).
 - unparseable lines, duplicate JSON keys and non-object rows are rejected into rejected.json, never
   repaired. Lines are split on "\\n" only (U+2028/U+0085 inside a valid row are data); input must be UTF-8.
-- rows with one endpoint key merge (evidence union); rows of one component fuse into ONE record with a
-  sources list (no component qualifier) only on positive evidence of one component: each member row's
-  path is rooted in its own stated repo ("<repo>/..."), each has a stated identity (not UNKNOWN), and the
-  identities differ. Equal names alone stay separate endpoints.
+- rows with one endpoint key merge (evidence union); rows with an equal name fuse into ONE record with a
+  sources list (no component qualifier) by a HEURISTIC that does not prove they are one component: each member
+  row's path, normalized (".." and "." resolved, no leading "/", no "//", repo without a trailing "/"), is rooted in its own stated repo
+  ("<repo>/..."), each has a stated identity (not UNKNOWN-equivalent), and the identities differ. The fused
+  record carries fusion_basis; every source is kept, so nothing is lost if the guess is wrong. Equal names
+  with any other shape stay separate endpoints. UNKNOWN-equivalents (scripts/ir_norm.py) in component,
+  host, repo, path and evidence refs are treated as not stated.
 - labels stay "unclassified"; effect_state/replay are not emitted.
 usage: extract_register.py ENDPOINTS.jsonl OUTDIR   (exit 0 ok, 3 if any row was rejected, 2 unreadable input or output)
 Writes register-partial.json, register-declared-complete.json (same records, for refusal checks),
 rejected.json, extraction.json.
 """
 import hashlib
+import importlib.util
 import json
 import os
+import posixpath
 import re
 import sys
 from collections import Counter
+
+
+def _load_norm():
+    m = sys.modules.get("ir_norm")
+    if m is None:
+        spec = importlib.util.spec_from_file_location("ir_norm", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ir_norm.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        sys.modules["ir_norm"] = m
+    return m
+
+
+_N = _load_norm()
+is_unknown, redact = _N.is_unknown, _N.redact
 
 FAMILY = re.compile(r"^IF[0-9]{3}$")
 UNASSIGNED = "UNASSIGNED"
@@ -44,13 +63,13 @@ def _pairs(pairs):
     seen = set()
     for k, _ in pairs:
         if k in seen:
-            raise ValueError(f"duplicate JSON key {k!r}")
+            raise ValueError(f"duplicate JSON key {redact(k)!r}")
         seen.add(k)
     return dict(pairs)
 
 
 def _s(v):
-    return v if isinstance(v, str) and v.strip() else None
+    return v if isinstance(v, str) and not is_unknown(v) else None
 
 
 def parse_identity(row):
@@ -118,7 +137,9 @@ def convert_lines(lines, declared="partial"):
         try:
             items.append((n, json.loads(line, object_pairs_hook=_pairs)))
         except ValueError as e:
-            rejected.append({"line": n, "reason": f"not JSON: {e}"})
+            rejected.append({"line": n, "reason": f"not JSON: {redact(e)}"})
+        except RecursionError:
+            rejected.append({"line": n, "reason": "not JSON: nested too deeply to parse"})
     return _build(items, declared, rejected)
 
 
@@ -137,7 +158,8 @@ def _build(items, declared, rejected):
         role, claimed_role = norm_role(row, ev)
         si = parse_identity(row)
         state, claimed_state = norm_state(row, si)
-        kind = row.get("interface_kind") if row.get("interface_kind") in KINDS else "other"
+        kind = row.get("interface_kind")
+        kind = kind if isinstance(kind, str) and kind in KINDS else "other"
         host = _s(row.get("host")) or "UNKNOWN"
         comp = _s(row.get("component")) or "UNKNOWN"
         path = _s(row.get("path_or_command"))
@@ -183,13 +205,25 @@ def _build(items, declared, rejected):
     return {"register": reg, "rejected": rejected, "stats": dict(stats)}
 
 
+def _rooted(path, repo):
+    """path, with "." and ".." resolved, lies inside repo/ (never absolute, never climbing out)."""
+    if not isinstance(path, str) or not path or path.startswith("/"):
+        return False
+    if repo != repo.strip() or repo.endswith("/") or "//" in path or "//" in repo:
+        return False                        # a non-canonical spelling is not read as rooted
+    r = posixpath.normpath(repo)
+    n = posixpath.normpath(path)
+    return r not in ("", ".", "..") and not r.startswith(("/", "../")) and n.startswith(r + "/")
+
+
 def _one_component(members):
-    """Positive evidence that differently-sourced endpoints are one component: every member's path is
-    rooted in its own stated repo and carries a stated identity, and the identities are distinct."""
+    """Heuristic (it does not prove it) that differently-sourced, equally named endpoints are one component:
+    every member's normalized path is rooted in its own stated repo and carries a stated identity, and the
+    identities are distinct."""
     vers = []
     for m in members:
         path, repo = m["key"][5], next(iter({s["repo"] for s in m["sources"]}))
-        if not path or not path.startswith(repo + "/"):
+        if not _rooted(path, repo):
             return False
         v = {s["version"] for s in m["sources"]}
         if len(v) != 1 or "UNKNOWN" in v:
@@ -229,6 +263,8 @@ def _record(ep, stats):
     else:
         rec["source_identity"] = srcs[0]
     rec.update(installed_state=state, label="unclassified", evidence=ep["evidence"], source_rows=ep["rows"])
+    if ep.get("fused"):
+        rec["fusion_basis"] = "same-name-and-repo-rooted-paths-heuristic"
     if ep["claimed_roles"]:
         rec["claimed_roles"] = ep["claimed_roles"]
         stats["roles_claimed_not_evidenced"] += 1
@@ -248,7 +284,7 @@ def main(argv):
         with open(argv[1], encoding="utf-8", newline="") as f:
             lines = f.read().split("\n")
     except (OSError, ValueError) as e:
-        print(f"UNKNOWN: input unreadable: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"UNKNOWN: input unreadable: {type(e).__name__}: {redact(e)}", file=sys.stderr)
         return 2
     out = convert_lines(lines, "partial")
     try:

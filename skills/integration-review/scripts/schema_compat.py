@@ -18,6 +18,9 @@ T = tightened constraint, e.g. enum value removed, type narrowed, pattern added,
   additionalProperties true->false: consumer-first incompatible; false->true: producer-first incompatible
   items constraint added = T, removed = L (an empty items schema is no constraint); a changed items form
   (schema vs tuple list) is incompatible; enum values compare by JSON type (1 differs from true, 1 equals 1.0)
+  type present in only one schema: added = T, removed = L; $ref retargeted (or swapped with an inline schema):
+  the two targets are compared, an unresolvable target (not "#/..." in its own document) is UNDETERMINED;
+  additionalProperties as a schema: open->schema = T, schema->open = L, schema->schema compared;
   incomparable type change, unsupported keyword in OLD or NEW (so a removed one too): incompatible; a pattern that changed text is
   UNDETERMINED (regexes are not compared) and is never reported compatible.
 Pure comparison of two files; nothing is executed or fetched.
@@ -25,8 +28,23 @@ usage: schema_compat.py OLD.json NEW.json [--direction D] [--consumer C]
 exit 0 compatible, 1 not compatible, 2 usage or unreadable input (missing, not UTF-8, bad JSON, duplicate
 key, not an object); rc 1 is never used for an unreadable input.
 """
+import importlib.util
 import json
+import os
 import sys
+
+
+def _load_norm():
+    m = sys.modules.get("ir_norm")
+    if m is None:
+        spec = importlib.util.spec_from_file_location("ir_norm", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ir_norm.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        sys.modules["ir_norm"] = m
+    return m
+
+
+redact = _load_norm().redact
 
 KNOWN = {"$schema", "title", "description", "type", "enum", "required", "properties",
          "additionalProperties", "items", "pattern", "minLength", "minItems", "definitions", "$ref"}
@@ -38,7 +56,7 @@ def _pairs(pairs):
     seen = set()
     for k, _ in pairs:
         if k in seen:
-            raise ValueError(f"duplicate JSON key {k!r}")
+            raise ValueError(f"duplicate JSON key {redact(k)!r}")
         seen.add(k)
     return dict(pairs)
 
@@ -58,6 +76,57 @@ def _constrains(it):
 
 def _types(v):
     return set(v) if isinstance(v, list) else {v}
+
+
+def _num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _shape(n):
+    """Refuse (ValueError -> rc 2) a node whose keywords have a shape this comparison cannot read."""
+    for k in ("properties", "definitions"):
+        if k in n and not (isinstance(n[k], dict) and all(isinstance(x, dict) or isinstance(x, bool) for x in n[k].values())):
+            raise ValueError(f"{k} is not an object of schemas")
+    if "required" in n and not (isinstance(n["required"], list) and all(isinstance(x, str) for x in n["required"])):
+        raise ValueError("required is not a list of names")
+    if "enum" in n and not isinstance(n["enum"], list):
+        raise ValueError("enum is not a list")
+    if "type" in n and not (isinstance(n["type"], str) or (isinstance(n["type"], list) and all(isinstance(x, str) for x in n["type"]))):
+        raise ValueError("type is not a string or list of strings")
+    for k in ("minLength", "minItems"):
+        if k in n and not _num(n[k]):
+            raise ValueError(f"{k} is not a number")
+    if "pattern" in n and not isinstance(n["pattern"], str):
+        raise ValueError("pattern is not a string")
+    if "$ref" in n and not isinstance(n["$ref"], str):
+        raise ValueError("$ref is not a string")
+    if "items" in n and not isinstance(n["items"], (dict, list)):
+        raise ValueError("items is neither a schema nor a list")
+
+
+def _ap(n):
+    """open | closed | schema for additionalProperties."""
+    v = n.get("additionalProperties", True)
+    if v is True or v == {}:
+        return "open"
+    if v is False:
+        return "closed"
+    if isinstance(v, dict):
+        return "schema"
+    raise ValueError("additionalProperties is neither boolean nor schema")
+
+
+def _resolve(root, ref):
+    """Local JSON-pointer target of a "#/..." $ref inside its own document, else None."""
+    if not isinstance(ref, str) or not (ref == "#" or ref.startswith("#/")):
+        return None
+    node = root
+    for part in [p for p in ref[2:].split("/") if p] if ref != "#" else []:
+        part = part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node if isinstance(node, dict) else None
 
 
 def _one(kind, d, closed, ctx):
@@ -94,7 +163,7 @@ def _classify(res, path, change, kind, direction, consumer, ctx=None):
         verdict, reason = "undetermined", "regex text changed; direction cannot be decided mechanically"
     elif kind in ("removed_def",):
         verdict, reason = "incompatible", "definition removed"
-    elif kind == "added_def":
+    elif kind in ("added_def", "note"):
         verdict, reason = "compatible", ""
     else:
         ds = ("producer-first", "consumer-first") if direction == "both" else (direction,)
@@ -113,14 +182,29 @@ def _classify(res, path, change, kind, direction, consumer, ctx=None):
         res["additions"].append(text)
 
 
-def _walk(old, new, path, res, direction, consumer):
+def _walk(old, new, path, res, direction, consumer, depth=0):
     if not isinstance(old, dict) or not isinstance(new, dict):
+        if old != new or isinstance(old, dict) != isinstance(new, dict):
+            raise ValueError("subschema is not an object on both sides")
         return
+    _shape(old)
+    _shape(new)
     cl = lambda *a, **k: _classify(res, path, *a, direction=direction, consumer=consumer, **k)  # noqa: E731
     for k in sorted(set(old) | set(new)):
         if k not in KNOWN:
             where = "old and new" if k in old and k in new else ("old" if k in old else "new")
             cl(f"unsupported keyword {k!r} in {where}", "unsupported")
+    orf, nrf = old.get("$ref"), new.get("$ref")
+    if orf != nrf:
+        oo = _resolve(res["_roots"][0], orf) if orf is not None else old
+        nn = _resolve(res["_roots"][1], nrf) if nrf is not None else new
+        if oo is None or nn is None or depth >= 16:
+            cl(f"$ref changed {orf!r} -> {nrf!r}; a target is not resolvable in its own document", "undetermined")
+        else:
+            before = len(res["classified"])
+            _walk(oo, nn, f"{path}/$ref", res, direction, consumer, depth + 1)
+            if len(res["classified"]) == before:
+                cl(f"$ref retargeted {orf!r} -> {nrf!r}; the targets are equivalent", "note")
     if "type" in old and "type" in new:
         o, n = _types(old["type"]), _types(new["type"])
         if n > o:
@@ -129,6 +213,10 @@ def _walk(old, new, path, res, direction, consumer):
             cl(f"type narrowed {old['type']!r} -> {new['type']!r}", "tighten")
         elif n != o:
             cl(f"type changed {old['type']!r} -> {new['type']!r}", "incomparable")
+    elif "type" in new:
+        cl(f"type constraint added {new['type']!r}", "tighten")
+    elif "type" in old:
+        cl(f"type constraint removed (was {old['type']!r})", "loosen")
     if "enum" in old and "enum" in new:
         oe, ne = {_canon(v) for v in old["enum"]}, {_canon(v) for v in new["enum"]}
         for v in new["enum"]:
@@ -160,12 +248,15 @@ def _walk(old, new, path, res, direction, consumer):
     for r in old.get("required", []):
         if r not in new.get("required", []):
             cl(f"{r!r} no longer required", "req_rm")
-    oc = old.get("additionalProperties", True) is False
-    nc = new.get("additionalProperties", True) is False
-    if not oc and nc:
-        cl("additionalProperties tightened", "ap_tight")
-    elif oc and not nc:
-        cl("additionalProperties loosened", "ap_loose")
+    oa, na = _ap(old), _ap(new)
+    oc, nc = oa == "closed", na == "closed"
+    if oa == na == "schema":
+        _walk(old["additionalProperties"], new["additionalProperties"], f"{path}/additionalProperties",
+              res, direction, consumer, depth + 1)
+    elif (oa, na) in (("open", "closed"), ("open", "schema"), ("schema", "closed")):
+        cl(f"additionalProperties tightened ({oa} -> {na})", "ap_tight")
+    elif (oa, na) in (("closed", "open"), ("closed", "schema"), ("schema", "open")):
+        cl(f"additionalProperties loosened ({oa} -> {na})", "ap_loose")
     ctx = {"old_closed": oc, "new_closed": nc}
     for section in ("properties", "definitions"):
         op, np_ = old.get(section, {}), new.get(section, {})
@@ -173,17 +264,18 @@ def _walk(old, new, path, res, direction, consumer):
             if name not in np_:
                 cl(f"{section}/{name} removed", "prop_rm" if section == "properties" else "removed_def", ctx=ctx)
             else:
-                _walk(op[name], np_[name], f"{path}/{section}/{name}", res, direction, consumer)
+                _walk(op[name], np_[name], f"{path}/{section}/{name}", res, direction, consumer, depth + 1)
         for name in np_:
             if name not in op:
                 cl(f"{section}/{name} added", "prop_add" if section == "properties" else "added_def", ctx=ctx)
                 _walk({}, np_[name], f"{path}/{section}/{name}", {"classified": [], "breaking": [],
-                                                                    "additions": [], "undetermined": []},
-                      direction, consumer)
+                                                                    "additions": [], "undetermined": [],
+                                                                    "_roots": res["_roots"]},
+                      direction, consumer, depth + 1)
     oi, ni = old.get("items"), new.get("items")
     if isinstance(oi, dict) and isinstance(ni, dict):
         if oi and ni:
-            _walk(oi, ni, f"{path}/items", res, direction, consumer)
+            _walk(oi, ni, f"{path}/items", res, direction, consumer, depth + 1)
         elif ni:
             cl("items constraint added", "tighten")
         elif oi:
@@ -200,8 +292,9 @@ def _walk(old, new, path, res, direction, consumer):
 def compare(old, new, direction="both", consumer="closed"):
     if direction not in DIRECTIONS or consumer not in CONSUMERS:
         raise ValueError(f"direction must be one of {DIRECTIONS}, consumer one of {CONSUMERS}")
-    res = {"classified": [], "breaking": [], "additions": [], "undetermined": []}
+    res = {"classified": [], "breaking": [], "additions": [], "undetermined": [], "_roots": (old, new)}
     _walk(old, new, "#", res, direction, consumer)
+    del res["_roots"]
     ok = not res["breaking"] and not res["undetermined"]
     return {"compatible": ok, "additive": ok and bool(res["additions"]), "direction": direction,
             "consumer": consumer, **res}
@@ -228,7 +321,7 @@ def main(argv):
             with open(fn, encoding="utf-8") as fh:
                 doc = json.load(fh, object_pairs_hook=_pairs)
         except (OSError, ValueError, RecursionError) as e:
-            print(f"UNKNOWN: schema unreadable: {fn}: {type(e).__name__}: {e}", file=sys.stderr)
+            print(f"UNKNOWN: schema unreadable: {redact(fn)}: {type(e).__name__}: {redact(e)}", file=sys.stderr)
             return 2
         if not isinstance(doc, dict):
             print(f"UNKNOWN: schema unreadable: {fn}: top level is {type(doc).__name__}, not an object", file=sys.stderr)
@@ -236,8 +329,8 @@ def main(argv):
         docs.append(doc)
     try:
         res = compare(docs[0], docs[1], opts["--direction"], opts["--consumer"])
-    except (TypeError, AttributeError, KeyError, ValueError, RecursionError) as e:
-        print(f"UNKNOWN: schema shape not comparable ({type(e).__name__})", file=sys.stderr)
+    except (TypeError, AttributeError, LookupError, ValueError, RecursionError) as e:
+        print(f"UNKNOWN: schema shape not comparable ({type(e).__name__}: {redact(e)})", file=sys.stderr)
         return 2
     print(json.dumps(res, indent=2))
     return 0 if res["compatible"] else 1

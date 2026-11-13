@@ -5,23 +5,47 @@ Coverage counts are derived from the enumerated records; a declared count is ign
 differs). A register declaring "all-interfaces-complete" is REFUSED (exit 1) while any record has
 role, component (endpoint/caller), installed state or version UNKNOWN, is unclassified, or a family
 lacks a producer or a consumer endpoint, or evidence is older than the source identity.
-Unknown-equivalents (any case, surrounding whitespace, empty) are UNKNOWN. Complete also needs: at least one
-record; loaded = adoption_evidence; parseable timestamps. (installed needing a stated path + sha256 is an
-extractor rule only: a hand register states installed on the reviewer's word, see SKILL.md.) Evidence refs are never printed (records and indexes are named); credential-shaped text in any
-message is redacted. A duplicate JSON key or a non-object register is unreadable (exit 2).
-usage: register_validate.py REGISTER.json   (exit 0 ok, 1 refused, 2 unreadable)
+Unknown-equivalents (scripts/ir_norm.py is_unknown: any case, Unicode/zero-width whitespace, trailing
+punctuation, the placeholders UNK ? tbd - n/a none, empty) are UNKNOWN in every field the check reads: role,
+component, host, installed_state, label, source repo and version, evidence refs, adoption refs. Complete also
+needs: at least one record; loaded = adoption_evidence naming a process observation (pid, /proc/<n>, process,
+cmdline, exe, lsof, fuser); an unlisted unit state is not adoption; timestamps parseable, with an explicit UTC
+offset (an offset-less time is ambiguous and never read in the host zone) and not later than --now plus 300 s.
+(installed needing a stated path + sha256 is an extractor rule only: a hand register states installed on the
+reviewer's word; the OK line names every installed record taken on that word.) Evidence refs are never
+printed (records and indexes are named); credential-shaped text in any message is redacted. A duplicate JSON
+key or a non-object register is unreadable (exit 2).
+usage: register_validate.py REGISTER.json [--now ISO8601-with-offset]   (exit 0 ok, 1 refused, 2 unreadable or bad --now)
 """
+import importlib.util
 import json
 import os
 import re
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+
+def _load_norm():
+    m = sys.modules.get("ir_norm")
+    if m is None:
+        spec = importlib.util.spec_from_file_location("ir_norm", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ir_norm.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        sys.modules["ir_norm"] = m
+    return m
+
+
+_N = _load_norm()
+is_unknown = _N.is_unknown
 
 SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "schema", "register.schema.json")
 COMPLETE = "all-interfaces-complete"
 UNASSIGNED = "UNASSIGNED"
-CRED = re.compile(r"(token|secret|passw|bearer|api[_-]?key|sk-ant|-----BEGIN|://[^/\s]*:[^/\s]*@)", re.I)
+CRED = _N.CRED
+SKEW = timedelta(seconds=300)
+HEX64 = re.compile(r"[0-9a-f]{64}")
+PROCESS = re.compile(r"(\bpid\b|/proc/\d+|\bprocess\b|\bcmdline\b|\bexe\b|\blsof\b|\bfuser\b)", re.I)
 
 
 def _pairs(pairs):
@@ -34,17 +58,14 @@ def _pairs(pairs):
 
 
 def _safe(text):
-    t = str(text)
-    return "[credential-shaped text redacted]" if CRED.search(t) else t
+    return _N.redact(text)
 
 
 def _blank(v):
     return v is None or (isinstance(v, str) and not v.strip())
 
 
-def _unk(v):
-    """UNKNOWN-equivalent: missing, empty/whitespace, or UNKNOWN in any case."""
-    return not isinstance(v, str) or not v.strip() or v.strip().upper() == "UNKNOWN"
+_unk = is_unknown     # the one shared definition, scripts/ir_norm.py
 
 
 def _hk(v):
@@ -106,10 +127,17 @@ def _check(v, s, root, path, errs):
 
 # ---- semantic checks ------------------------------------------------------------------------
 def _ts(s):
+    """(UTC datetime, "ok") | (None, "bad") unparseable | (None, "ambiguous") no UTC offset, never read in the host zone."""
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
-    except (ValueError, AttributeError, OverflowError, OSError):
-        return None
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None, "bad"
+    if d.tzinfo is None or d.utcoffset() is None:
+        return None, "ambiguous"
+    try:
+        return d.astimezone(timezone.utc), "ok"
+    except (OverflowError, OSError, ValueError):
+        return None, "bad"
 
 
 def _key(r):
@@ -122,9 +150,20 @@ def _rid(r):
 
 
 def _refs(items):
-    """Non-blank evidence refs among items, as (index, item)."""
+    """Evidence refs among items that are not UNKNOWN-equivalent, as (index, item)."""
     return [(i, e) for i, e in enumerate(items if isinstance(items, list) else [])
-            if isinstance(e, dict) and isinstance(e.get("ref"), str) and e["ref"].strip()]
+            if isinstance(e, dict) and not _unk(e.get("ref"))]
+
+
+def _adopted(items):
+    """Adoption refs that state a process observation; a unit listing or an install location is not adoption."""
+    return [(i, e) for i, e in _refs(items) if PROCESS.search(e["ref"])]
+
+
+def _on_word(r, srcs):
+    """installed with no source that states a path and a full sha256: taken on the declarer's word."""
+    return not any(not _unk(si.get("path")) and isinstance(si.get("sha256"), str) and HEX64.fullmatch(si["sha256"])
+                   for _, si in srcs)
 
 
 def _sources(r):
@@ -136,7 +175,8 @@ def _sources(r):
     return []
 
 
-def validate(reg, schema):
+def validate(reg, schema, now=None):
+    now = now if isinstance(now, datetime) and now.tzinfo else datetime.now(timezone.utc)
     findings = []
     errs = []
     _check(reg, schema, schema, "", errs)
@@ -171,6 +211,7 @@ def validate(reg, schema):
 
     fl = reg.get("families") if isinstance(reg, dict) and isinstance(reg.get("families"), list) else []
     fams = {f["id"]: f for f in fl if isinstance(f, dict) and isinstance(f.get("id"), str)}
+    on_word, stamps = [], {}
     for r in recs:
         rid = _rid(r)
         srcs = _sources(r)
@@ -184,14 +225,18 @@ def validate(reg, schema):
             add("unknown-field", "role UNKNOWN", rid, gap=True)
         if _unk(r.get("component")):
             add("missing-endpoint", "component/endpoint missing or UNKNOWN", rid, gap=True)
+        if _unk(r.get("host")):
+            add("unknown-field", "host UNKNOWN", rid, gap=True)
         if _unk(r.get("installed_state")):
             add("unknown-field", "installed_state UNKNOWN", rid, gap=True)
         lbl = r.get("label")
-        if not isinstance(lbl, str) or lbl.strip().lower() in ("", "unclassified"):
+        if _unk(lbl) or _N.fold(lbl) == "unclassified":
             add("unclassified", f"{_safe(r.get('role'))} record is unclassified", rid, gap=True)
         for lab, si in srcs:
             if _unk(si.get("version")):
                 add("unknown-field", f"{lab} source version UNKNOWN", rid, gap=True)
+            if _unk(si.get("repo")):
+                add("unknown-field", f"{lab} source repo UNKNOWN", rid, gap=True)
             if si.get("available") is False and not _unk(r.get("installed_state")):
                 add("unavailable-source-not-unknown",
                     f"{lab} source unavailable but installed_state is not UNKNOWN; an unavailable source is UNKNOWN, not a pass", rid)
@@ -199,20 +244,34 @@ def validate(reg, schema):
             add("unknown-effect-replayed", "an UNKNOWN effect must be reported with replay=none, never retried", rid)
         if r.get("condition") == "committed-publish-pending" and r.get("label") != "positive-control":
             add("pending-mislabelled", "committed-publish-pending is a positive control, not a failure", rid)
-        if r.get("installed_state") == "loaded" and not _refs(r.get("adoption_evidence")):
-            add("unevidenced-state", "installed_state loaded without adoption_evidence (process adoption)", rid, gap=True)
+        if r.get("installed_state") == "loaded" and not _adopted(r.get("adoption_evidence")):
+            add("unevidenced-state", "installed_state loaded without adoption_evidence naming a process observation", rid, gap=True)
+        if r.get("installed_state") == "installed" and _on_word(r, srcs):
+            on_word.append(rid)
         evs = r.get("evidence") if isinstance(r.get("evidence"), list) else []
+
+        def stamp(what, value):
+            d, st = _ts(value)
+            if st == "bad":
+                add("unparseable-timestamp", f"{what} is not a parseable ISO-8601 time; staleness unprovable", rid, gap=True)
+            elif st == "ambiguous":
+                add("ambiguous-timestamp", f"{what} has no UTC offset; it is not read in the host time zone, staleness unprovable", rid, gap=True)
+            elif d > now + SKEW:
+                add("future-timestamp", f"{what} is later than the reference time plus 300 s", rid, gap=True)
+            return d
+
         for lab, si in srcs:
-            cap = _ts(si.get("captured_at")) if "captured_at" in si else None
-            if "captured_at" in si and cap is None:
-                add("unparseable-timestamp", f"{lab} captured_at is not a parseable ISO-8601 time; staleness unprovable", rid, gap=True)
+            cap = stamp(f"{lab} captured_at", si.get("captured_at")) if "captured_at" in si else None
             for i, ev in enumerate(evs):
-                at = _ts(ev["observed_at"]) if isinstance(ev, dict) and "observed_at" in ev else None
-                if at and cap and at < cap:
-                    add("stale-evidence", f"evidence[{i}] observed {at.isoformat()} before {lab} identity {cap.isoformat()}", rid, gap=True)
+                if isinstance(ev, dict) and "observed_at" in ev:
+                    if (id(r), i) not in stamps:
+                        stamps[(id(r), i)] = stamp(f"evidence[{i}] observed_at", ev["observed_at"])
+                    at = stamps[(id(r), i)]
+                    if at and cap and at < cap:
+                        add("stale-evidence", f"evidence[{i}] observed {at.isoformat()} before {lab} identity {cap.isoformat()}", rid, gap=True)
         for i, ev in enumerate(evs):
-            if isinstance(ev, dict) and "observed_at" in ev and _ts(ev["observed_at"]) is None:
-                add("unparseable-timestamp", f"evidence[{i}] observed_at is not a parseable ISO-8601 time; staleness unprovable", rid, gap=True)
+            if isinstance(ev, dict) and "observed_at" in ev and (id(r), i) not in stamps:
+                stamps[(id(r), i)] = stamp(f"evidence[{i}] observed_at", ev["observed_at"])
         if r.get("role") == "caller":
             reg_callers = (fams.get(r.get("family")) or {}).get("registered_callers")
             if isinstance(reg_callers, list) and r.get("component") not in reg_callers:
@@ -248,13 +307,25 @@ def validate(reg, schema):
                 findings.append({"code": "declared-count-ignored", "severity": "warn", "record": None,
                                  "message": f"declared {k}={v} ignored; derived {counts[k]}"})
     return {"ok": not any(f["severity"] == "error" for f in findings), "declared": declared,
-            "counts": counts, "findings": findings}
+            "counts": counts, "findings": findings, "installed_on_word": on_word}
 
 
 def main(argv):
-    if len(argv) != 2:
+    args, now = argv[1:], None
+    if "--now" in args:
+        i = args.index("--now")
+        if i + 1 >= len(args):
+            print(__doc__, file=sys.stderr)
+            return 2
+        now, st = _ts(args[i + 1])
+        if st != "ok":
+            print("UNKNOWN: --now is not an ISO-8601 time with a UTC offset", file=sys.stderr)
+            return 2
+        del args[i:i + 2]
+    if len(args) != 1:
         print(__doc__, file=sys.stderr)
         return 2
+    argv = [argv[0]] + args
     try:
         with open(argv[1], encoding="utf-8") as f:
             reg = json.load(f, object_pairs_hook=_pairs)
@@ -265,8 +336,8 @@ def main(argv):
         print(f"UNKNOWN: register unreadable: top level is {type(reg).__name__}, not an object", file=sys.stderr)
         return 2
     try:
-        res = validate(reg, load_schema())
-    except (TypeError, AttributeError, KeyError, RecursionError) as e:
+        res = validate(reg, load_schema(), now)
+    except (TypeError, AttributeError, LookupError, ValueError, RecursionError) as e:
         print(f"UNKNOWN: register shape not processable ({type(e).__name__})", file=sys.stderr)
         return 2
     print(json.dumps(res["counts"], indent=2, sort_keys=True))
@@ -280,7 +351,9 @@ def main(argv):
         else:
             print("REFUSED: register has errors")
         return 1
-    print(f"OK (declared {res['declared']}; counts derived from {res['counts']['records']} records)")
+    word = (f"; installed state of {len(res['installed_on_word'])} record(s) taken on the declarer's word, "
+            f"no stated path+sha256: {', '.join(res['installed_on_word'])}") if res["installed_on_word"] else ""
+    print(_safe(f"OK (declared {res['declared']}; counts derived from {res['counts']['records']} records{word})"))
     return 0
 
 
