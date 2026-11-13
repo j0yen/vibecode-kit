@@ -16,6 +16,9 @@ _EDGE = " \t\r\n.,;:!'\"`()[]{}<>*_~|\\/="
 _FAMILY = frozenset({"", "na", "undefined", "undef", "null", "nil", "none", "notavailable", "notapplicable",
                      "unavailable", "unknown", "unk", "notknown", "unspecified", "notspecified", "notset",
                      "notprovided", "notstated", "tbd", "tba", "todo", "tobedetermined", "tobeannounced"})
+# Every slash look-alike (division slash, fraction slash, big solidus, box-drawing diagonal, set minus, reverse
+# solidus forms) and the backslash fold to "/" in canon(slashes=True) (the placeholder rule), so "N\u2215A", "n\\a" and "none\u2044" read as n/a, none/.
+_SLASHES = "\u2215\u2044\u29f8\u29f9\uff0f\u2571\u27cb\u27cd\u2216\u29f5\u29f7\u3033\u1735\u2e0b\ufe68\uff3c\\\u2572\u27c8\u2afb\u2afd"
 _DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u2043\u207b\u208b\u2e3a\u2e3b\u058a\u05be\u1806\ufe58\ufe63\uff0d\u30fc"
 CRED = re.compile(
     r"(token|secret|passw|bearer|api[_-]?key|sk-ant|sk-[A-Za-z0-9]{8}|sk_(?:live|test)_|rk_(?:live|test)_|-----BEGIN"
@@ -35,9 +38,11 @@ def fold(v):
     return t.strip().lower()
 
 
-def canon(v):
+def canon(v, slashes=False):
     """Placeholder-comparable form: NFKD, combining marks (Mn) and variation selectors removed, format/control
-    characters removed, every dash/minus variant folded to "-", case folded, whitespace collapsed."""
+    characters removed, every dash/minus variant folded to "-", case folded, whitespace collapsed. With slashes=True
+    every slash look-alike and the backslash fold to "/" too: used for placeholders and negations only, never for
+    a path (a look-alike inside /proc/<n>/exe is not that path)."""
     t = unicodedata.normalize("NFKD", v)
     out = []
     for c in t:
@@ -48,6 +53,8 @@ def canon(v):
             continue
         if c in _DASHES or cat == "Pd":
             c = "-"
+        elif slashes and c in _SLASHES:
+            c = "/"
         out.append(" " if (c.isspace() or cat in ("Zs", "Zl", "Zp")) else c)
     return re.sub(r"\s+", " ", "".join(out)).strip().casefold()
 
@@ -59,7 +66,7 @@ def is_unknown(v):
     unavailable, unspecified, tbd, tba, todo, empty) once separators (space . / _ -) are removed."""
     if not isinstance(v, str):
         return True
-    t = canon(v)
+    t = canon(v, slashes=True)
     if t in PLACEHOLDERS:
         return True
     core = t.strip(_EDGE + "?-")
@@ -69,25 +76,53 @@ def is_unknown(v):
 
 
 def _credential_view(t):
+    """A credential-shaped text: a pattern from CRED, or a run of 32+ characters from [A-Za-z0-9+/=_-] holding
+    an upper-case letter, a lower-case letter and a digit, wherever it sits and whatever precedes it (a path,
+    a URL, "x-"): a long mixed-case path is masked too, which is the conservative side of the net."""
     if CRED.search(t):
         return True
     for m in _RUN.finditer(t):
         r = m.group(0)
-        if (any(c.isupper() for c in r) and any(c.islower() for c in r) and any(c.isdigit() for c in r)
-                and not r.startswith(("x-", "/"))):
+        if any(c.isupper() for c in r) and any(c.islower() for c in r) and any(c.isdigit() for c in r):
             return True
     return False
 
 
+_ESC = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "/": "/", "\\": "\\", '"': '"'}
+
+
+def _unicode_escapes(t):
+    return re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), t)
+
+
+def _json_escapes(t):
+    """Decode the JSON escapes (\\n, \\t, \\r ...) that json.dumps leaves in a printed key or count, however many
+    times the text was escaped (each dumps doubles the backslashes), so an escaped newline or tab inside a token
+    does not hide it."""
+    return re.sub(r"\\+([ntrbf])", lambda m: _ESC[m.group(1)], t)
+
+
+def _plain(t):
+    """The text after the FULL normalization: NFKD, combining marks (Mn), format and control characters removed,
+    then NFKC (so letters that compose, such as p + U+0301, are judged as the plain letter)."""
+    d = unicodedata.normalize("NFKD", t)
+    d = "".join(c for c in d if unicodedata.category(c) not in ("Cf", "Cc", "Mn"))
+    return unicodedata.normalize("NFKC", d)
+
+
 def redact(text):
-    """Fixed marker for text shaped like a credential, judged on the text as written, on its NFKC form and on
-    the form with format/control characters (zero-width splits) and combining marks removed. A pattern list:
-    a net, not a proof."""
+    """Fixed marker for text shaped like a credential. It is judged on the text as written, on its NFKC form, and
+    on the fully normalized form (NFKD, then combining marks, format and control characters removed, then NFKC,
+    so neither a mark nor a zero-width character hides a token) before any pattern is applied; escapes (\\uXXXX,
+    \\n, \\t, \\r) are decoded first, and a newline, tab or carriage return (with the blanks around it) inside a
+    token is joined, so a wrapped token is judged whole. A pattern list: a net, not a proof."""
     t = text if isinstance(text, str) else str(text)
-    t = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), t)     # JSON-escaped text (json.dumps keys)
-    n = unicodedata.normalize("NFKC", t)
-    stripped = "".join(c for c in n if unicodedata.category(c) not in ("Cf", "Cc", "Mn"))
-    if any(_credential_view(v) for v in (t, n, stripped)) or CRED.search(re.sub(r"\s+", "", stripped)):
+    t = _unicode_escapes(t)                     # the returned text keeps this decoding (json.dumps keys)
+    e = _json_escapes(t)
+    e = re.sub(r"\s*[\r\n\t]\s*", "", e) if re.search(r"[\r\n\t]", e) else e
+    n = unicodedata.normalize("NFKC", e)
+    plain = _plain(e)
+    if any(_credential_view(v) for v in (t, e, n, plain)) or CRED.search(re.sub(r"\s+", "", plain)):
         return REDACTED
     return t
 

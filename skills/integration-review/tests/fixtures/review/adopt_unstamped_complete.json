@@ -1,0 +1,102 @@
+{
+ "schema_version": 1,
+ "coverage": {
+  "declared": "all-interfaces-complete",
+  "declared_counts": {
+   "records": 999
+  }
+ },
+ "families": [
+  {
+   "id": "IF001",
+   "registered_callers": [
+    "cli-a"
+   ]
+  }
+ ],
+ "records": [
+  {
+   "record_id": "R1",
+   "family": "IF001",
+   "role": "producer",
+   "host": "ryzen7",
+   "component": "svc-a",
+   "interface_kind": "event",
+   "source_identity": {
+    "repo": "j0yen/x",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "bin/x",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": "1.0.0",
+    "captured_at": "2026-11-12T10:00:00Z",
+    "available": true
+   },
+   "installed_state": "loaded",
+   "label": "positive-control",
+   "evidence": [
+    {
+     "ref": "file:x#1",
+     "observed_at": "2026-11-12T11:00:00Z"
+    }
+   ],
+   "owner_row": null,
+   "adoption_evidence": [
+    {
+     "ref": "/proc/4242/exe -> /usr/bin/svc-a"
+    }
+   ]
+  },
+  {
+   "record_id": "R2",
+   "family": "IF001",
+   "role": "consumer",
+   "host": "ryzen7",
+   "component": "svc-b",
+   "interface_kind": "event",
+   "source_identity": {
+    "repo": "j0yen/x",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "bin/x",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": "1.0.0",
+    "captured_at": "2026-11-12T10:00:00Z",
+    "available": true
+   },
+   "installed_state": "installed",
+   "label": "positive-control",
+   "evidence": [
+    {
+     "ref": "file:x#1",
+     "observed_at": "2026-11-12T11:00:00Z"
+    }
+   ],
+   "owner_row": null
+  },
+  {
+   "record_id": "R3",
+   "family": "IF001",
+   "role": "caller",
+   "host": "ryzen7",
+   "component": "cli-a",
+   "interface_kind": "event",
+   "source_identity": {
+    "repo": "j0yen/x",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "bin/x",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": "1.0.0",
+    "captured_at": "2026-11-12T10:00:00Z",
+    "available": true
+   },
+   "installed_state": "installed",
+   "label": "positive-control",
+   "evidence": [
+    {
+     "ref": "file:x#1",
+     "observed_at": "2026-11-12T11:00:00Z"
+    }
+   ],
+   "owner_row": null
+  }
+ ]
+}

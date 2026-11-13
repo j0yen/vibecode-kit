@@ -51,7 +51,10 @@ HEX64 = re.compile(r"[0-9a-f]{64}")
 # It is refused when it carries a negation or placeholder word or names a unit (systemctl, *.service, list-units):
 # a tool name alone, an UNKNOWN value, "no process found", "pid=" and a unit listing are not observations.
 _PROC_PATH = re.compile(r"/proc/[1-9][0-9]*/(?:exe|cmdline|comm|status|stat|cwd|fd)\b")
-_PID_NUM = re.compile(r"\bpid[\s:=#_-]*[1-9][0-9]*\b")
+# a positive integer only: the separator never consumes a sign ("pid=-1" is the no-process sentinel, "pid +3",
+# "pid=1e3", "pid=1.5" and "pid=0x1f" are not a pid); "pid-1" with the hyphen joined to the word is the existing
+# accepted spelling.
+_PID_NUM = re.compile(r"\bpid(?:[\s:=#_]*|-)[1-9][0-9]*(?![0-9a-z_]|\.[0-9])")
 _PID_FACT = re.compile(r"\b(?:exe|cmdline|comm|command)\b")
 _TOOL_SAYS = re.compile(r"\b(?:ps|pgrep|pidof|lsof|fuser|top)\b[^\n]*?\b(?:shows|lists|reports|names|found)\s+(?:a\s+)?process\s+(?P<n>[^\s,;]+)")
 _NEGATED = re.compile(r"\b(?:no|not|none|never|without|absent|missing|nonexistent|dead|exited|gone|stopped|terminated|killed"
@@ -61,7 +64,7 @@ _UNIT = re.compile(r"\bsystemctl\b|\blist-units?\b|\blist-unit-files\b|\.(?:serv
 
 def _observed_process(ref):
     t = _N.canon(ref)
-    if _NEGATED.search(t) or _UNIT.search(t):
+    if _NEGATED.search(_N.canon(ref, slashes=True)) or _UNIT.search(t):
         return False
     if _PROC_PATH.search(t) or (_PID_NUM.search(t) and _PID_FACT.search(t)):
         return True
@@ -301,11 +304,7 @@ def validate(reg, schema, now=None):
                     continue
                 what = f"{field}[{i}] observed_at"
                 if "observed_at" not in ev:
-                    if field == "evidence":
-                        add("missing-timestamp", f"{what} is missing; staleness unprovable", rid, gap=True)
-                    else:       # residual, stated: an earlier test pins an unstamped adoption ref as accepted
-                        findings.append({"code": "unstamped-adoption", "severity": "warn", "record": rid,
-                                         "message": f"{what} is missing; the adoption observation is unstamped, staleness unprovable"})
+                    add("missing-timestamp", f"{what} is missing; staleness unprovable", rid, gap=True)
                     continue
                 at = stamp(what, ev["observed_at"])
                 for lab, cap in caps:

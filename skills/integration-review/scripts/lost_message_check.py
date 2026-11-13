@@ -17,7 +17,9 @@ form (messagelost). A claim not recognised is not silently passed: the output sa
 a NOT-CHECKED line (the trace rule was not applied). Actors, family, interface and message are compared by JSON
 type and value (1, 1.0 and true differ). An actor chain that returns to an actor already reached
 (a -> b -> a; an identity mapping is not a loop) is inconsistent. A trace in which no family, interface or message is
-stated on two links, or that lacks the producer or waiter actor, is marked "consistency": "unproven"
+stated on two links, or that lacks the producer or waiter actor, or whose family, interface, message or actor is
+UNKNOWN-equivalent (ir_norm.is_unknown: UNKNOWN, ?, N/A, tbd, none, null; equal UNKNOWNs never prove agreement) on two
+links, is marked "consistency": "unproven"
 with the reasons in "unproven" and an UNPROVEN line; its label is unchanged, the marker is the signal.
 Credential-shaped text in any printed value is redacted. Non-object or duplicate-key input is unreadable (exit 2).
 finding JSON: {id, claim, label, trace: {producer, adapters: [..], adapters_none_evidence, waiter}}
@@ -128,19 +130,33 @@ def _consistency(t):
     return bad
 
 
+def _stated(v):
+    """A value that can be compared: present, and not UNKNOWN-equivalent (None, UNKNOWN, ?, N/A, tbd, none ...).
+    A number or boolean is a stated value; a string is judged by the one shared rule, ir_norm.is_unknown."""
+    return v is not None and not (isinstance(v, str) and _N.is_unknown(v))
+
+
 def _unproven(t):
     """Reasons the trace is not PROVEN consistent (nothing disagrees, but too little is stated to compare)."""
     links = [("producer", t.get("producer")), ("waiter", t.get("waiter"))]
     links += [(f"adapters[{i}]", a) for i, a in enumerate(t.get("adapters") if isinstance(t.get("adapters"), list) else [])]
     why = []
-    if not any(sum(1 for _, l in links if isinstance(l, dict) and fld in l) >= 2
+    if not any(sum(1 for _, l in links if isinstance(l, dict) and fld in l and _stated(l[fld])) >= 2
                for fld in ("family", "interface", "message")):
         why.append("none of family, interface or message is stated on two links, so no link is compared")
+    for fld in ("family", "interface", "message"):
+        unk = [n for n, l in links if isinstance(l, dict) and fld in l and not _stated(l[fld])]
+        if len(unk) >= 2:
+            why.append(f"{fld} is UNKNOWN on {' and '.join(unk)}: equal UNKNOWN values do not prove the links agree")
     p, w = t.get("producer"), t.get("waiter")
     if isinstance(p, dict) and "actor" not in p:
         why.append("producer actor not stated, the verdict is not tied to the producer's actor")
     if isinstance(w, dict) and "actor" not in w:
         why.append("waiter actor not stated, the verdict is not tied to an actor")
+    acts = [(n, l[k]) for n, l in links if isinstance(l, dict) for k in ("actor", "maps_from", "maps_to") if k in l]
+    unk = [n for n, v in acts if not _stated(v)]
+    if len(unk) >= 2:
+        why.append(f"actor is UNKNOWN on {' and '.join(dict.fromkeys(unk))}: equal UNKNOWN actors do not prove the chain holds")
     return why
 
 

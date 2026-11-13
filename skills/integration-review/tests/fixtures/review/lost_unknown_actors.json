@@ -1,0 +1,27 @@
+{
+ "id": "F-unk-actors",
+ "claim": "message-lost",
+ "label": "observed-defect",
+ "trace": {
+  "producer": {
+   "ref": "p.sh:10",
+   "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "family": "F1",
+   "interface": "I",
+   "message": "m",
+   "actor": "UNKNOWN"
+  },
+  "adapters": [],
+  "adapters_none_evidence": "direct call, no adapter at p.sh:12",
+  "waiter": {
+   "ref": "w.sh:28",
+   "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "installed_state": "installed",
+   "verdict_for_actor": "refuse",
+   "family": "F1",
+   "interface": "I",
+   "message": "m",
+   "actor": "UNKNOWN"
+  }
+ }
+}

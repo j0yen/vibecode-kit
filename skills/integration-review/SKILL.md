@@ -33,12 +33,16 @@ production state, and it opens no tasks or PRs; findings go to their existing ca
   whitespace collapse and dropping of edge punctuation and `=`, either a value with no letter or digit (`?`, `???`,
   `-`, `--`, `...`) or one of the placeholder family `unknown unk n/a` (any dotting or spacing: `N.A.`, `n a`),
   `undefined null nil none unavailable unspecified tbd tba todo` and `not available/applicable/known`, matched with
-  spaces, dots, slashes and dashes removed. The same function decides every field. A real component named
+  spaces, dots, slashes and dashes removed. In the placeholder rule every slash look-alike (U+2215, U+2044, U+29F8, U+FF0F, U+2571 ...) and the
+  backslash fold to `/` first (never inside a path: a look-alike in `/proc/<n>/exe` is not that path), so `N∕A`, `n\a` and `none⁄` are `n/a`, `none`; two equal UNKNOWN repos are never one repo. The same function decides every field. A real component named
   `none` must be given another name.
 - Credential-shaped text (token/secret/password words, `ghp_`, `sk_live_`, `glpat-`, `npm_`, `hf_`, `AKIA`, `eyJ`,
   `xox`, key headers, `key=value` forms, and any 32+ character mixed-case-and-digit run such as a 40-character
-  secret key; judged also after NFKC, after removing zero-width characters and combining marks, and after decoding
-  `\uXXXX` escapes) is redacted from every message the scripts print, from record ids, roles, property names,
+  secret key; such a run is masked wherever it sits and whatever precedes it: after `/`, `s3://bucket/`, `x-` or any
+  path-like prefix; a long mixed-case path is masked too, a full lowercase hex sha is not. Judged on the fully normalized
+  text (NFKD, combining marks and zero-width/control characters removed, then NFKC, before any pattern is applied) and
+  after decoding `\uXXXX`, `\n`, `\t` and `\r` escapes; a token split by a newline, tab or carriage return, or by their
+  JSON escapes, is joined and masked in every output path including the `by_role`/`by_label` counts) is redacted from every message the scripts print, from record ids, roles, property names,
   finding ids, actors, record fields and duplicate-key names, in every script (`discriminator_check.py` included); the redactor is a pattern list, so it is a net, not a proof.
 
 ## Labels (exactly five)
@@ -79,10 +83,12 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    `adoption_evidence`. An omitted `captured_at` on a source or `observed_at` on an evidence ref is as refused as
    an unparseable one (staleness is unprovable); `adoption_evidence` timestamps follow the evidence rules when
    stated (garbage, offset-less, future, or observed before the source capture: refused), and an unstamped
-   adoption ref is only warned (`unstamped-adoption`, a stated residual). `validate(now=...)` takes an aware
+   adoption ref is refused like an unstamped evidence ref (`missing-timestamp`, naming the record; a warning under
+   `partial`): `complete` never passes while any adoption ref has no parseable `observed_at`. `validate(now=...)` takes an aware
    datetime or None (the wall clock); a naive datetime raises ValueError, it is never silently replaced.
    Adoption rule: a ref is a positive observation of a running process only when it states a
-   `/proc/<n>/exe|cmdline|comm|status|stat|cwd|fd` path, or `pid` with a non-zero number plus `exe`, `cmdline`,
+   `/proc/<n>/exe|cmdline|comm|status|stat|cwd|fd` path, or `pid` with a positive integer (no sign, no `+`/`-` before the digits,
+   no `0`, `1e3`, `1.5` or `0x1f`; `pid=-1` is the no-process sentinel; `pid-1` joined by a hyphen is the one accepted spelling) plus `exe`, `cmdline`,
    `comm` or `command`, or a listing tool (`ps pgrep pidof lsof fuser top`) with `shows|lists|reports|names|found
    process <name>`. It is refused when it carries a negation or placeholder word (`no not none never dead exited
    unknown n/a tbd ...`), or names a unit (`systemctl`, `list-units`, `*.service|timer|socket|...`), and a tool name,
@@ -99,8 +105,12 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    invented; contradictory side marks give UNKNOWN; equally named endpoints fuse only on direct proof of
    one component: the same content sha256, or the same canonical repo identity (URL, `.git`, trailing `/` folded)
    with the same normalized path; a fused record carries `fusion_basis` and every source. Same-named
-   components in different repos, or with distinct commits, stay separate. The old guess (paths rooted in their
-   own repos, identities distinct) is a heuristic, off by default, enabled only by `--heuristic-fusion`; it is a
+   components in different repos, or with distinct commits, stay separate: distinct commits never fuse, whatever the basis
+   (same sha256 or same repo identity and path), directly or through a chain of other members. A path-less member beside a
+   fused cluster keeps its own record_id and key (the fused record then carries its first member path, or `fused:<rows>`),
+   so the extractor's output always passes the validator's duplicate-record check. The old guess (paths rooted in their
+   own repos, identities distinct) is a heuristic, off by default, enabled only by `--heuristic-fusion`; it is the one
+   stated exception to the distinct-commits rule (its premise is distinct identities), it is a
    guess and its records are labelled `same-name-and-repo-rooted-paths-heuristic`; raw identity and
    evidence kept verbatim; an identity parses only when the whole string is
    `path+sha256:<path> <64 hex>` or `commit <40 hex>` (a trailing newline or `(dirty, unverified)` is UNKNOWN); input is split on newline only, must be UTF-8, and a duplicate JSON key
@@ -114,7 +124,9 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    `lost-message`, `message-dropped`, `msg-loss`); a claim not recognised is not silently passed: the output
    states `"claim_recognised": false` and a `NOT-CHECKED:` line (the label is then the declarer's, unverified); a disagreeing link is named and keeps conditional-risk, and
    an actor chain that returns to an earlier actor is a cycle (inconsistent). A trace in which no family,
-   interface or message is stated on two links, or that lacks the producer or waiter actor, is marked
+   interface or message is stated on two links, that lacks the producer or waiter actor, or in which family, interface,
+   message or actor is UNKNOWN-equivalent (`UNKNOWN`, `?`, `N/A`, `tbd`, `none`, null) on two links (equal UNKNOWNs never
+   prove agreement), is marked
    `"consistency": "unproven"` with an `UNPROVEN:` line; its label is not changed by the tool, so say in the
    report that consistency is unproven.
 6. Fill `templates/boundary-report.md`. Separate states: source change, tests, independent review,

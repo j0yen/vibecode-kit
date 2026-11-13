@@ -1,0 +1,2 @@
+{"family": "IF001", "role": "producer", "host": "h", "component": "c", "interface_kind": "http", "source_repo": "r1", "source_identity": "commit 1111111111111111111111111111111111111111", "installed_state": "source-only", "evidence": "side=producer", "path_or_command": "a/./x.py"}
+{"family": "IF001", "role": "producer", "host": "h", "component": "c", "interface_kind": "http", "source_repo": "r1", "source_identity": "commit 2222222222222222222222222222222222222222", "installed_state": "source-only", "evidence": "side=producer", "path_or_command": "a/x.py"}

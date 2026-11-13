@@ -45,7 +45,7 @@ def complete_ok(reg):
 # ---- DEFECT 1 ---------------------------------------------------------------------------------------
 class TestD1Adoption(unittest.TestCase):
     def adopt(self, ref):
-        return mut(lambda r: r.update(installed_state="loaded", adoption_evidence=[{"ref": ref}]))
+        return mut(lambda r: r.update(installed_state="loaded", adoption_evidence=[{"ref": ref, "observed_at": "2026-11-12T11:00:00Z"}]))
 
     REFUSED = ("process: UNKNOWN", "pid=", "no process found for ctl", "systemctl list-units process-compose.service loaded active",
                "lsof", "process: n/a", "systemctl status exe.service enabled", "/proc/", "pid not found", "/proc/x/exe",
@@ -68,9 +68,9 @@ class TestD1Adoption(unittest.TestCase):
             self.assertTrue(complete_ok(self.adopt(v)), "a positive process observation was refused")
 
     def test_one_good_ref_among_bad_ones_is_enough_and_all_bad_is_not(self):
-        reg = mut(lambda r: r.update(installed_state="loaded", adoption_evidence=[{"ref": "lsof"}, {"ref": "pid 4242 exe"}]))
+        reg = mut(lambda r: r.update(installed_state="loaded", adoption_evidence=[{"ref": "lsof", "observed_at": "2026-11-12T11:00:00Z"}, {"ref": "pid 4242 exe", "observed_at": "2026-11-12T11:00:00Z"}]))
         self.assertTrue(complete_ok(reg))
-        reg = mut(lambda r: r.update(installed_state="loaded", adoption_evidence=[{"ref": "lsof"}, {"ref": "pid="}]))
+        reg = mut(lambda r: r.update(installed_state="loaded", adoption_evidence=[{"ref": "lsof", "observed_at": "2026-11-12T11:00:00Z"}, {"ref": "pid=", "observed_at": "2026-11-12T11:00:00Z"}]))
         self.assertFalse(complete_ok(reg))
 
     def test_skill_md_states_the_rule(self):
@@ -254,8 +254,8 @@ class TestD4D5D11Timestamps(unittest.TestCase):
         reg = self.reg()
         del reg["records"][0]["adoption_evidence"][0]["observed_at"]
         res = check(reg)
-        self.assertTrue(res["ok"])        # residual: an earlier test pins an unstamped adoption ref as accepted
-        self.assertIn("unstamped-adoption", {f["code"] for f in res["findings"] if f["severity"] == "warn"})
+        self.assertFalse(res["ok"])       # repair 4 (D1): an unstamped adoption ref is refused under complete, not warned
+        self.assertIn("missing-timestamp", {f["code"] for f in res["findings"] if f["severity"] == "error"})
 
     def test_naive_now_is_not_replaced_by_the_wall_clock(self):
         reg = base()
@@ -501,12 +501,13 @@ class TestD12Fusion(unittest.TestCase):
         self.assertEqual(len(recs), 2)
 
     def test_same_repo_identity_in_other_spellings_with_one_path_fuses(self):
-        recs, _ = self.recs(self.two("src/a.py", "src/./a.py", r1="github.com/o/r1", r2="https://github.com/O/r1.git/"))
+        same = "commit " + H40         # repair 4 (D8): distinct commits never fuse, so the one-component rows state one commit
+        recs, _ = self.recs(self.two("src/a.py", "src/./a.py", r1="github.com/o/r1", r2="https://github.com/O/r1.git/", i1=same, i2=same))
         self.assertEqual(len(recs), 1)
         self.assertEqual(recs[0]["fusion_basis"], "same-repo-identity-and-path")
         recs, _ = self.recs(self.two("src/a.py", "src/./a.py", r1="github.com/o/r1", r2="git@github.com:o/r2.git"))
         self.assertEqual(len(recs), 2)
-        recs, _ = self.recs(self.two("src/a.py", "src/./a.py", r1="github.com/o/r1", r2="git@github.com:o/r1.git"))
+        recs, _ = self.recs(self.two("src/a.py", "src/./a.py", r1="github.com/o/r1", r2="git@github.com:o/r1.git", i1=same, i2=same))
         self.assertEqual(len(recs), 1)
 
     def test_heuristic_is_opt_in_and_labelled_a_guess(self):

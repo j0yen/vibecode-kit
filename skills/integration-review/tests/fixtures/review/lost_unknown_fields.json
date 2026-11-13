@@ -1,0 +1,27 @@
+{
+ "id": "F-unk-fields",
+ "claim": "message-lost",
+ "label": "observed-defect",
+ "trace": {
+  "producer": {
+   "ref": "p.sh:10",
+   "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "family": "UNKNOWN",
+   "interface": "N/A",
+   "message": "?",
+   "actor": "a"
+  },
+  "adapters": [],
+  "adapters_none_evidence": "direct call, no adapter at p.sh:12",
+  "waiter": {
+   "ref": "w.sh:28",
+   "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "installed_state": "installed",
+   "verdict_for_actor": "refuse",
+   "family": "UNKNOWN",
+   "interface": "N/A",
+   "message": "?",
+   "actor": "a"
+  }
+ }
+}

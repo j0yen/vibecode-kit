@@ -200,13 +200,18 @@ def _build(items, declared, rejected, heuristic_fusion=False):
                     clusters = [(list(range(len(members))), "same-name-and-repo-rooted-paths-heuristic")]
             used = {i for idx, _ in clusters for i in idx}
             fused = []
+            rest = [m for i, m in enumerate(members) if i not in used]
+            taken = {m["key"] for m in rest}            # a record key (and so its record_id) is never shared
             for n, (idx, basis) in enumerate(clusters):
                 stats["fused_multi_source_components"] += 1
                 f = _fuse([members[i] for i in idx], basis)
-                if n:
-                    f["key"] = f["key"][:5] + (members[idx[0]]["key"][5],)
+                if n or f["key"] in taken:
+                    paths = [members[i]["key"][5] for i in idx if members[i]["key"][5]]
+                    cands = paths + ["fused:" + ",".join(str(r) for r in f["rows"])]
+                    f["key"] = next(f["key"][:5] + (c,) for c in cands if f["key"][:5] + (c,) not in taken)
+                taken.add(f["key"])
                 fused.append(f)
-            members = fused + [m for i, m in enumerate(members) if i not in used]
+            members = fused + rest
         records += [_record(m, stats) for m in members]
     stats["records"] = len(records)
     stats["unassigned_records"] = sum(1 for r in records if r["family"] == UNASSIGNED)
@@ -229,10 +234,22 @@ def _path_id(path):
     return posixpath.normpath(path) if isinstance(path, str) and path else None
 
 
+def _commits(m):
+    return {s["commit"] for s in m["sources"] if "commit" in s}
+
+
+def _distinct_commits(a, b):
+    """Two members that each state commits, and not the same ones: they are different builds and never fuse,
+    whatever the basis label (same sha256, same repo and path, or the heuristic)."""
+    ca, cb = _commits(a), _commits(b)
+    return bool(ca) and bool(cb) and ca != cb
+
+
 def _positive_clusters(members):
     """Members (same family/role/host/component/kind, different path) that POSITIVELY are one component:
     the same canonical repo identity with the same normalized path, or the same content sha256. Returns
-    [(member indexes, basis)] for clusters of two or more; every other member stays a separate record."""
+    [(member indexes, basis)] for clusters of two or more; every other member stays a separate record.
+    Members with distinct commits never fuse (directly or through a chain of other members)."""
     parent = list(range(len(members)))
 
     def find(i):
@@ -255,7 +272,9 @@ def _positive_clusters(members):
                 pa, pb = _path_id(a["key"][5]), _path_id(b["key"][5])
                 if ra & rb and pa and pa == pb:
                     how = "same-repo-identity-and-path"
-            if how:
+            if how and not any(_distinct_commits(members[x], members[y])
+                               for x in range(len(members)) if find(x) == find(i)
+                               for y in range(len(members)) if find(y) == find(j)):
                 parent[find(i)] = find(j)
                 basis[find(i)] = how
     out = {}

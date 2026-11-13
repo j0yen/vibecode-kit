@@ -178,7 +178,7 @@ class TestD02UnknownEvidence(unittest.TestCase):
         self.assertTrue(res["ok"])
 
     def adopt(self, ref):
-        return mut(lambda r: r.update(installed_state="loaded", adoption_evidence=[{"ref": ref}]))
+        return mut(lambda r: r.update(installed_state="loaded", adoption_evidence=[{"ref": ref, "observed_at": "2026-11-12T11:00:00Z"}]))
 
     def test_unknown_adoption_ref_refused(self):
         for v in ("UNKNOWN", "unknown", "?", "tbd", "UNK"):
