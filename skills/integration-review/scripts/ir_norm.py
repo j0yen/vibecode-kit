@@ -158,27 +158,57 @@ _COMMIT_NOISE = frozenset("commit sha id rev revision hash oid git ref no number
 # A label before a commit ("sha:", "sha1:", "sha-256:", "commit ", "rev ", "hash=", "git:" ...); only the sha forms may be
 # followed by "-" ("sha256-<hex>"): "git-2.40" and "rev-1" are names, not a label and a value.
 _COMMIT_LABEL = re.compile(r"^(?:(?:sha-?(?:1|256)?)[\s:=#-]+|(?:commit(?:\s*id)?|rev(?:ision)?|hash|git|oid)[\s:=#]+)", re.I)
-# A sha written inside decoration: the hex (7-64 digits) is a token of its own, optionally glued to 0x, g (git describe), or
-# label-. A hex glued to a name by - / _ . ("feature/abc1234-login", "fix-abc1234") is part of that name, never a commit.
-_HEXTOK = re.compile(r"(?:(?<![\w/.-])(?:0x|g|(?:commit|rev|revision|sha|sha1|sha256|hash|oid|git|id)-)?|(?<=\d-)g|(?<=/commit/)|(?<=/commits/)|(?<=/tree/))"
-                     r"([0-9a-f]{7,64})(?![\w/-]|\.\w)")
+# A sha that is the SUBJECT of its text: the hex (7-64 digits) is a token of its own, or glued to 0x / g (git describe), or to a
+# label (commit sha sha1 sha256 rev revision hash oid git id ref tree blob archive) by - _ : = # @ (and by "/" inside a URL
+# path: /commit/<hex>), and may end in a file suffix (.patch .diff .zip .tar.gz ...) or a trailing slash. A hex glued to a NAME
+# by - / _ . ("feature/abc1234-login", "fix-abc1234", "abc1234-dirty") is part of that name, never a commit.
+_LABELS = "commit|commits|rev|revision|sha|sha1|sha256|hash|oid|git|id|ref|tree|blob|archive"
+_HEXTOK = re.compile(r"(?:(?<![\w/.-])(?:0x|g)?|(?<![\w/.-])(?:%s)[-_:=#@]|(?<![\w.-])(?:%s)/|(?<=\d-)g)"
+                     r"([0-9a-f]{7,64})(?=(?:\.(?:patch|diff|zip|tar|tgz|gz|bz2|xz|bundle))*/?(?![\w/-]|\.\w))" % (_LABELS, _LABELS))
+# A RELATION to a commit is another commit: "parent <hex>", "revert <hex>", "cherry-picked from <hex>", "hotfix for <hex>"
+# (the relation word stands just before the hex, see _relates).
+_RELATION = frozenset(
+    "parent parents child children ancestor ancestors descendant descendants predecessor successor previous prior next following "
+    "preceding revert reverts reverted reverting cherry-pick cherry-picks cherry-picked cherrypick cherrypicked backport backports "
+    "backported hotfix hotfixes fix fixes fixed followup follow-up merge merges merged rebase rebased onto squash squashed amend "
+    "amends amended supersede supersedes superseded replace replaces replaced undo undoes before after since until base based "
+    "bisect".split())
+_REVSUF = re.compile(r"(?:[~^]\d*|\^\{[^}]*\})+$")      # HEAD~1, abc1234^2, main^{commit}: the parent expression of a base
+_REFLOG = re.compile(r"@\{([^}]*)\}?")                    # main@{1}, @{u}, abc1234@{upstream}: a moving state, never a sha
+_CEDGE = _EDGE.replace("}", "").replace("~", "")           # edge punctuation, but a closing "}" and a "~" belong to a suffix
 _NA = re.compile(r"\bn\s*[./]\s*a\b\.?")
+# The placeholder PHRASES of is_unknown's _FAMILY (not known, not available, not applicable, not provided, not specified, not set,
+# not stated, to be determined, to be announced): a ref holding one says the fact is not known, as the single word does.
+_PH_PHRASE = re.compile(r"\b(?:not (?:available|applicable|known|provided|specified|set|stated)|to be (?:determined|announced))\b")
 _SPACED_LETTERS = re.compile(r"\b(?:[a-z] )+[a-z]\b")
 # Non-identifying commits: the null object (all zeros) and the generic moving pointers. They say that no particular commit is
-# named, so they are unstated, as UNKNOWN is. A pointer may carry a remote or refs/heads prefix, "the/current/latest" and a
-# trailing "commit/branch", and ~N, ^N or @{..} suffixes. A specific name (a tag, a release, feature/login) is not one.
-FLOATING_WORDS = ("HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD", "main", "master", "trunk", "develop", "development",
-                  "default", "latest", "tip", "current")
-_FLOATING = re.compile(r"(?:(?:origin|upstream)/|(?:refs/)?(?:heads|remotes/[^/\s]+)/)?(?:(?:the|current|latest) )*(?:%s)"
-                       r"(?: commit| branch| ref)?(?:[~^]\d*|@\{[^}]*\})*" % "|".join(w.lower() for w in FLOATING_WORDS))
-_POINTER_WORDS = frozenset(w.lower() for w in FLOATING_WORDS)
+# named, so they are unstated, as UNKNOWN is. A pointer may carry a remote or refs/heads prefix, "the/current/latest/branch/tip
+# of/detached/working" and a trailing "commit/branch/ref/tag/detached" (also in parentheses). Parent expressions (~N, ^N) are read
+# off the base (_commit_id) and reflog / upstream expressions (@{..}) are never a commit (_REFLOG). A specific name (a tag, a
+# release-7, feature/login) is not a pointer: only the whole text is matched.
+_POINTERS = ("HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD", "main", "master", "trunk", "develop", "development", "default",
+             "latest", "tip", "current")
+_STATES = ("stable", "nightly", "dev", "edge", "canary", "release", "uncommitted", "unrecorded", "not yet committed",
+           "not committed", "working tree", "wip", "local")
+FLOATING_WORDS = _POINTERS + _STATES
+_FLOATING = re.compile(r"(?:(?:origin|upstream)/|(?:refs/)?(?:heads|remotes/[^/\s]+)/)?(?:(?:the|current|latest|branch|tip of|detached|"
+                       r"working|local) )*(?:%s)(?: \(?(?:commit|branch|ref|tag|detached)\)?)?"
+                       % "|".join(w.lower().replace(" ", r"\s+") for w in FLOATING_WORDS))
+_POINTER_WORDS = frozenset(w.lower() for w in _POINTERS)   # only these count as words of a placeholder wording
 _NULL_SHA = re.compile(r"0{7,64}")
 # A number or version is a concrete anchor only after a content word ("line 12"): "#12", "2026-11-12", "v1" beside a
 # placeholder word are decoration. Code tokens are classified by _token_kind().
 _WEAK = re.compile(r"[0-9\"'`=#]")
 _NUMBER = re.compile(r"[#v]?[0-9][0-9:.,/-]*")
+# A number anchors only as a LOCATION ("line 12", "page 4", "column 8": _LOCATION_NOUNS before it), an OBSERVED RESULT ("returned
+# 404", "exit 1", "http 200": _RESULT_BEFORE before it) or a RESULT COUNT ("3 passed", "2 errors": _RESULT_AFTER after it). After
+# any other word it is a date, a count, a version or an ordinal ("since 2026-11-12", "after 3 retries", "sprint 14").
+_LOCATION_NOUNS = frozenset("line lines row rows col cols column columns page pages step steps offset position index char".split())
+_RESULT_BEFORE = frozenset("returns returned return got exit code http https errno rc".split())
+_RESULT_AFTER = frozenset("passed passing failed failing fail fails errors error warnings warning tests test assertions ok "
+                          "succeeded skipped failures".split())
 _TOK_EDGE = " \t\r\n.,;:!'\"`()[]{}<>*_~|=?-"
-_CALL = re.compile(r"[a-z_][\w.]*\([^()\s]*\)")
+_CALLARGS = re.compile(r"\([^()\s]*\)")
 _SCOPE = re.compile(r"\w::\w")
 _PIN = re.compile(r"\w@[\w.{~^-]*[0-9]")
 _LINE_SUFFIX = re.compile(r"(?::\d+(?:-\d+)?|#l\d+(?:-l?\d+)?)$")
@@ -190,6 +220,22 @@ _EXT = frozenset("py rs js ts tsx jsx go java kt c h cc cpp hpp rb sh bash md rs
                  "env sql html css scss proto xml csv tsv lock gradle php cs swift scala ex exs erl hs lua pl".split())
 
 
+def _has_call(tok):
+    """True when the token holds a call f(), a.b(x): an identifier run [\\w.]* with a letter or "_" in it, then (args) with no
+    blank or nested parenthesis. Linear in the token: each "(...)" is found once and the run before it read once (a run
+    ends at the previous parenthesis), so a long unbroken word or dotted token costs one pass, never one pass per start."""
+    for m in _CALLARGS.finditer(tok):
+        i = m.start()
+        j = i
+        letter = False
+        while j > 0 and (tok[j - 1] == "." or tok[j - 1] == "_" or tok[j - 1].isalnum()):
+            j -= 1
+            letter = letter or tok[j] == "_" or ("a" <= tok[j] <= "z")
+        if i > j and letter:
+            return True
+    return False
+
+
 def _token_kind(tok):
     """What a whitespace-separated token of a ref is, as code: "call" (f(), a.b()), "scope" (a::b), "url" (a://b), "pin"
     (name@version), "file" (a dotted name with a known file extension or a line suffix), "path" (a/b/c, or a/b.ext, or a
@@ -198,7 +244,7 @@ def _token_kind(tok):
     b = tok.strip(_TOK_EDGE)
     if re.search(r"\w://[^/\s]+/\S", b):
         return "url"                                 # a URL with a path; a bare site root names no location
-    if _CALL.search(tok):
+    if _has_call(tok):
         return "call"
     if _SCOPE.search(b):
         return "scope"
@@ -252,29 +298,55 @@ def commit_id(c):
 
 @lru_cache(maxsize=65536)
 def _commit_id(c):
-    """THE ONE IDENTITY RULE. Canonical spelling of a commit, or None when the commit is UNSTATED (non-identifying). A commit
-    text identifies a commit when it is a sha (7+ hex digits, not all zero), a sha written inside decoration, or a name
-    specific to one commit (a tag, a release, a branch such as feature/login); two spellings of one sha are one commit, and a
-    name is only itself. It is unstated, as an unstated repo is, when it names no particular commit: not a string, an
+    """THE ONE IDENTITY RULE. A commit text names the commit it IS; the result is its canonical spelling, or None when the
+    commit is UNSTATED. (1) A sha (7+ hex digits, not all zero), or a sha that is the SUBJECT of its text, is that commit:
+    NFKC folding, removal of format/control characters and surrounding blanks, lower case, a leading label ("sha:", "commit ",
+    "rev ", "hash ", "git:" ...) and edge punctuation removed; when what remains is not one bare hex but holds exactly one hex
+    token of 7+ digits with a digit (a token of its own, or glued to 0x, g or a label by - _ / : = # @, ending in a file suffix
+    or a slash: "0x<hex>", "g<hex>", "<hex> (HEAD)", "HEAD@{<hex>}", a URL ending in @<hex> or /commit/<hex>, "commit_<hex>",
+    "sha/<hex>", "<hex>.patch", "archive/<hex>.zip", "v1.0-3-g<hex>", a trailing ref name; all-digit hexes included) that hex
+    is the commit. (2) A RELATION to a sha is another commit, a name of its own: a relation word just before the hex (_RELATION:
+    "parent <hex>", "revert <hex>", "cherry-picked from <hex>", "hotfix for <hex>", not inside a URL) or a ~N / ^N suffix on it
+    ("<hex>~1"). (3) A hex glued to a NAME ("feature/abc1234-login", "fix-abc1234", "abc1234-dirty") is part of that name; text
+    naming two different hexes is its own identity; a tag, a release or a branch such as feature/login is a commit of its own.
+    (4) A text that names no particular commit is UNSTATED, as an unstated repo is, and differs from nothing: not a string, an
     UNKNOWN-equivalent (is_unknown), a placeholder wording ("unknown (pending)", "tbc", "not recorded", "no commit"; see
-    _is_placeholder_commit), the null object (all zeros), or a generic moving pointer (HEAD, main, origin/main, HEAD~1 ...;
-    FLOATING_WORDS). Spelling: NFKC folding, removal of format/control characters and surrounding blanks, lower case, a
-    leading label ("sha:", "sha1:", "sha256:", "commit ", "rev ", "hash ", "git:" ...) and edge punctuation removed; when what
-    remains is not one bare hex but holds exactly one hex token of 7+ digits with a digit (a hex that is a token of its own, or
-    glued to 0x, g or a label-: "0x<hex>", "g<hex>", "<hex> (HEAD)", "HEAD@{<hex>}", a URL ending in @<hex>,
-    "commit-<hex>", "v1.0-3-g<hex>", a trailing ref name; all-digit hexes included), that hex is the commit. A hex glued to a
-    name ("feature/abc1234-login") is part of that name; text naming two different hexes is its own identity."""
+    _is_placeholder_commit), the null object (all zeros), a generic moving pointer (HEAD, main, origin/main, stable, uncommitted,
+    working tree ...; FLOATING_WORDS), a pointer with a parent suffix (HEAD~1, main^), or any reflog / upstream expression
+    (X@{1}, X@{upstream}, @{u}) whose braces do not hold a sha."""
     if is_unknown(c):
         return None
-    t = _COMMIT_LABEL.sub("", fold(c)).strip(_EDGE)
+    t = _COMMIT_LABEL.sub("", fold(c)).strip(_CEDGE)
     t = re.sub(r"^0x(?=[0-9a-f]{7})", "", t)
+    for m in _REFLOG.finditer(t):
+        if not (re.fullmatch(r"[0-9a-f]{7,64}", m.group(1).strip()) and any(x.isdigit() for x in m.group(1))):
+            return None
+    t = re.sub(r"\^\{commit\}$", "", t)                  # <hex>^{commit} peels to the commit itself
+    base = _REVSUF.sub("", t)
+    if base != t:
+        return None if _commit_id(base) is None else t
     if not re.fullmatch(r"[0-9a-f]{7,64}", t):
-        hexes = {m.group(1) for m in _HEXTOK.finditer(t) if any(x.isdigit() for x in m.group(1))}
-        if len(hexes) == 1:
+        ms = [m for m in _HEXTOK.finditer(t) if any(x.isdigit() for x in m.group(1))]
+        hexes = {m.group(1) for m in ms}
+        if len(hexes) == 1 and ("://" in t or not _relates(t[:ms[0].start()])):
             t = hexes.pop()
     if is_unknown(t) or _is_placeholder_commit(t) or _non_identifying(t):
         return None
     return t
+
+
+_PREPOSITIONS = frozenset("for of from to onto on in by at with".split())
+_LABEL_WORDS = frozenset(_LABELS.split("|"))
+
+
+def _relates(before):
+    """True when the words just BEFORE a hex name a relation to it (_RELATION, optionally followed by a preposition or a label word:
+    "parent <hex>", "revert commit <hex>", "cherry-picked from <hex>", "hotfix for <hex>"): the text is about another commit. A word
+    after the hex is the commit's own subject ("<hex> Revert foo", "<hex> fix typo") and leaves the text the sha."""
+    toks = [w for w in (x.strip(_TOK_EDGE).lower() for x in before.split()) if w]
+    while toks and (toks[-1] in _PREPOSITIONS or toks[-1] in _LABEL_WORDS):
+        toks.pop()
+    return bool(toks) and toks[-1] in _RELATION
 
 
 def _anchored(t):
@@ -282,7 +354,7 @@ def _anchored(t):
     token, see _token_kind: status(), a.status, Status::Unknown, check_null()) is a location unless all its words are placeholder
     words (unknown(), null::nil). Beside plain prose words a code token anchors only when it is precise (a call, ::, URL,
     name@version, a file, a path; never a bare dotted name or two-part slash name, an abbreviation, a mention or an alternative) and holds a word
-    of 2+ letters that is neither a placeholder nor a filler word (src/unknown/x.py). A number after a content word ("line 12") anchors."""
+    of 2+ letters that is neither a placeholder nor a filler word (src/unknown/x.py). A number anchors only as a location, an observed result or a result count (_LOCATION_NOUNS, _RESULT_BEFORE, _RESULT_AFTER), never after another word."""
     toks = t.split()
     kinds = [(tok, _token_kind(tok)) for tok in toks]
     lone = any(k for _, k in kinds) and not any(k is None and re.search(r"[a-z]", tok) for tok, k in kinds)
@@ -297,10 +369,10 @@ def _anchored(t):
                                                   for w in ws):
             return True
     prev = None
-    for tok in toks:
+    for i, tok in enumerate(toks):
         core = tok.strip(_EDGE + "?-")
-        if _NUMBER.fullmatch(core) and prev is not None and prev not in _NE_PLACEHOLDER and prev not in _NE_FILLER \
-                and len(prev) > 1:
+        if _NUMBER.fullmatch(core) and (prev in _LOCATION_NOUNS or prev in _RESULT_BEFORE
+                                        or (i + 1 < len(toks) and (re.findall(r"[a-z]+", toks[i + 1]) or [""])[0] in _RESULT_AFTER)):
             return True
         m = re.findall(r"[a-z]+", core)
         if m:
@@ -322,7 +394,7 @@ def non_evidence(ref):
     words = re.findall(r"[a-z]+(?:['\u2019][a-z]+)?", t)
     if not words:
         return False
-    ph = any(w in _NE_PLACEHOLDER for w in words)
+    ph = any(w in _NE_PLACEHOLDER for w in words) or bool(_PH_PHRASE.search(t))
     if _anchored(t) or (not ph and _WEAK.search(t)):
         return False
     if all(w in _NE_PLACEHOLDER or w in _NE_FILLER for w in words):
