@@ -358,7 +358,7 @@ def main(argv):
             print(f"UNKNOWN: schema unreadable: {redact(fn)}: {type(e).__name__}: {redact(e)}", file=sys.stderr)
             return 2
         if not isinstance(doc, dict):
-            print(f"UNKNOWN: schema unreadable: {fn}: top level is {type(doc).__name__}, not an object", file=sys.stderr)
+            print(f"UNKNOWN: schema unreadable: {redact(fn)}: top level is {type(doc).__name__}, not an object", file=sys.stderr)
             return 2
         docs.append(doc)
     try:

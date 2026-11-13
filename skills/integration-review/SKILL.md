@@ -105,7 +105,11 @@ committed-publish-pending). An endpoint not yet judged is `unclassified` and blo
    invented; contradictory side marks give UNKNOWN; equally named endpoints fuse only on direct proof of
    one component: the same content sha256, or the same canonical repo identity (URL, `.git`, trailing `/` folded)
    with the same normalized path; a fused record carries `fusion_basis` and every source. Same-named
-   components in different repos, or with distinct commits, stay separate: distinct commits never fuse, whatever the basis
+   components in different repos, or with distinct commits, stay separate, also when the path text is identical: rows with
+   one endpoint key and a path join one record only when their stated repos (canonical) and stated commits do not differ
+   (an unstated repo or commit is not a difference); otherwise each is its own record with its own record_id, and the
+   validator's duplicate-record key then includes the canonical repos and commits the record's sources state. Path-less
+   rows of one component still merge into one record (there is no path to tell them apart). Distinct commits never fuse, whatever the basis
    (same sha256 or same repo identity and path), directly or through a chain of other members. A path-less member beside a
    fused cluster keeps its own record_id and key (the fused record then carries its first member path, or `fused:<rows>`),
    so the extractor's output always passes the validator's duplicate-record check. The old guess (paths rooted in their

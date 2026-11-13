@@ -54,8 +54,15 @@ def verdicts(pattern, names):
     return out
 
 
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):       # argparse echoes the offending argument value: redact it like every other path
+        self.print_usage(sys.stderr)
+        print(redact(f"{self.prog}: error: {message}"), file=sys.stderr)
+        sys.exit(2)
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = _Parser(description=__doc__.splitlines()[0])
     ap.add_argument("file")
     ap.add_argument("--line", type=int, required=True)
     ap.add_argument("--names", required=True)

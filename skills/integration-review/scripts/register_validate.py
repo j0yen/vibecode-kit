@@ -165,7 +165,15 @@ def _ts(s):
 
 
 def _key(r):
-    return tuple(_hk(r.get(k)) for k in ("family", "role", "host", "component", "path_or_command", "interface_kind"))
+    """Endpoint identity. A record with a path also carries the canonical repos its sources state: the same
+    path in two different repos, or at distinct commits, is two endpoints (SKILL.md), never a duplicate."""
+    k = tuple(_hk(r.get(k)) for k in ("family", "role", "host", "component", "path_or_command", "interface_kind"))
+    if not r.get("path_or_command"):
+        return k
+    repos = sorted({_N.repo_id(si["repo"]) for _, si in _sources(r)
+                    if isinstance(si.get("repo"), str) and not _unk(si["repo"])})
+    commits = sorted({si["commit"] for _, si in _sources(r) if isinstance(si.get("commit"), str)})
+    return k + (tuple(repos), tuple(commits))
 
 
 def _rid(r):

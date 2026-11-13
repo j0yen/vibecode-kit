@@ -22,7 +22,7 @@ _SLASHES = "\u2215\u2044\u29f8\u29f9\uff0f\u2571\u27cb\u27cd\u2216\u29f5\u29f7\u
 _DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u2043\u207b\u208b\u2e3a\u2e3b\u058a\u05be\u1806\ufe58\ufe63\uff0d\u30fc"
 CRED = re.compile(
     r"(token|secret|passw|bearer|api[_-]?key|sk-ant|sk-[A-Za-z0-9]{8}|sk_(?:live|test)_|rk_(?:live|test)_|-----BEGIN"
-    r"|authorization\s*[:=]|://[^/\s]*:[^/\s]*@|gh[pousr]_[A-Za-z0-9]|github_pat_|glpat-|npm_[A-Za-z0-9]{8}"
+    r"|authorization\s*[:=]|://[^/\s]*:[^/\s]*@|\b[a-z][a-z0-9+.-]*:_{1,3}[^/\s]*:[^/\s]*@|gh[pousr]_[A-Za-z0-9]|github_pat_|glpat-|npm_[A-Za-z0-9]{8}"
     r"|pypi-[A-Za-z0-9_-]{8}|hf_[A-Za-z0-9]{8}|dop_v1_|shp(?:at|ss|ca|pa)_|SG\.[A-Za-z0-9_-]{8}|ya29\.|"
     r"\b(?:AKIA|ASIA)[A-Z0-9]{8}|eyJ[A-Za-z0-9_-]{6}|xox[abprs]-|AIza[0-9A-Za-z_-]{8}"
     r"|\b(?:key|auth|pwd|cred\w*)\s*[:=]\s*\S{6})", re.I)
@@ -57,6 +57,14 @@ def canon(v, slashes=False):
             c = "/"
         out.append(" " if (c.isspace() or cat in ("Zs", "Zl", "Zp")) else c)
     return re.sub(r"\s+", " ", "".join(out)).strip().casefold()
+
+
+def repo_id(repo):
+    """Canonical spelling of a repo identity: URL / scp forms, ".git" and trailing "/" removed, lower case."""
+    r = repo.strip().lower()
+    r = re.sub(r"^(?:https?|ssh|git)://(?:[^@/]*@)?", "", r)
+    r = re.sub(r"^[^@/\s]+@([^:/\s]+):", r"\1/", r)
+    return re.sub(r"(?:\.git)?/*$", "", r)
 
 
 def is_unknown(v):

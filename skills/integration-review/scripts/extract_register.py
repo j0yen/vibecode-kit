@@ -165,10 +165,13 @@ def _build(items, declared, rejected, heuristic_fusion=False):
         comp = _s(row.get("component")) or "UNKNOWN"
         path = _s(row.get("path_or_command"))
         k = (fam, role, host, comp, kind, path)
-        ep = eps.get(k)
+        ep = next((e for e in eps.get(k, ()) if not path or _same_endpoint(e, si)), None)
         if ep is None:
-            ep = eps[k] = {"key": k, "rows": [], "sources": [], "evidence": [], "states": [],
-                           "claimed_roles": [], "claimed_states": []}
+            ep = {"key": k, "rows": [], "sources": [], "evidence": [], "states": [],
+                  "claimed_roles": [], "claimed_states": []}
+            if k in eps:
+                ep["salt"] = n          # same key, different repo or commit: its own record, id salted by first row
+            eps.setdefault(k, []).append(ep)
             order.append(ep)
         ep["rows"].append(n)
         if (si["repo"], si["raw"]) not in [(s["repo"], s["raw"]) for s in ep["sources"]]:
@@ -201,15 +204,15 @@ def _build(items, declared, rejected, heuristic_fusion=False):
             used = {i for idx, _ in clusters for i in idx}
             fused = []
             rest = [m for i, m in enumerate(members) if i not in used]
-            taken = {m["key"] for m in rest}            # a record key (and so its record_id) is never shared
+            taken = {_ident(m) for m in rest}            # a record key (and so its record_id) is never shared
             for n, (idx, basis) in enumerate(clusters):
                 stats["fused_multi_source_components"] += 1
                 f = _fuse([members[i] for i in idx], basis)
-                if n or f["key"] in taken:
+                if n or _ident(f) in taken:
                     paths = [members[i]["key"][5] for i in idx if members[i]["key"][5]]
                     cands = paths + ["fused:" + ",".join(str(r) for r in f["rows"])]
-                    f["key"] = next(f["key"][:5] + (c,) for c in cands if f["key"][:5] + (c,) not in taken)
-                taken.add(f["key"])
+                    f["key"] = next(f["key"][:5] + (c,) for c in cands if (f["key"][:5] + (c,), None) not in taken)
+                taken.add(_ident(f))
                 fused.append(f)
             members = fused + rest
         records += [_record(m, stats) for m in members]
@@ -221,13 +224,22 @@ def _build(items, declared, rejected, heuristic_fusion=False):
     return {"register": reg, "rejected": rejected, "stats": dict(stats)}
 
 
+def _ident(ep):
+    return (ep["key"], ep.get("salt"))
+
+
+def _same_endpoint(ep, si):
+    """A row joins an endpoint of its key unless the two PROVE different sources: both state a repo and the
+    canonical identities differ, or both state commits and the commit sets differ. Unstated is not different."""
+    rr = {_repo_id(s["repo"]) for s in ep["sources"] if s["repo"] != "UNKNOWN"}
+    if si["repo"] != "UNKNOWN" and rr and _repo_id(si["repo"]) not in rr:
+        return False
+    cs = _commits(ep)
+    return not (cs and "commit" in si and si["commit"] not in cs)
+
+
 def _repo_id(repo):
-    """Canonical spelling of a repo identity: URL / scp forms, ".git" and trailing "/" removed, lower case."""
-    r = repo.strip().lower()
-    r = re.sub(r"^(?:https?|ssh|git)://(?:[^@/]*@)?", "", r)
-    r = re.sub(r"^[^@/\s]+@([^:/\s]+):", r"\1/", r)
-    r = re.sub(r"(?:\.git)?/*$", "", r)
-    return r
+    return _N.repo_id(repo)
 
 
 def _path_id(path):
@@ -338,7 +350,7 @@ def _record(ep, stats):
     fam, role, host, comp, kind, path = ep["key"]
     states = set(ep["states"])
     state = states.pop() if len(states) == 1 else "UNKNOWN"
-    rec = {"record_id": _id(fam, role, host, comp, kind, path), "family": fam, "role": role,
+    rec = {"record_id": _id(fam, role, host, comp, kind, path, *([ep["salt"]] if "salt" in ep else [])), "family": fam, "role": role,
            "host": host, "component": comp, "interface_kind": kind}
     if path:
         rec["path_or_command"] = path
@@ -390,7 +402,7 @@ def main(argv):
         with open(os.path.join(argv[2], "extraction.json"), "w", encoding="utf-8") as f:
             json.dump(out["stats"], f, indent=1, sort_keys=True)
     except OSError as e:
-        print(f"UNKNOWN: output unwritable: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"UNKNOWN: output unwritable: {type(e).__name__}: {redact(e)}", file=sys.stderr)
         return 2
     for k, v in sorted(out["stats"].items()):
         print(f"{k}: {v}")
