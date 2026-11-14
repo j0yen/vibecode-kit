@@ -352,8 +352,9 @@ def _is_name(tx, s, e, lo=0, words=None):
 
 def _dotted_heads(t, a, b):
     """For _Toks.member: (first, lo, hi) of the dotted segment t[a:b] with its edge punctuation removed. `first` is the end of its
-    first component that is no listed abbreviation (None if there is none): a word after it is a member. A leading run of two or more
-    single letters ("e.g", "a.k.a") is an abbreviation as a whole: a word at a position in (lo, hi] follows only that run. One pass."""
+    first component that is no listed abbreviation and no part of a leading run of two or more single letters (None if there is
+    none): a word after it is a member. A leading run of two or more single letters ("e.g", "a.k.a") is an abbreviation as a whole, so
+    "a.k.a.cf.maybe" has no member (re-review 18 eq18); a word at a position in (lo, hi] follows only that run. One pass."""
     seg = t[a:b]
     i = a + len(seg) - len(seg.lstrip(_TOK_EDGE))
     first, ends, letters = None, [], True
@@ -362,12 +363,14 @@ def _dotted_heads(t, a, b):
         j = b if j < 0 else j
         c = t[i:j].strip(_TOK_EDGE).casefold()
         if letters and len(c) == 1 and "a" <= c <= "z":
-            ends.append(j)
+            ends.append(j)                            # a leading single letter: an abbreviation only in a run of two or more
         else:
             letters = False
-        if first is None and c and c.lstrip("([{\"'`") not in ABBREVIATIONS:
-            first = j
+            if first is None and c and c.lstrip("([{\"'`") not in ABBREVIATIONS:
+                first = j
         i = j + 1
+    if len(ends) == 1:
+        first = ends[0]                               # one leading letter is a name ("x.maybe"); a run is not ("a.k.a.cf.maybe")
     return first, (ends[0] if len(ends) >= 2 else 0), (ends[-1] + 1 if len(ends) >= 2 else 0)
 
 
