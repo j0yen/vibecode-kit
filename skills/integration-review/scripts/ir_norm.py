@@ -9,7 +9,7 @@ redact() replaces text shaped like a credential (or an e-mail address) by a fixe
 """
 import re
 import unicodedata
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from functools import lru_cache
 from urllib.parse import unquote
 
@@ -93,17 +93,38 @@ def negated(text, state=False, doubt=False):
 # and no verb-able word after it ("since may at emit.py:3", "in early may (emit.py:3)"; not "the end may change"). Nothing else is
 # evidence: a capital alone (Title Case, the pronoun I, a sentence start), a preposition alone or a compound with no code mark
 # ("maybe-http", "would-be") leave the word prose, so an ambiguous form refuses the role and never asserts it.
+# ABBREVIATIONS (one list; extract_register's clause end reads it): a dot after one of these words, or after dotted single letters
+# ("e.g.", "i.e.", "a.k.a."), ends no clause. A word glued by its dot to dotted single letters ("e.g.maybe") is prose, not a dotted
+# name; a listed word glued to an extension stays a file ("approx.py").
+ABBREVIATIONS = frozenset("vs cf etc eg ie viz incl resp approx esp al ca".split())
+_ABBR_HEAD = re.compile(r"^(?:[a-z]\.){2,}")
+_ABBR_DOTS = re.compile(r"(?:[a-z]\.)+[a-z]")
+
+
+def abbreviation(word):
+    """True when `word` (a token without its final dot) is an abbreviation: ABBREVIATIONS or dotted single letters (e.g, i.e, a.k.a)."""
+    w = word.casefold().lstrip("([{\"'`")
+    return w in ABBREVIATIONS or bool(_ABBR_DOTS.fullmatch(w))
+
+
 _SIDE = re.compile(r"\b(?:producer|consumer|caller|adapter)", re.I)
-_ALT = frozenset(("or", "nor", "either", "vs", "versus", "/", "|"))
+_ALT = frozenset(("or", "nor", "either", "vs", "versus", "alternatively", "/", "|"))
 _CONJ = frozenset(("and", "plus", "&", "+"))
-_CONN = r"(?:\b(?P<w>or|nor|either|vs|versus|and|plus)\b\.?|(?<![\w.\\/-])(?P<s>[/|&+])(?=\s|$))"
+_CONN = r"(?:\b(?P<w>or|nor|either|vs|versus|alternatively|and|plus)\b\.?|(?<![\w.\\/-])(?P<s>[/|&+])(?=\s|$))"
 # FWD: a connective, then the token it joins (after "the"/"a" and a "side=" / "side:" label). REV: a token, then a connective. A symbol
 # connective is standalone (blanks or the text edge on its right); glued to a word it is GLUED: a side word glued to / | & + in a token
 # that is no name ("side=producer/consumer"; "/srv/consumer/app.py" is a path). A connective word inside a name ("src/or/x.py") is none.
 # QM: a question mark that ends a word.
 _FWD = re.compile(_CONN + r"\s*(?:(?:the|a)\s+)?(?:side\s*[=:]?\s*)?(?P<tok>\S*)", re.I)
-_REV = re.compile(r"(?<!\S)(?P<tok>\S+?)(?:\s+\b(?P<w>or|nor|either|vs|versus|and|plus)\b|\s*(?<![\w.\\/-])(?P<s>[/|&+])(?=\s|$))", re.I)
+_REV = re.compile(r"(?<!\S)(?P<tok>\S+?)(?:\s+\b(?P<w>or|nor|either|vs|versus|alternatively|and|plus)\b|\s*(?<![\w.\\/-])(?P<s>[/|&+])(?=\s|$))", re.I)
 _GLUED = re.compile(r"[/|&+](?=(?:producer|consumer|caller|adapter))|\b(?:producer|consumer|caller|adapter)s?[/|&+]", re.I)
+# N5: an alternative connective WORD reaches a side word of the prose across up to _ALT_REACH plain words (a determiner, possessive or
+# adjective: "or the legacy consumer", "or its consumer", "or rather consumer", "or else consumer"); a punctuated token, a connective or
+# a function word other than a determiner stops it, and a side word inside a code token there is a location ("or see docs/consumers.md").
+# Beside the connective any side token counts (D3); a symbol connective (/ |), a conjunction and a side word BEFORE a connective still
+# need the side token beside them (the reach reads rightward only, so the one-pass suffix scan stays exact).
+_ALT_REACH = 3
+_DETERMINERS = frozenset("the a an its their his her our your my this that these those some any another other each every".split())
 _QM = re.compile(r"\?(?![\w=&/#.%:-])")
 _HEDGE_WORD = re.compile(
     r"\b(?:(?:probab|possib|perhap|maybe|mayb|presum|apparent|seem|appear|suppos|alleg|reput|purport|ostensib|conceiv|plausib|putativ|"
@@ -112,7 +133,23 @@ _HEDGE_WORD = re.compile(
     r"|not (?:sure|certain|clear|confirmed))\b", re.I)
 _CODE_KINDS = frozenset(("call", "scope", "url", "pin", "file", "path", "module", "dotted"))
 _OPEN_QUOTES = "'\"`‘“"
-_MONTH_AFTER = frozenset(("in", "since", "until", "till", "during", "from", "by", "early", "late", "mid", "end"))
+# N2: code evidence belongs to the segment of a token that holds the word (_Toks.segment); a key whose value is only an answer to the
+# hedge ("likely=yes", "maybe=true") is a key only when a location follows it.
+# N1: a quoted name is followed by an ARTIFACT NOUN, the kind of thing it names; the quote closes within _QUOTE_WORDS words.
+_CLOSE_QUOTES = {"'": "'’", '"': '"”', "`": "`", "‘": "’'", "“": '”"'}
+_QUOTE_WORDS = 8
+_NAME_HEADS = frozenset(
+    "handler module class type enum variant function method field flag label banner alert queue topic event message check bot job "
+    "task step stage state status mode option setting button page screen dialog view widget panel tab menu component service package "
+    "crate library plugin hook test case file branch tag release version feature error exception warning header key value record "
+    "template rule policy role team project repo app endpoint route command tool script table column index schema config macro trait "
+    "interface struct constant variable worker daemon timer channel stream bucket".split())
+_SEG_CUT = frozenset(",()=?")
+_ANSWERS = frozenset("yes no true false y n on off ok".split())
+_MONTH_AFTER = frozenset(("in", "since", "until", "till", "during", "from", "by"))
+_MONTH_PART = frozenset(("early", "late", "mid", "end"))          # a time word only after a preposition (N3)
+_MONTH_PART_AFTER = _MONTH_AFTER | frozenset(("at", "of", "to", "before", "after", "through"))
+_DATE_NUM = re.compile(r"\d{1,4}(?:st|nd|rd|th)?[,.;:)]*", re.I)
 # A word after the month that is no verb: a function word (the modal "may" takes a verb: "may be", "may change").
 _FUNCTION_WORDS = frozenset("at in on by for to from with of and or nor the a an as via into onto per than then when while until till "
                             "since during before after through".split())
@@ -120,8 +157,9 @@ _KINDS = (("qm", _QM), ("fwd", _FWD), ("rev", _REV), ("glued", _GLUED), ("word",
 
 
 class _Toks:
-    """The blank-delimited tokens of a canonical text, found once; the code kind of a token is judged once (linear in the text)."""
-    __slots__ = ("t", "starts", "ends", "_code")
+    """The blank-delimited tokens of a canonical text, found once; the code kind of a token or of a segment is judged once (linear in
+    the text)."""
+    __slots__ = ("t", "starts", "ends", "_code", "_cuts", "_seg")
 
     def __init__(self, t):
         self.t = t
@@ -129,6 +167,8 @@ class _Toks:
         self.starts = [a for a, _ in spans]
         self.ends = [b for _, b in spans]
         self._code = {}
+        self._cuts = {}
+        self._seg = {}
 
     def at(self, pos):
         """Index of the token that holds pos (pos is no blank)."""
@@ -141,26 +181,77 @@ class _Toks:
             self._code[k] = _token_kind(self.t[self.starts[k]:self.ends[k]].casefold().replace("-", "_")) in _CODE_KINDS
         return self._code[k]
 
+    def segment(self, k, pos):
+        """The SEGMENT of token k that holds pos: the token cut at the glue marks , ( ) = ? and a lone ":" (not "::", not "://"),
+        which prose also uses to join words without a blank. Each token is cut once."""
+        cuts = self._cuts.get(k)
+        if cuts is None:
+            t = self.t
+            cuts = [i for i in range(self.starts[k], self.ends[k]) if t[i] in _SEG_CUT or (
+                t[i] == ":" and t[i - 1] != ":" and t[i + 1:i + 2] != ":" and t[i + 1:i + 3] != "//")]
+            self._cuts[k] = cuts
+        j = bisect_right(cuts, pos)
+        return (cuts[j - 1] + 1 if j else self.starts[k]), (cuts[j] if j < len(cuts) else self.ends[k])
+
+    def seg_code(self, a, b):
+        """Segment t[a:b] is code by the shared code-token rule (hyphen read as a word joiner, as in code()); a leading abbreviation
+        glued by its dot ("e.g.maybe") is prose, not a dotted name."""
+        if (a, b) not in self._seg:
+            seg = _ABBR_HEAD.sub("", self.t[a:b].casefold())
+            self._seg[(a, b)] = bool(seg) and _token_kind(seg.replace("-", "_")) in _CODE_KINDS
+        return self._seg[(a, b)]
+
     def word(self, k):
         """Token k as a bare lower-case word (edge punctuation removed)."""
         return self.t[self.starts[k]:self.ends[k]].strip(_TOK_EDGE).lower()
 
+    def located(self, k):
+        """A location follows token k: the next token is code, or a function word and then a code token ("in cfg.toml:2")."""
+        n = len(self.starts)
+        return k + 1 < n and (self.code(k + 1) or (self.word(k + 1) in _FUNCTION_WORDS and k + 2 < n and self.code(k + 2)))
+
 
 def _is_name(tx, s, e, lo=0, words=None):
     """THE NAME-VS-HEDGE RULE (see the HEDGE note): True when the word t[s:e] (a hedge word or a side word; `words` is the whole match
-    of a phrase) is part of a name: a code token, an identifier, a key or a handle, or a quoted Capitalised name after a word. Nothing
-    left of `lo` is read (a suffix judged alone has no text before it)."""
+    of a phrase) is part of a name: its segment is code or it names a call, an identifier, a key or a handle, or a quoted Capitalised
+    name after a word. Nothing left of `lo` is read (a suffix judged alone has no text before it)."""
     t = tx.t
     k = tx.at(s)
     run = t[s:e]
     if "_" in run or (run[1:] != run[1:].lower() and not run.isupper()):
         return True                                   # an identifier: possible_values, MightyEmit
-    if (e < len(t) and t[e] == "=" and e + 1 < len(t) and not t[e + 1].isspace()) or (s > tx.starts[k] and t[s - 1] == "@"):
-        return True                                   # a key (maybe=1) or a handle (@maybe)
-    if tx.code(k):
-        return True                                   # a code token: possible-values.md, maybe(), obj.maybe, lib/should
+    if s > tx.starts[k] and t[s - 1] == "@":
+        return True                                   # a handle: @maybe
+    a, b = tx.segment(k, s)
+    if e < len(t) and t[e] == "=" and e + 1 < len(t) and not t[e + 1].isspace():
+        _, vb = tx.segment(k, e + 1)
+        if t[e + 1:vb].strip(_TOK_EDGE).lower() not in _ANSWERS or tx.located(k):
+            return True                               # a key: maybe=1, assumed=true in cfg.toml:2 (not likely=yes: the hedge, answered)
+    if tx.seg_code(a, b) or (b < tx.ends[k] and t[b] == "(" and _CALLARGS.match(t, b)):
+        return True                                   # code: possible-values.md, obj.maybe, lib/should; a call name: maybe()
     return (s - 1 == tx.starts[k] and t[s - 1] in _OPEN_QUOTES and k > 0 and tx.starts[k - 1] >= lo
-            and t[tx.ends[k - 1] - 1].isalnum() and all(w[0].isupper() for w in (words or run).split()))
+            and t[tx.ends[k - 1] - 1].isalnum() and _quoted_name(tx, k, s))
+
+
+def _quoted_name(tx, k, s):
+    """N1: the quote that opens token k (just before s) closes within a few Capitalised words, and an artifact noun follows the closing
+    quote ("'Might' handler", "'Probably Fine' alert", "`Maybe` bot"). A quoted label that ends its text or is followed by any other
+    word ("status 'Needs Verification'", "'Might' be right", "'Maybe' a.py:2") is no name."""
+    t = tx.t
+    close = _CLOSE_QUOTES[t[s - 1]]
+    for j in range(k, min(k + _QUOTE_WORDS, len(tx.starts))):
+        a, b = (s if j == k else tx.starts[j]), tx.ends[j]
+        if not t[a].isupper():
+            return False                              # every word inside the quotes is Capitalised
+        if t[b - 1] in close and b - 1 > a:
+            if j + 1 >= len(tx.starts) or not t[tx.starts[j + 1]].isalpha():
+                return False
+            w = tx.word(j + 1)
+            return (w in _NAME_HEADS or (w[-1:] == "s" and w[:-1] in _NAME_HEADS) or (w[-2:] == "es" and w[:-2] in _NAME_HEADS)
+                    or (w[-3:] == "ies" and w[:-3] + "y" in _NAME_HEADS))
+        if any(c in close for c in t[a:b]):
+            return False                              # closed, then punctuation: "'Might'," is a label
+    return False
 
 
 def _is_hedge_word(tx, m, lo=0):
@@ -173,13 +264,24 @@ def _is_hedge_word(tx, m, lo=0):
     if w.lower() == "may":
         k = tx.at(m.start())
         nxt = k + 1 < len(tx.starts)
-        if nxt and t[tx.starts[k + 1]].isdigit():
-            return False                              # May 12, may 2026
-        if k > 0 and tx.starts[k - 1] >= lo and tx.word(k - 1) in _MONTH_AFTER:
+        if nxt and _DATE_NUM.fullmatch(t[tx.starts[k + 1]:tx.ends[k + 1]]):
+            return False                              # May 12, may 2026, May 3rd (not "may 2x the load")
+        if _time_before(tx, k, lo):
             if (m.end() < tx.ends[k] or not nxt or not t[tx.starts[k + 1]].isalpha() or tx.code(k + 1)
                     or tx.word(k + 1) in _FUNCTION_WORDS):
                 return False                          # since may at emit.py:3, in early may (emit.py:3), since May.
     return True
+
+
+def _time_before(tx, k, lo):
+    """N3: a time word just before token k: a preposition of time (in since until till during from by), or early / late / mid / end
+    after a preposition ("by end may", "in early may"); "the front end may", "the end may" and a bare "mid may" are no date."""
+    if k < 1 or tx.starts[k - 1] < lo:
+        return False
+    w = tx.word(k - 1)
+    if w in _MONTH_AFTER:
+        return True
+    return w in _MONTH_PART and k >= 2 and tx.starts[k - 2] >= lo and tx.word(k - 2) in _MONTH_PART_AFTER
 
 
 def _side_hit(tx, s0, tok, conn, lo):
@@ -210,7 +312,27 @@ def _decide(tx, kind, m, lo):
     if m.group("w") and _is_name(tx, m.start("w"), m.end("w"), lo):
         return False                                  # a connective word inside a name: src/or/x.py
     conn = (m.group("w") or m.group("s")).lower()
-    return _side_hit(tx, m.start("tok"), m.group("tok"), conn, lo)
+    if _side_hit(tx, m.start("tok"), m.group("tok"), conn, lo):
+        return True
+    return kind == "fwd" and conn in _ALT and conn.isalpha() and _alt_reach(tx, m.start("tok"))
+
+
+def _alt_reach(tx, p):
+    """N5: from the token at p, just after an alternative connective word, walk right over up to _ALT_REACH plain words to a side word of
+    the prose. It reads only text right of the connective, so a suffix judged alone (doubted_suffixes) sees the same reach."""
+    t, n = tx.t, len(tx.starts)
+    j = bisect_left(tx.starts, p)
+    for _ in range(_ALT_REACH + 1):
+        if j >= n:
+            return False
+        a, b = tx.starts[j], tx.ends[j]
+        if _SIDE.search(t, a, b):
+            return not tx.code(j)                     # a prose side word; a path or file that holds one is a location
+        w = t[a:b].lower()
+        if not w.isalpha() or w in _ALT or w in _CONJ or w == "side" or (w in _FUNCTION_WORDS and w not in _DETERMINERS):
+            return False
+        j += 1
+    return False
 
 
 def _candidates(t):
@@ -240,10 +362,11 @@ def hedged(text):
 
 # THE AFTER-TEXT OF A SIDE MARK (doubted_suffixes, used by extract_register._marks): the rest of its clause with the other marks blanked
 # is judged as ONE text, as the pre-repair scan judged it. Judging each suffix from scratch costs time quadratic in the marks of a
-# clause; one pass gives the same answers because a judgement reads at most ONE token left of a word (the time word before "may", the
-# word before a quoted name) and a zero count reads at most two words left of the failure word it cancels. Every hit of the whole text
-# that starts in a suffix is a hit of that suffix (removing text on the left removes name evidence and zero counts, never a hit); the
-# only hits a suffix adds are in its first token (re-judged without the text before it) and inside a zero count that crosses its start.
+# clause; one pass gives the same answers because a judgement reads at most TWO tokens left of a word (the time word before "may" and
+# the preposition before "end"/"early"/"late"/"mid"; the word before a quoted name) and a zero count reads at most two words left of the
+# failure word it cancels. Every hit of the whole text that starts in a suffix is a hit of that suffix (removing text on the left removes
+# name evidence and zero counts, never a hit); the only hits a suffix adds are in its first two tokens (re-judged without the text before
+# it) and inside a zero count that crosses its start.
 
 
 def _joined(pieces, fold_case):
@@ -299,7 +422,7 @@ def doubted_suffixes(pieces):
         if j >= 0 and zs[j][0] < q < zs[j][1]:
             raw = t[q:zs[j][1]]
             flags[i] = bool(_ZERO_PASS.search(raw) or NEG_DOUBT.search(raw) or NEG_CORE.search(raw))
-    # hedge: every hit is found once with the whole text as context; each suffix re-judges only its first token without it
+    # hedge: every hit is found once with the whole text as context; each suffix re-judges only its first two tokens without it
     t, cuts = _joined(pieces, False)
     cands = _candidates(t)
     if not cands:
@@ -315,11 +438,11 @@ def doubted_suffixes(pieces):
         if last >= q:
             flags[i] = True
             continue
-        k = bisect_right(tx.starts, q - 1)            # the first token at or after q
+        k = bisect_right(tx.starts, q - 1)            # the first token at or after q (it and the next are re-judged)
         if k >= len(tx.starts):
             continue
         if q not in seen:
-            hi = tx.ends[k]
+            hi = tx.ends[min(k + 1, len(tx.starts) - 1)]
             a = bisect_right(starts, q - 1)
             seen[q] = any(_decide(tx, kind, m, q) for _, kind, m in cands[a:bisect_right(starts, hi - 1)])
         flags[i] = seen[q]

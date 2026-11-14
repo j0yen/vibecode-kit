@@ -104,6 +104,22 @@ def evidence_text(row):
 
 
 _CLAUSE_END = re.compile(r"[;\n]|\.\s")
+
+
+def _clause_ends(t):
+    """The clause ends of t: ";", a newline, or a full stop and a blank, but not the dot of an abbreviation ("vs.", "e.g.", "i.e.",
+    "etc."; ir_norm.abbreviation, one list), so an alternative or a hedge after it stays in the clause. Each token is read once."""
+    out = []
+    for c in _CLAUSE_END.finditer(t):
+        i = c.start()
+        if t[i] == ".":
+            j = i
+            while j > 0 and not t[j - 1].isspace():
+                j -= 1
+            if _N.abbreviation(t[j:i]):
+                continue
+        out.append(c.span())
+    return out
 _NEG_HEAD = re.compile(r"(?i)\b(?:not|no|never|without|isn['\u2019]t)\s+(?=side=)")
 
 
@@ -125,13 +141,13 @@ def _marks(t):
     established that side=producer", "unverified: side=producer", "side=producer is false") or a hedge or alternative (ir_norm.hedged:
     "maybe side=producer", "side=producer?", "side=producer or consumer") between the start of its
     clause and the mark, counted from the end of the previous side mark, or one after it up to the end of its clause
-    (; newline or a full stop ends the clause). A negation that heads another side mark does not reach this one
-    ("side=producer, not side=consumer" keeps the producer mark); a zero count of failures is no negation. The after-text is the rest
+    (; newline or a full stop ends the clause, an abbreviation's dot does not: _clause_ends). A negation that heads another side
+    mark does not reach this one ("side=producer, not side=consumer" keeps the producer mark); a zero count of failures is no negation. The after-text is the rest
     of the clause with the other marks blanked, judged as one text (ir_norm.doubted_suffixes: one pass, linear in the clause)."""
     marks = list(SIDE_MARK.finditer(t))
     if not marks:
         return set()
-    ends = [(c.start(), c.end()) for c in _CLAUSE_END.finditer(t)]
+    ends = _clause_ends(t)
     bad_before, bad_after, group = [], [], []
     k, a, prev_end, z_group = 0, 0, 0, None
     for m in marks:
