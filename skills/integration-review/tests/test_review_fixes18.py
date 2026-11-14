@@ -213,6 +213,27 @@ class TestD6ACodeTailAfterACutIsProse(unittest.TestCase):
         self.assertEqual(cli_roles(FX["d6_reviewer"][:2] + FX["d6_keep"][:2]), [U, U, P, P])
 
 
+class TestAnAbbreviationRunHeadsNoMember(unittest.TestCase):
+    """Found by re-review 18's eq18 reference on this repair's own head (seed 18, pre-existing on 53946c23): a word after dotted single
+    letters AND a listed abbreviation ("a.k.a.cf.maybe") read as a member of a dotted name, because only the single-letter run counted
+    as an abbreviation. A word that follows only abbreviations is prose (fix17 D6, residual i)."""
+
+    def test_reviewer_row_is_unknown(self):
+        bad = [e for e in FX["abbr_run_reviewer"] if E._marks(e) != set()]
+        self.assertEqual(bad, [])
+
+    def test_generated_runs_are_unknown(self):
+        rows = [(tp.format(w=w), U) for tp in FX["abbr_run_forms"] for st in FX["stems"] for w in cases(st)]
+        bad = wrong(rows)
+        self.assertEqual(bad, [], summary(bad, len(rows)))
+
+    def test_own_rows_are_unknown(self):
+        self.assertEqual(wrong([(e, U) for e in FX["abbr_run_own"]]), [])
+
+    def test_a_member_after_a_name_keeps_the_role(self):
+        self.assertEqual(wrong([(e, P) for e in FX["abbr_run_keep"]]), [])
+
+
 # ---- DEFECT 8: a parenthesised month -------------------------------------------------------------------------------------------------
 class TestD8AParenthesisedMonthIsTheMonth(unittest.TestCase):
     """DEFECT 8 (fail-closed regression of 53946c23 against bfa49033): a ")" closed a date only when the token holding "may" opened the
