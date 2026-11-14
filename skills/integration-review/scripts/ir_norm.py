@@ -71,11 +71,13 @@ def negated(text, state=False, doubt=False):
     passed") is not a negation."""
     if not isinstance(text, str):
         return False
-    t = canon(text, slashes=True).replace("\u2019", "'")
-    t = _ZERO_FAIL.sub(" ", t)
-    if doubt and (_ZERO_PASS.search(t) or NEG_DOUBT.search(t)):
-        return True
-    return bool((NEG_STATE if state else NEG_CORE).search(t))
+    for t in _readings(text, slashes=True):                     # THE GLUE RULE: either reading
+        t = _ZERO_FAIL.sub(" ", t.replace("\u2019", "'"))
+        if doubt and (_ZERO_PASS.search(t) or NEG_DOUBT.search(t)):
+            return True
+        if (NEG_STATE if state else NEG_CORE).search(t):
+            return True
+    return False
 
 
 # HEDGE (hedged(): the one rule for a side mark): a clause that doubts or alternates its claim does not state it. Three kinds: (1)
@@ -89,11 +91,14 @@ def negated(text, state=False, doubt=False):
 # positive evidence that it is not prose; whatever the rule does not recognise (a mark, a following word, a modifier, a context) leaves
 # it prose. (1) Its SEGMENT (the token cut at every mark that does not join a code name, _token_cuts) is code by the shared code-token
 # rule (_token_kind: ::, URL, name@version, file, path, module or dotted name; a bare dotted name only as a whole token, a two-part one
-# only for a member, D6) or names a call ("maybe()", "x.maybe()"); (2) its word run is an identifier (an underscore, or a capital after the first
+# only for a member, D6; the tail of a path, file, URL or pin only when no cut stands before its segment, D6 of re-review 18) or names a
+# call ("maybe()", "x.maybe()"); a glue mark (an em dash, a zero-width space, a fullwidth "＋") cuts before any fold (THE GLUE RULE); (2)
+# its word run is an identifier (an underscore, or a capital after the first
 # letter, not all capitals), a key ("maybe=1") or a handle ("@maybe" at its token start); (3) a QUOTED NAME: an opening quote glued to it,
-# every word Title-case, the quote after a word of the same text, closed, then an artifact noun that ends the text or is followed by a
-# location ("in 'Might' handler at h.py:3", D2). For "may" only (_is_hedge_word), (4) the MONTH: a date after it ("May 12"; a lowercase
-# "may" needs the date to end there), or a time word just before it and then the clause end, a location or a month range ("since may at
+# every word Title-case, the quote after a word of the same text, closed, then an artifact noun that ends the text (a program structure
+# only) or is followed by a location (and stands in a noun slot, is followed by the code itself, or names a program structure: "in
+# 'Might' handler at h.py:3", D2). For "may" only (_is_hedge_word), (4) the MONTH: a date after it ("May 12"; a lowercase or capitals
+# "may" needs the date to END: a location, a year, punctuation and a year or location, the clause end), or a time word just before it and then the clause end, a location or a month range ("since may at
 # emit.py:3", "in early may (emit.py:3)"; not "the end may change", "reads from may at times differ", D3). Nothing else is evidence: a
 # capital alone (Title Case, the pronoun I, a sentence start), a preposition alone or a compound with no code mark ("maybe-http",
 # "would-be") leave the word prose, so an ambiguous form refuses the role and never asserts it.
@@ -127,13 +132,14 @@ _GLUED = re.compile(r"[/|&+](?=(?:producer|consumer|caller|adapter))|\b(?:produc
 # a location ("or see docs/consumers.md"). Beside the connective any side token counts (D3); a conjunction and a side word BEFORE a
 # connective still need the side token beside them (the reach reads rightward only, so the one-pass suffix scan stays exact).
 _ALT_REACH = 3
-_QM = re.compile(r"\?(?![\w=&/#.%:-])")
+_QM = re.compile(r"\?(?![\w=&/#%:-]|\.[\w/])")          # D5 of re-review 18: "producer?." is a question; "obj?.emit()" is code
 _HEDGE_WORD = re.compile(
     r"\b(?:(?:probab|possib|perhap|maybe|mayb|presum|apparent|seem|appear|suppos|alleg|reput|purport|ostensib|conceiv|plausib|putativ|"
     r"arguab|likel|unlikel|assum|tentativ|hopeful|guess|suspect|believ|roughl|approx|might|could|would|should|iirc|afaik|imo|kinda|sorta)\w*"
     r"|\w+edly|may|ish|(?:kind|sort) of|i think|(?:need|needs|needed|to be|to) (?:verif|confirm|check|valid)\w*"
     r"|not (?:sure|certain|clear|confirmed))\b", re.I)
 _CODE_KINDS = frozenset(("call", "scope", "url", "pin", "file", "path", "module", "dotted"))
+_TAIL_KINDS = frozenset(("url", "pin", "file", "path"))
 _OPEN_QUOTES = "'\"`‘“"
 # N2, D1: code evidence belongs to the segment of a token that holds the word (_Toks.segment, _token_cuts); a key whose value is only an
 # answer to the hedge ("likely=yes", "maybe=true") is a key only when a location follows it (_Toks.located).
@@ -148,12 +154,19 @@ _NAME_HEADS = frozenset(
     "crate library plugin hook test case file branch tag release version feature error exception warning header key record "
     "template rule policy role team project repo app endpoint route command tool script table column index schema config macro trait "
     "interface struct constant variable worker daemon timer channel stream bucket".split())
+# D2 of re-review 18: a quoted label at the END of its text names an artifact only when the noun names a PROGRAM STRUCTURE (no verb and
+# no holder of a value: not test, check, label, queue, stage, tag, flag ...); before a location the label must also stand in a noun slot
+# (a preposition or determiner before the quote), be followed by the code token itself, or name a program structure.
+_CODE_HEADS = frozenset("handler module class enum variant function method macro trait interface struct constant variable crate library "
+                        "package plugin component service endpoint daemon worker bot widget banner button dialog panel menu screen "
+                        "exception error event".split())
+_NOUN_SLOT = frozenset("the a an its their our his her this that these those my your each every some any".split())
 _ANSWERS = frozenset("yes no true false y n on off ok".split())
 _MONTH_AFTER = frozenset(("in", "since", "until", "till", "during", "from", "by"))
 _MONTH_PART = frozenset(("early", "late", "mid", "end"))          # a time word only after a preposition (N3)
 _MONTH_PART_AFTER = _MONTH_AFTER | frozenset(("at", "of", "to", "before", "after", "through"))
-_DATE_NUM = re.compile(r"(?:(?P<y>\d{4})|(?:0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?)(?P<p>[,.;:)]*)", re.I)
-_YEAR = re.compile(r"\d{4}")
+_DATE_NUM = re.compile(r"(?:(?P<y>(?:19|20)\d\d)|(?:0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?)(?P<p>[,.;:)]*)", re.I)
+_YEAR = re.compile(r"(?:19|20)\d\d")
 _CLOSERS = ")]}'\"`’”"
 _RANGE = frozenset(("to", "through", "till", "until", "-"))
 _MONTHS = frozenset("january february march april may june july august september october november december jan feb mar apr jun "
@@ -161,10 +174,11 @@ _MONTHS = frozenset("january february march april may june july august september
 # A word after the month that is no verb: a function word (the modal "may" takes a verb: "may be", "may change").
 _FUNCTION_WORDS = frozenset("at in on by for to from with of and or nor the a an as via into onto per than then when while until till "
                             "since during before after through".split())
+assert _CODE_HEADS <= _NAME_HEADS
 _KINDS = (("qm", _QM), ("fwd", _FWD), ("rev", _REV), ("glued", _GLUED), ("word", _HEDGE_WORD))
 
 
-_PIN_SPAN = re.compile(r"(?<=\w)@[\w.{~^-]*[0-9][\w.+-]*")
+_PIN_SPAN = re.compile(r"(?<=\w)@[\w.{~^-]*?[0-9][\w.]*")
 _RUNS = re.compile(r"[\w.-]+")
 _DOT_RUN = re.compile(r"\.{2,}(?=[^\s/])")
 
@@ -173,9 +187,11 @@ def _token_cuts(t, a, b):
     """D1, THE INVERTED DEFAULT: the positions where token t[a:b] is cut into segments. Only a positive code joiner joins: a letter,
     digit or "_", "." and "/", "::" and "://", the "@" of a pin and its version ("maybe@1.2.3"), a "~" that starts a home path ("~/x"),
     a run of dots only before "/" ("../x"), and a hyphen inside a URL host or inside a FILE OR DIRECTORY NAME (its hyphenated word is
-    followed by "/" or by a dotted run that ends in a known extension: "possible-values.md", "maybe-src/x.py"). Every other mark cuts:
-    "," "(" ")" "=" "?" a lone ":" "#" brackets, quotes, backticks, "|" "&" "+" "!" "*" "%" "^" "$" ";" "<" ">", a dash after a name
-    ("src/emit.py-probably", an em or en dash folded by canon()), and any mark this list does not name. Linear in the token: each run
+    followed by "/" or by a dotted run that ends in a known extension: "possible-values.md", "maybe-src/x.py"). A pin's version is its
+    letters, digits and dots ("lib@1.2.3"); a "-" or "+" after it cuts ("lib@1.2.3+maybe"). Every other mark cuts: "," "(" ")" "=" "?" a
+    lone ":" "#" brackets, quotes, backticks, "|" "&" "+" "!" "*" "%" "^" "$" ";" "<" ">", a dash after a name ("src/emit.py-probably"),
+    and any mark this list does not name. An em or en dash, a look-alike and a zero-width character are cut in the glue reading, before
+    canon() folds or deletes them (THE GLUE RULE). Linear in the token: each run
     of word characters, dots and hyphens is read once."""
     keep, cut_dots = set(), set()
     for m in _PIN_SPAN.finditer(t, a, b):
@@ -257,14 +273,18 @@ class _Toks:
             self._seg[(a, b)] = _token_kind(seg.replace("-", "_")) if seg else None
         return self._seg[(a, b)]
 
-    def whole(self, k, a, b):
-        """Segment t[a:b] is all of token k but its edge punctuation ("(obj.maybe)," is obj.maybe; "status=obj.maybe" is not). The
-        token's core is found once."""
+    def core(self, k):
+        """(start, end) of token k without its edge punctuation, found once."""
         core = self._core.get(k)
         if core is None:
             tok = self.t[self.starts[k]:self.ends[k]]
             core = self._core[k] = (self.starts[k] + len(tok) - len(tok.lstrip(_TOK_EDGE)),
                                     self.ends[k] - len(tok) + len(tok.rstrip(_TOK_EDGE)))
+        return core
+
+    def whole(self, k, a, b):
+        """Segment t[a:b] is all of token k but its edge punctuation ("(obj.maybe)," is obj.maybe; "status=obj.maybe" is not)."""
+        core = self.core(k)
         return a <= core[0] and b >= core[1]
 
     def member(self, a, b, s):
@@ -322,10 +342,12 @@ def _is_name(tx, s, e, lo=0, words=None):
         return False                                  # a word in the scheme position of a URL ("maybe.https://h/x") names nothing
     if kind in ("dotted", "module") and not (tx.whole(k, a, b) and (kind == "module" or tx.member(a, b, s))):
         return False                                  # D6: a bare dotted name is code only as a whole token; a two-part one only for a member
+    if kind in _TAIL_KINDS and s > a and t[s - 1] in "./" and not t[e:b].strip(_TOK_EDGE) and a > tx.core(k)[0]:
+        return False                                  # D6 of re-review 18: the tail of a path, file, URL or pin after a cut (x+docs/maybe)
     if kind in _CODE_KINDS:
         return True                                   # code: possible-values.md, obj.maybe, lib/should
     return (s - 1 == tx.starts[k] and t[s - 1] in _OPEN_QUOTES and k > 0 and tx.starts[k - 1] >= lo
-            and t[tx.ends[k - 1] - 1].isalnum() and _quoted_name(tx, k, s))
+            and t[tx.ends[k - 1] - 1].isalnum() and _quoted_name(tx, k, s, words is not None and " " in words))
 
 
 def _dotted_heads(t, a, b):
@@ -349,7 +371,7 @@ def _dotted_heads(t, a, b):
     return first, (ends[0] if len(ends) >= 2 else 0), (ends[-1] + 1 if len(ends) >= 2 else 0)
 
 
-def _quoted_name(tx, k, s):
+def _quoted_name(tx, k, s, phrase=False):
     """N1, D2: the quote that opens token k (just before s) closes within a few Title-case words, an artifact noun follows the closing
     quote, and the noun ends the text or a location follows it ("at 'Might' handler", "'Probably Fine' alert a.py:2", "`Maybe` bot
     a.py:5"). A quoted label that ends its text, is followed by any other word, or by a noun and then another word ("status 'Needs
@@ -366,12 +388,25 @@ def _quoted_name(tx, k, s):
             if j + 1 >= len(tx.starts) or not t[tx.starts[j + 1]].isalpha():
                 return False
             w = tx.word(j + 1)
-            return ((w in _NAME_HEADS or (w[-1:] == "s" and w[:-1] in _NAME_HEADS) or (w[-2:] == "es" and w[:-2] in _NAME_HEADS)
-                     or (w[-3:] == "ies" and w[:-3] + "y" in _NAME_HEADS))
-                    and (j + 2 >= len(tx.starts) or tx.located(j + 1)))   # D2: the noun ends the text or a location follows it
+            if not _noun_in(w, _NAME_HEADS):
+                return False
+            structure = _noun_in(w, _CODE_HEADS)
+            if j + 2 >= len(tx.starts):
+                return structure                      # D2 of re-review 18: at the text end only a program structure ("at 'Probably' handler")
+            if not tx.located(j + 1):
+                return False
+            if phrase:
+                return structure                      # a quoted hedge PHRASE ('Needs Verification') names only a program structure
+            return structure or tx.code(j + 2) or tx.word(k - 1) in _FUNCTION_WORDS or tx.word(k - 1) in _NOUN_SLOT
         if any(c in close for c in t[a:b]):
             return False                              # closed, then punctuation: "'Might'," is a label
     return False
+
+
+def _noun_in(w, heads):
+    """The noun w, or its plural (-s, -es, -ies), is one of heads."""
+    return (w in heads or (w[-1:] == "s" and w[:-1] in heads) or (w[-2:] == "es" and w[:-2] in heads)
+            or (w[-3:] == "ies" and w[:-3] + "y" in heads))
 
 
 def _is_hedge_word(tx, m, lo=0):
@@ -383,27 +418,50 @@ def _is_hedge_word(tx, m, lo=0):
         return False
     if w.lower() == "may":
         k = tx.at(m.start())
-        if m.end() == tx.ends[k] and _date_after(tx, k, t[m.start()] == "M"):
+        if m.end() == tx.ends[k] and _date_after(tx, k, w == "May", lo):
             return False                              # May 12, may 2026, May 3rd at a.py:3 (not "may 2x", "may 3 times", "may 1)")
         if _time_before(tx, k, lo) and _month_after(tx, k, m.end()):
             return False                              # since may at emit.py:3, in early may (emit.py:3), since May., from May to June
     return True
 
 
-def _date_after(tx, k, capital):
-    """D3: a DATE after the word "may" (token k): a year (4 digits) or a day (1-31, an optional ordinal suffix). A day after "May" with
-    a capital is the date; after a lowercase "may" the date must END there: punctuation glued to the day, the end of the text, a
-    year, or a location ("may 12, 2026", "may 3 at a.py:3"; not "may 3 times retry", "may 1) drop", "may 2x the load"). A ")" closes
-    a date only inside the parenthesis that holds "may" ("(May 12)")."""
-    n = len(tx.starts)
+def _date_after(tx, k, capital, lo=0):
+    """D3: a DATE after the word "may" (token k): a year (19xx or 20xx) or a day (1-31, an optional ordinal suffix). A day or year
+    after a Title-case "May" is the date. After a lowercase or capitals "may" the date must END (D3 of re-review 18): a location
+    follows it ("may 3 at a.py:3", "may 2026 a.py:1"), a year follows the day ("may 12 2026"), glued punctuation and then a year or a
+    location within one word follow ("may 12, 2026", "may 3, see a.py:4"), or the clause ends right after it: after a year
+    ("in may 2026"), or after a day with a time word before "may" ("since may 3"). Not "may 3 times retry", "may 1. drop" (the ". "
+    ends the clause), "may 1, drop", "may 1000 times", "may 2048 times retry", "may 1) drop". A ")" closes a date only inside a
+    parenthesis that opens at "may" or at one of the two tokens before it, with no ")" between ("(May 12)", "(since May 12)", D8)."""
+    t, n = tx.t, len(tx.starts)
     if k + 1 >= n:
         return False
-    m = _DATE_NUM.fullmatch(tx.t, tx.starts[k + 1], tx.ends[k + 1])
-    if not m or (")" in m.group("p") and tx.t[tx.starts[k]] != "("):
+    m = _DATE_NUM.fullmatch(t, tx.starts[k + 1], tx.ends[k + 1])
+    if not m:
         return False
-    if m.group("y") or capital or m.group("p").strip(")"):
+    p = m.group("p")
+    if ")" in p and not _paren_opens(tx, k, lo):
+        return False
+    if capital:
         return True
-    return k + 2 >= n or bool(_YEAR.fullmatch(tx.word(k + 2))) or tx.located(k + 1)
+    year = bool(m.group("y"))
+    if p.replace(")", ""):
+        return k + 2 < n and ((not year and bool(_YEAR.fullmatch(tx.word(k + 2)))) or tx.code(k + 2) or (k + 3 < n and tx.code(k + 3)))
+    if k + 2 >= n:
+        return year or _time_before(tx, k, lo)
+    return (not year and bool(_YEAR.fullmatch(tx.word(k + 2)))) or tx.located(k + 1)
+
+
+def _paren_opens(tx, k, lo):
+    """D8 of re-review 18: an opening "(" heads token k, k-1 or k-2 (never left of lo: a judgement reads at most two tokens left) and
+    no ")" stands between it and token k."""
+    t = tx.t
+    for j in range(k, max(k - 3, -1), -1):
+        if tx.starts[j] < lo:
+            return False
+        if t[tx.starts[j]] == "(":
+            return ")" not in t[tx.starts[j]:tx.starts[k]]
+    return False
 
 
 def _month_after(tx, k, e):
@@ -506,12 +564,13 @@ def hedged(text):
     """True when the text hedges or alternates the claim it belongs to (see the HEDGE note above)."""
     if not isinstance(text, str):
         return False
-    t = canon(text, slashes=True, fold_case=False)
-    cands = _candidates(t)
-    if not cands:
-        return False
-    tx = _Toks(t)
-    return any(_decide(tx, kind, m, 0) for _, kind, m in cands)
+    for t in _readings(text, slashes=True, fold_case=False):    # THE GLUE RULE: either reading
+        cands = _candidates(t)
+        if cands:
+            tx = _Toks(t)
+            if any(_decide(tx, kind, m, 0) for _, kind, m in cands):
+                return True
+    return False
 
 
 # THE AFTER-TEXT OF A SIDE MARK (doubted_suffixes, used by extract_register._marks): the rest of its clause with the other marks blanked
@@ -523,9 +582,10 @@ def hedged(text):
 # it) and inside a zero count that crosses its start.
 
 
-def _joined(pieces, fold_case):
-    """canon() of " ".join(pieces) (slashes folded) and the offset in it where each piece starts, in one pass."""
-    parts = [_canon_chars(p, True) for p in pieces]
+def _joined(pieces, fold_case, glue=False):
+    """canon() of " ".join(pieces) (slashes folded; with glue=True the glue reading) and the offset in it where each piece starts, in
+    one pass."""
+    parts = [_canon_chars(p, True, glue) for p in pieces]
     if fold_case:
         parts = [p.casefold() for p in parts]
     out, cuts, last = [], [], " "
@@ -556,10 +616,18 @@ def doubted_suffixes(pieces):
     total length (see the note above). A piece is the text between two side marks (the mark itself is the joining blank)."""
     if len(pieces) == 1:
         return [negated(pieces[0], doubt=True) or hedged(pieces[0])]
+    flags = _suffix_flags(pieces, False)
+    if any(has_glue(p) for p in pieces):                        # THE GLUE RULE: either reading (a suffix with no glue mark reads alike)
+        flags = [a or b for a, b in zip(flags, _suffix_flags(pieces, True))]
+    return flags
+
+
+def _suffix_flags(pieces, glue):
+    """doubted_suffixes in one reading of the pieces (glue=False: canon(); glue=True: the glue reading)."""
     flags = [False] * len(pieces)
     # negation: zero counts are found once; a hit after a cut is a hit of that suffix unless a zero count that starts in the suffix
     # cancels it, and a zero count that crosses the cut is not applied there (its words after the cut are read raw)
-    t, cuts = _joined(pieces, True)
+    t, cuts = _joined(pieces, True, glue)
     t = t.replace("’", "'")
     zs = [m.span() for m in _ZERO_FAIL.finditer(t)]
     g = list(t)
@@ -577,7 +645,7 @@ def doubted_suffixes(pieces):
             raw = t[q:zs[j][1]]
             flags[i] = bool(_ZERO_PASS.search(raw) or NEG_DOUBT.search(raw) or NEG_CORE.search(raw))
     # hedge: every hit is found once with the whole text as context; each suffix re-judges only its first two tokens without it
-    t, cuts = _joined(pieces, False)
+    t, cuts = _joined(pieces, False, glue)
     cands = _candidates(t)
     if not cands:
         return flags
@@ -611,17 +679,61 @@ def fold(v):
     return t.strip().lower()
 
 
-def canon(v, slashes=False, fold_case=True):
+def canon(v, slashes=False, fold_case=True, glue=False):
     """Placeholder-comparable form: NFKD, combining marks (Mn) and variation selectors removed, format/control
     characters removed, every dash/minus variant folded to "-", case folded, whitespace collapsed. With slashes=True
     every slash look-alike and the backslash fold to "/" too: used for placeholders and negations only, never for
-    a path (a look-alike inside /proc/<n>/exe is not that path)."""
-    t = re.sub(r"\s+", " ", _canon_chars(v, slashes)).strip()
+    a path (a look-alike inside /proc/<n>/exe is not that path). With glue=True every GLUE MARK is first a cut (see THE GLUE
+    RULE): the second reading of a side mark's text."""
+    t = re.sub(r"\s+", " ", _canon_chars(v, slashes, glue)).strip()
     return t.casefold() if fold_case else t
 
 
-def _canon_chars(v, slashes):
-    """canon() before whitespace is collapsed: one output character per kept character, every blank a single space."""
+# THE GLUE RULE (re-review 18 DEFECT 1 and DEFECT 7): canon() folds a dash or a look-alike to its ASCII mark and deletes zero-width,
+# format, control and combining characters. Read only that way, a hedge glued to a name by such a character joins the name: an em
+# dash becomes the hyphen of a file name, a pin version or a URL host ("probably—emit.py:3", "lib@1.2.3—maybe", "https://maybe—ci.x/y"),
+# a fullwidth "＋" the "+" of a pin, a zero-width space nothing at all ("src/emit.py<ZWSP>probably"). A GLUE MARK is a character that is
+# no ASCII mark and that canon() folds or deletes: every dash or minus other than "-", every slash look-alike, any other character
+# that NFKD turns into a mark (fullwidth and compatibility forms: "．" "／" "＿" "＝" "…"), a modifier letter or symbol ("ʼ"), and every
+# zero-width, format, control or combining character. The DASH CUTS BEFORE ANY FOLD: a side mark's text is read a second time with
+# every glue mark as a cut (_GLUE_CUT, no code joiner), and it is hedged or negated when EITHER reading is. Between a name and a word a
+# glue mark therefore cuts ("src/emit.py<ZWSP>probably" is a hedge); inside a word it hides nothing, because the first reading removes
+# it ("pro<ZWSP>bably" is still "probably"). The second reading only adds refusals, never removes one, and is made only for a text
+# that holds a glue mark (ASCII text has none but its control characters).
+_GLUE_CUT = "\u00a6"
+_ASCII_GLUE = re.compile(r"[\x00-\x08\x0e-\x1b\x7f]")
+
+
+@lru_cache(maxsize=4096)
+def _glue_char(c):
+    """A non-ASCII character that is a GLUE MARK (THE GLUE RULE)."""
+    if c.isspace():
+        return False
+    cat = unicodedata.category(c)
+    if cat in ("Mn", "Me", "Cf", "Cc", "Lm", "Sk") or c in _DASHES or cat == "Pd" or c in _SLASHES:
+        return True
+    return not c.isalnum() and unicodedata.normalize("NFKD", c) != c
+
+
+def has_glue(v):
+    """True when the text holds a GLUE MARK (THE GLUE RULE): only then is it read a second time."""
+    if v.isascii():
+        return bool(_ASCII_GLUE.search(v))
+    return any(c < "\x80" and _ASCII_GLUE.match(c) or c >= "\x80" and _glue_char(c) for c in v)
+
+
+def _readings(v, **kw):
+    """canon(v, **kw), and canon(v, glue=True, **kw) when v holds a glue mark: the readings a side mark's text is judged in."""
+    yield canon(v, **kw)
+    if has_glue(v):
+        yield canon(v, glue=True, **kw)
+
+
+def _canon_chars(v, slashes, glue=False):
+    """canon() before whitespace is collapsed: one output character per kept character, every blank a single space. With glue=True
+    every glue mark is _GLUE_CUT before anything is folded."""
+    if glue:
+        v = "".join(_GLUE_CUT if (c < "\x80" and _ASCII_GLUE.match(c)) or (c >= "\x80" and _glue_char(c)) else c for c in v)
     t = unicodedata.normalize("NFKD", v)
     out = []
     for c in t:
@@ -832,10 +944,18 @@ def _is_placeholder_commit(t):
 
 
 def unstated_version(v):
-    """D7: a source version that states nothing: an UNKNOWN-equivalent (is_unknown) or a placeholder wording, by the same rule that
-    reads a commit text (_is_placeholder_commit: "pending", "tbc", "unknown (pending)", "not yet known", "to be confirmed"); a
-    version with a digit ("1.0.0", "v2.3.1-rc.1") or any other word ("stable", "v") is stated."""
-    return is_unknown(v) or _is_placeholder_commit(fold(v))
+    """D7, default inverted (DEFECT 4 of re-review 18): a source version is STATED only on positive evidence, a NUMBER that is not all
+    zeros ("1.0.0", "v2.3.1-rc.1", "2026.11.13", "release-7") or a commit sha (7-64 hex digits, not all zero), and no word that says it is not known (the negation and doubt rule,
+    negated(doubt=True), and the placeholder state words: "1.2 (unconfirmed)", "1.4.0-pending"). Everything else states nothing:
+    an UNKNOWN-equivalent, a placeholder wording ("pending", "unknown (pending)", "unknown-version", "pending-release", "unreleased",
+    "not yet released"), a template ("x.y.z", "vX"), the null version "0.0.0", and any word with no number ("stable", "v", "someday")."""
+    if is_unknown(v):
+        return True
+    t = fold(v)
+    digits = {c for c in t if c.isdigit()}
+    sha = bool(re.fullmatch(r"[0-9a-f]{7,64}", t)) and not _NULL_SHA.fullmatch(t)
+    return ((not sha and (not digits or digits == {"0"})) or negated(t, doubt=True)
+            or any(w in _NE_STATE for w in re.findall(r"[a-z]+", t)))
 
 
 def _non_identifying(t):
