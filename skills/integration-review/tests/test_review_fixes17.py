@@ -161,7 +161,8 @@ class TestD2QuotedLabelNeedsALocatedArtifact(unittest.TestCase):
                     rows += [(tp.format(q=o + title(h) + c, n=n), U) for n in FX["d2_value_words"]]
                     rows += [(tp.format(q=o + h.upper() + c, n=n), U) for n in FX["d2_artifacts"]]
                     if h != "may" and not h.startswith("not "):       # "Not Sure" is refused by the negation layer, as 'Should Not Happen' is
-                        rows += [(tp.format(q=o + title(h) + c, n=n), P) for n in FX["d2_artifacts"]]
+                        rows += [(tp.format(q=o + title(h) + c, n=n), U if n in FX["d2_end_value_holders"] else P)   # re-review 18 DEFECT 2
+                                 for n in FX["d2_artifacts"]]
         bad = wrong(rows)
         self.assertEqual(bad, [], "%d of %d wrong, e.g. %r" % (len(bad), len(rows), bad[:5]))
 

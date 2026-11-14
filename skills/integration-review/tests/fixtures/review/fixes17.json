@@ -208,8 +208,6 @@
   ". before": "path line call file dotted",
   "= before": "*",
   "- before": "path line file",
-  "— before": "path line file",
-  "– before": "path line file",
   "; after": "*"
  },
  "d1_own": [
@@ -577,14 +575,18 @@
   "TBC - see ticket",
   "not yet known",
   "to be confirmed",
-  "Pending."
+  "Pending.",
+  "v",
+  "stable"
  ],
  "d7_keep": [
   "1.0.0",
-  "v",
   "v2.3.1-rc.1",
   "2026.11.13",
-  "release-7",
-  "stable"
+  "release-7"
+ ],
+ "d2_end_value_holders": [
+  "queue",
+  "alert"
  ]
 }
