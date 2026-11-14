@@ -103,12 +103,13 @@ def evidence_text(row):
     return out
 
 
-_CLAUSE_END = re.compile(r"[;\n]|\.\s")
+_CLAUSE_END = re.compile(r"[;\n]|\.[^\S\n]")
 
 
 def _clause_ends(t):
     """The clause ends of t: ";", a newline, or a full stop and a blank, but not the dot of an abbreviation ("vs.", "e.g.", "i.e.",
-    "etc."; ir_norm.abbreviation, one list), so an alternative or a hedge after it stays in the clause. Each token is read once."""
+    "etc."; ir_norm.abbreviation, one list), so an alternative or a hedge after it stays in the clause. A newline always ends a
+    clause, after an abbreviation's dot too ("etc.\n": D5); the dot before a newline is not part of that end. Each token is read once."""
     out = []
     for c in _CLAUSE_END.finditer(t):
         i = c.start()

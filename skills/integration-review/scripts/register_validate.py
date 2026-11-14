@@ -465,7 +465,7 @@ def validate(reg, schema, now=None):
         if _unk(lbl) or _N.canon(lbl) == "unclassified":
             add("unclassified", f"{_safe(r.get('role'))} record is unclassified", rid, gap=True)
         for lab, si in srcs:
-            if _unk(si.get("version")):
+            if _N.unstated_version(si.get("version")):
                 add("unknown-field", f"{lab} source version UNKNOWN", rid, gap=True)
             if _unk(si.get("repo")):
                 add("unknown-field", f"{lab} source repo UNKNOWN", rid, gap=True)

@@ -778,6 +778,13 @@ def _is_placeholder_commit(t):
     return bool(re.search(r"\s", t)) and any(w in _NE_PLACEHOLDER for w in words)
 
 
+def unstated_version(v):
+    """D7: a source version that states nothing: an UNKNOWN-equivalent (is_unknown) or a placeholder wording, by the same rule that
+    reads a commit text (_is_placeholder_commit: "pending", "tbc", "unknown (pending)", "not yet known", "to be confirmed"); a
+    version with a digit ("1.0.0", "v2.3.1-rc.1") or any other word ("stable", "v") is stated."""
+    return is_unknown(v) or _is_placeholder_commit(fold(v))
+
+
 def _non_identifying(t):
     """The null object (an all-zero sha) or a generic moving pointer (see FLOATING_WORDS): names no particular commit."""
     return bool(_NULL_SHA.fullmatch(t) or _FLOATING.fullmatch(t))
