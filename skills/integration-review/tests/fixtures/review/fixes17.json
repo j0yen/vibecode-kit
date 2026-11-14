@@ -1,0 +1,566 @@
+{
+ "_note": "A1659 repair 18 (fix17): review 17 defects D1-D7. Synthetic strings only; reviewer rows are review 17's reproducers (neg17, adj17, own17, findings.json), generator vocabularies follow its probes (glue17, quote17, may17, alt17, abbr17, lessb22).",
+ "stems": [
+  "maybe",
+  "probably",
+  "possibly",
+  "perhaps",
+  "presumably",
+  "apparently",
+  "likely",
+  "seems",
+  "appears",
+  "supposedly",
+  "allegedly",
+  "assumed",
+  "guess",
+  "suspect",
+  "reportedly",
+  "might",
+  "could",
+  "would",
+  "should",
+  "may",
+  "arguably",
+  "plausibly",
+  "tentatively",
+  "iirc",
+  "afaik"
+ ],
+ "d6_reviewer": [
+  "side=producer, status=probably.ok",
+  "side=producer, verdict=maybe.later",
+  "side=producer, result=likely.pass",
+  "side=producer x,emit.py#maybe",
+  "side=producer at side=unknowne.g.maybe",
+  "side=producer, x,cf.maybe",
+  "side=producer at x?cf.maybe",
+  "side=producer cf.maybe(e.g.",
+  "side=producer 1)emit.py#maybe",
+  "side=producer likely=yesemit.py#maybe"
+ ],
+ "d6_cuts": [
+  ",",
+  "(",
+  ")",
+  "=",
+  "?",
+  ":"
+ ],
+ "d6_anchors": {
+  "key": "status",
+  "call": "emit()",
+  "path": "src/emit.py"
+ },
+ "d6_tails": [
+  "ok",
+  "later",
+  "pass",
+  "done"
+ ],
+ "d6_hash_files": [
+  "emit.py",
+  "docs/run.md",
+  "x"
+ ],
+ "d6_own": [
+  "side=producer, outcome=perhaps.final",
+  "side=producer, ci,presumably.green",
+  "side=producer (seemingly:apparently.fine)",
+  "side=producer, gate?arguably.open",
+  "side=producer, check=run.md#possibly",
+  "side=producer state=obj.maybe"
+ ],
+ "d6_keep": [
+  "side=producer at obj.maybe",
+  "side=producer calls x.maybe() at a.py:3",
+  "side=producer at src/maybe.rs:3",
+  "side=producer, see https://h.io/maybe/p?q=1",
+  "side=producer at possible-values.md",
+  "side=producer, x,maybe.py at a.py:3"
+ ],
+ "d1_reviewer": [
+  "side=producer at src/emit.py—probably",
+  "side=producer at docs/run.md#probably",
+  "side=producer per [probably](https://ci.example/run/12)",
+  "side=producer at src/emit.py[maybe]",
+  "side=producer at obj.attr—maybe",
+  "side=producer at src/emit.py–maybe",
+  "side=producer at src/emit.py#maybe",
+  "side=producer at https://ci.example/run/12#probably",
+  "side=producer at emit.py@maybe",
+  "side=producer, cf.maybe",
+  "side=producer, etc.probably",
+  "side=producer, vs.maybe",
+  "side=producer, approx.maybe"
+ ],
+ "d1_anchors": {
+  "key": "status",
+  "path": "src/emit.py",
+  "line": "src/emit.py:3",
+  "call": "emit()",
+  "url": "https://ci.example/run/12",
+  "dotted": "obj.attr",
+  "file": "emit.py"
+ },
+ "d1_glue": [
+  "!",
+  "\"",
+  "#",
+  "$",
+  "%",
+  "&",
+  "'",
+  "(",
+  ")",
+  "*",
+  "+",
+  ",",
+  "-",
+  ".",
+  "/",
+  ":",
+  ";",
+  "<",
+  "=",
+  ">",
+  "?",
+  "@",
+  "[",
+  "\\",
+  "]",
+  "^",
+  "_",
+  "`",
+  "{",
+  "|",
+  "}",
+  "~",
+  "—",
+  "–",
+  "‘",
+  "’",
+  "“",
+  "”"
+ ],
+ "d1_wrap": [
+  [
+   "(",
+   ")"
+  ],
+  [
+   "[",
+   "]"
+  ],
+  [
+   "{",
+   "}"
+  ],
+  [
+   "'",
+   "'"
+  ],
+  [
+   "\"",
+   "\""
+  ],
+  [
+   "`",
+   "`"
+  ],
+  [
+   "‘",
+   "’"
+  ],
+  [
+   "“",
+   "”"
+  ],
+  [
+   "<",
+   ">"
+  ],
+  [
+   "*",
+   "*"
+  ],
+  [
+   "|",
+   "|"
+  ],
+  [
+   "$",
+   "$"
+  ],
+  [
+   "#",
+   "#"
+  ]
+ ],
+ "d1_positive": {
+  "_ before": "*",
+  "_ after": "*",
+  "/ after": "path url",
+  "\\ after": "path url",
+  "/ before": "path line file",
+  "\\ before": "path line file",
+  ". after": "key path url dotted file",
+  ". before": "path line call file",
+  "= before": "*",
+  "- before": "path line file",
+  "— before": "path line file",
+  "– before": "path line file",
+  "; after": "*"
+ },
+ "d1_own": [
+  "side=producer at lib/out.go:7§maybe",
+  "side=producer at src/emit.py→probably",
+  "side=producer see src/emit.py…perhaps",
+  "side=producer at cfg.toml:2·likely",
+  "side=producer at emit()•maybe",
+  "side=producer per `src/emit.py`maybe",
+  "side=producer at status@probably"
+ ],
+ "d1_keep": [
+  "side=producer at src/should-retry/x.py:3",
+  "side=producer reads possible-values.md at a.py:3",
+  "side=producer at Presumably::emit",
+  "side=producer, maybe=1",
+  "side=producer, assumed=true in cfg.toml:2",
+  "side=producer pins maybe@1.2.3 at a.py:3",
+  "side=producer at ~/maybe/x.py",
+  "side=producer mentions @maybe at a.py:3",
+  "side=producer calls maybe!(x) at a.rs:3"
+ ],
+ "d2_reviewer": [
+  "side=producer, reviewer says 'Maybe' test again",
+  "side=producer, ticket in \"Needs Verification\" status",
+  "side=producer, lead said \"Probably\" check later",
+  "side=producer (triage 'Maybe' state)",
+  "side=producer, review 'MAYBE' label set",
+  "side=producer, marked it 'Maybe' status at a.py:3",
+  "side=producer, review 'NEEDS VERIFICATION' label set",
+  "side=producer (triage `Maybe` state)"
+ ],
+ "d2_hedges": [
+  "maybe",
+  "probably",
+  "possibly",
+  "likely",
+  "might",
+  "should",
+  "may",
+  "needs verification",
+  "probably fine",
+  "not sure"
+ ],
+ "d2_quotes": [
+  [
+   "'",
+   "'"
+  ],
+  [
+   "\"",
+   "\""
+  ],
+  [
+   "`",
+   "`"
+  ],
+  [
+   "‘",
+   "’"
+  ],
+  [
+   "“",
+   "”"
+  ]
+ ],
+ "d2_verbs": [
+  "test",
+  "check",
+  "status",
+  "state",
+  "label",
+  "flag",
+  "tag",
+  "release",
+  "record",
+  "review",
+  "verify",
+  "retry",
+  "ship",
+  "merge",
+  "deploy",
+  "result",
+  "verdict",
+  "outcome",
+  "value",
+  "answer",
+  "rating",
+  "level",
+  "mark",
+  "note"
+ ],
+ "d2_templates": [
+  "side=producer, reviewer says {q} {n} again",
+  "side=producer, ticket in {q} {n}",
+  "side=producer ({n} {q} {n})",
+  "side=producer, lead said {q} {n} later",
+  "side=producer, owner set {q} {n}, then left"
+ ],
+ "d2_own": [
+  "side=producer, the team calls it 'Probably' build now",
+  "side=producer, filed under 'Maybe' column today",
+  "side=producer, triaged as “Likely” priority",
+  "side=producer, owner wrote `Should` fix soon"
+ ],
+ "d2_keep": [
+  "side=producer in the 'Might Retry' handler at h.py:3",
+  "side=producer in 'Seems Fine' banner at b.py:2",
+  "side=producer emits 'Probably Fine' alert a.py:2",
+  "side=producer via ‘Seems Ok’ check a.py:1",
+  "side=producer, owner `Maybe` bot a.py:5",
+  "side=producer raises 'Maybe Later' error at a.py:3",
+  "side=producer via ‘Possibly Stale’ flag at a.py:9",
+  "side=producer and the 'Consumer' service at a.py:3"
+ ],
+ "d3_reviewer": [
+  "side=producer, but the queue it reads from may at times differ",
+  "side=producer, though it may 3 times retry",
+  "side=producer, which may 1) drop or 2) retry",
+  "side=producer, though the call to end may in rare cases hang",
+  "side=producer, but the box it runs in may, in theory, differ",
+  "side=producer, though the job it is called by may (rarely) differ",
+  "side=producer, though the call to end may in some builds hang",
+  "side=producer, though the consumer may 2 times retry",
+  "side=producer, but the queue it reads from may at times be the consumer"
+ ],
+ "d3_preps": [
+  "in",
+  "since",
+  "until",
+  "till",
+  "during",
+  "from",
+  "by"
+ ],
+ "d3_part_after": [
+  "in",
+  "since",
+  "until",
+  "till",
+  "during",
+  "from",
+  "by",
+  "at",
+  "of",
+  "to",
+  "before",
+  "after",
+  "through"
+ ],
+ "d3_parts": [
+  "early",
+  "late",
+  "mid",
+  "end"
+ ],
+ "d3_stranded": {
+  "in": "the box it runs in",
+  "from": "the queue it reads from",
+  "by": "the job it is called by",
+  "since": "the build it changed since",
+  "until": "the run it waits until",
+  "till": "the run it waits till",
+  "during": "the window it runs during"
+ },
+ "d3_follow": {
+  "adverbial": "may in some builds read it",
+  "fn-at": "may at times read it",
+  "comma": "may, in theory, change",
+  "paren": "may (rarely) read it",
+  "number": "may 2 times retry",
+  "enum": "may 1) drop or 2) retry",
+  "then": "may then call it",
+  "on": "may on retry differ",
+  "as": "may as well differ",
+  "num-x": "may 3 x the load",
+  "ordinal": "may 1st check it",
+  "day-word": "may 12 times retry"
+ },
+ "d3_clause_end": {
+  "end": "may",
+  "dot-end": "may."
+ },
+ "d3_own": [
+  "side=producer, though the cache it writes to may by design lag",
+  "side=producer, but the host it boots from may 4 seconds lag",
+  "side=producer, the pool it draws from may, under load, shrink",
+  "side=producer, since then it may 7 retries fire"
+ ],
+ "d3_keep": [
+  "side=producer since May 4th at a.py:3",
+  "side=producer in May 2026 per a.py:3",
+  "side=producer since May.",
+  "side=producer from May to June in a.py:3",
+  "side=producer by end May, see a.py:4",
+  "side=producer until late May, per a.py:3",
+  "side=producer, May 3 release a.py:1",
+  "May 12 log: side=producer",
+  "side=producer during may (a.py:3)",
+  "side=producer as of mid May e.py:3",
+  "side=producer, shipped in may.",
+  "side=producer, released (May 12) at a.py:3"
+ ],
+ "d4_reviewer": [
+  "side=producer or the third-party consumer",
+  "side=producer or the 2 consumers",
+  "side=producer, or on the consumer side",
+  "side=producer or the v2 consumer",
+  "side=producer or the 'old' consumer",
+  "side=producer / the legacy consumer",
+  "side=producer or a 2nd caller",
+  "side=producer or the `legacy` adapter",
+  "side=producer or the old, consumer"
+ ],
+ "d4_conn": {
+  "or": "side=producer or {m}{s}",
+  "or-else": "side=producer or else {m}{s}",
+  "either": "either side=producer or {m}{s}",
+  "and/or": "side=producer and/or {m}{s}",
+  "nor": "neither side=producer nor {m}{s}",
+  "alternatively": "side=producer, alternatively {m}{s}",
+  "versus": "side=producer versus {m}{s}",
+  "vs": "side=producer vs {m}{s}",
+  "or,": "side=producer, or, {m}{s}",
+  "OR": "side=producer OR {m}{s}",
+  "slash": "side=producer / {m}{s}",
+  "pipe": "side=producer | {m}{s}"
+ },
+ "d4_mods": {
+  "det": "the ",
+  "poss": "its ",
+  "adj": "legacy ",
+  "det+adj": "the legacy ",
+  "number": "the 2 ",
+  "num-ord": "a 2nd ",
+  "v2": "the v2 ",
+  "hyphen": "the third-party ",
+  "hyphen2": "a long-lived ",
+  "quoted-adj": "the 'old' ",
+  "backtick-adj": "the `legacy` ",
+  "prep-on": "on the ",
+  "prep-to": "to the ",
+  "prep-for": "for the ",
+  "prep-via": "via the ",
+  "even": "even the ",
+  "comma-adj": "the old, ",
+  "some": "some ",
+  "other": "another ",
+  "paren": "(the) ",
+  "percent": "50% of ",
+  "dash": "— the ",
+  "sym": "#2 "
+ },
+ "d4_sides": [
+  "consumer",
+  "caller",
+  "adapter",
+  "consumers"
+ ],
+ "d4_own": [
+  "side=producer or, in practice, the consumer",
+  "side=producer or 3.x consumers",
+  "side=producer or @team's consumer",
+  "side=producer or [the] consumer"
+ ],
+ "d4_keep": [
+  "side=producer emits to a.py:3 or b.py:4",
+  "side=producer / wiki page api/producers.md:1",
+  "side=producer at a.py:3, retried 2 or 3 times by the consumer",
+  "side=producer or see docs/consumers.md"
+ ],
+ "d5_reviewer": [
+  "side=producer at a.py:3, etc.\nmaybe the consumer reads it at b.py:4",
+  "side=producer, etc.\nperhaps the consumer"
+ ],
+ "d5_templates": [
+  "side=producer at a.py:3, {a}.\nmaybe the consumer reads it at b.py:4",
+  "side=producer ({a}.\nprobably stale)",
+  "side=producer, {a}.\nor consumer",
+  "side=producer {a}.\r\nperhaps the adapter"
+ ],
+ "d5_joined_templates": [
+  "side=producer at a.py:3, {a}. maybe the consumer reads it at b.py:4",
+  "side=producer, {a}. or consumer"
+ ],
+ "d5_abbr": [
+  "vs",
+  "cf",
+  "etc",
+  "eg",
+  "ie",
+  "viz",
+  "incl",
+  "resp",
+  "approx",
+  "esp",
+  "al",
+  "ca",
+  "e.g",
+  "i.e",
+  "a.k.a",
+  "n.b"
+ ],
+ "d5_own": [
+  "side=producer, see the list, i.e.\nlikely the caller",
+  "side=producer at a.py:3 (approx.\nmight be the adapter)",
+  "side=producer, a.k.a.\npossibly a consumer"
+ ],
+ "d5_vocab": [
+  "side=producer",
+  "side=consumer",
+  "maybe",
+  "or",
+  "consumer",
+  "etc.",
+  "e.g.",
+  "vs.",
+  "i.e.",
+  "cf.",
+  "a.py:3",
+  "\n",
+  ";",
+  ". ",
+  "the",
+  "at",
+  "not",
+  "0 failed",
+  "probably",
+  "Maybe",
+  "approx.",
+  "x",
+  ","
+ ],
+ "d7_reviewer": [
+  "pending",
+  "tbc",
+  "unknown (pending)"
+ ],
+ "d7_own": [
+  "pending (awaiting CI)",
+  "TBC - see ticket",
+  "not yet known",
+  "to be confirmed",
+  "Pending."
+ ],
+ "d7_keep": [
+  "1.0.0",
+  "v",
+  "v2.3.1-rc.1",
+  "2026.11.13",
+  "release-7",
+  "stable"
+ ]
+}
