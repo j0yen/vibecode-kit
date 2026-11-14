@@ -140,15 +140,20 @@ _CLOSE_QUOTES = {"'": "'’", '"': '"”', "`": "`", "‘": "’'", "“": '”"
 _QUOTE_WORDS = 8
 _NAME_HEADS = frozenset(
     "handler module class type enum variant function method field flag label banner alert queue topic event message check bot job "
-    "task step stage state status mode option setting button page screen dialog view widget panel tab menu component service package "
-    "crate library plugin hook test case file branch tag release version feature error exception warning header key value record "
+    "task step stage mode option setting button page screen dialog view widget panel tab menu component service package "
+    "crate library plugin hook test case file branch tag release version feature error exception warning header key record "
     "template rule policy role team project repo app endpoint route command tool script table column index schema config macro trait "
     "interface struct constant variable worker daemon timer channel stream bucket".split())
 _ANSWERS = frozenset("yes no true false y n on off ok".split())
 _MONTH_AFTER = frozenset(("in", "since", "until", "till", "during", "from", "by"))
 _MONTH_PART = frozenset(("early", "late", "mid", "end"))          # a time word only after a preposition (N3)
 _MONTH_PART_AFTER = _MONTH_AFTER | frozenset(("at", "of", "to", "before", "after", "through"))
-_DATE_NUM = re.compile(r"\d{1,4}(?:st|nd|rd|th)?[,.;:)]*", re.I)
+_DATE_NUM = re.compile(r"(?:(?P<y>\d{4})|(?:0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?)(?P<p>[,.;:)]*)", re.I)
+_YEAR = re.compile(r"\d{4}")
+_CLOSERS = ")]}'\"`’”"
+_RANGE = frozenset(("to", "through", "till", "until", "-"))
+_MONTHS = frozenset("january february march april may june july august september october november december jan feb mar apr jun "
+                    "jul aug sep sept oct nov dec".split())
 # A word after the month that is no verb: a function word (the modal "may" takes a verb: "may be", "may change").
 _FUNCTION_WORDS = frozenset("at in on by for to from with of and or nor the a an as via into onto per than then when while until till "
                             "since during before after through".split())
@@ -305,14 +310,16 @@ def _quoted_name(tx, k, s):
     close = _CLOSE_QUOTES[t[s - 1]]
     for j in range(k, min(k + _QUOTE_WORDS, len(tx.starts))):
         a, b = (s if j == k else tx.starts[j]), tx.ends[j]
-        if not t[a].isupper():
-            return False                              # every word inside the quotes is Capitalised
+        word = t[a:b].strip(_TOK_EDGE + "‘’“”")
+        if not t[a].isupper() or (len(word) > 1 and word.isupper()):
+            return False                              # every word inside the quotes is Title-case ("Might"; not "MAYBE")
         if t[b - 1] in close and b - 1 > a:
             if j + 1 >= len(tx.starts) or not t[tx.starts[j + 1]].isalpha():
                 return False
             w = tx.word(j + 1)
-            return (w in _NAME_HEADS or (w[-1:] == "s" and w[:-1] in _NAME_HEADS) or (w[-2:] == "es" and w[:-2] in _NAME_HEADS)
-                    or (w[-3:] == "ies" and w[:-3] + "y" in _NAME_HEADS))
+            return ((w in _NAME_HEADS or (w[-1:] == "s" and w[:-1] in _NAME_HEADS) or (w[-2:] == "es" and w[:-2] in _NAME_HEADS)
+                     or (w[-3:] == "ies" and w[:-3] + "y" in _NAME_HEADS))
+                    and (j + 2 >= len(tx.starts) or tx.located(j + 1)))   # D2: the noun ends the text or a location follows it
         if any(c in close for c in t[a:b]):
             return False                              # closed, then punctuation: "'Might'," is a label
     return False
@@ -327,14 +334,47 @@ def _is_hedge_word(tx, m, lo=0):
         return False
     if w.lower() == "may":
         k = tx.at(m.start())
-        nxt = k + 1 < len(tx.starts)
-        if nxt and _DATE_NUM.fullmatch(t[tx.starts[k + 1]:tx.ends[k + 1]]):
-            return False                              # May 12, may 2026, May 3rd (not "may 2x the load")
-        if _time_before(tx, k, lo):
-            if (m.end() < tx.ends[k] or not nxt or not t[tx.starts[k + 1]].isalpha() or tx.code(k + 1)
-                    or tx.word(k + 1) in _FUNCTION_WORDS):
-                return False                          # since may at emit.py:3, in early may (emit.py:3), since May.
+        if m.end() == tx.ends[k] and _date_after(tx, k, t[m.start()] == "M"):
+            return False                              # May 12, may 2026, May 3rd at a.py:3 (not "may 2x", "may 3 times", "may 1)")
+        if _time_before(tx, k, lo) and _month_after(tx, k, m.end()):
+            return False                              # since may at emit.py:3, in early may (emit.py:3), since May., from May to June
     return True
+
+
+def _date_after(tx, k, capital):
+    """D3: a DATE after the word "may" (token k): a year (4 digits) or a day (1-31, an optional ordinal suffix). A day after "May" with
+    a capital is the date; after a lowercase "may" the date must END there: punctuation glued to the day, the end of the text, a
+    year, or a location ("may 12, 2026", "may 3 at a.py:3"; not "may 3 times retry", "may 1) drop", "may 2x the load"). A ")" closes
+    a date only inside the parenthesis that holds "may" ("(May 12)")."""
+    n = len(tx.starts)
+    if k + 1 >= n:
+        return False
+    m = _DATE_NUM.fullmatch(tx.t, tx.starts[k + 1], tx.ends[k + 1])
+    if not m or (")" in m.group("p") and tx.t[tx.starts[k]] != "("):
+        return False
+    if m.group("y") or capital or m.group("p").strip(")"):
+        return True
+    return k + 2 >= n or bool(_YEAR.fullmatch(tx.word(k + 2))) or tx.located(k + 1)
+
+
+def _month_after(tx, k, e):
+    """D3: after a time word, what follows "may" (token k, the word ending at e) must be no verb: the clause end ("since May",
+    "since May."), a LOCATION ("since may at emit.py:3", "until may e.py:3", "in early may (a.py:3)"; tx.located), a comma and then
+    a location within one word ("by end May, see a.py:4"), or a month range ("from May to June"). Anything else, an unlisted word
+    included, reads "may" as the modal ("from may differ", "reads from may at times differ", "runs in may, in theory, differ")."""
+    t, n = tx.t, len(tx.starts)
+    rest = t[e:tx.ends[k]].lstrip(_CLOSERS)
+    if rest[:1] in (".", ";", "!"):
+        return True
+    if rest[:1] == ",":
+        return k + 1 < n and (tx.code(k + 1) or (k + 2 < n and tx.code(k + 2)))
+    if rest:
+        return False
+    if k + 1 >= n:
+        return True
+    if tx.code(k + 1) or tx.located(k):
+        return True
+    return tx.word(k + 1) in _RANGE and k + 2 < n and tx.word(k + 2) in _MONTHS
 
 
 def _time_before(tx, k, lo):
