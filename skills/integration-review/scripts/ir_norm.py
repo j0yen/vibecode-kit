@@ -173,10 +173,11 @@ _DOT_RUN = re.compile(r"\.{2,}(?=[^\s/])")
 def _token_cuts(t, a, b):
     """D1, THE INVERTED DEFAULT: the positions where token t[a:b] is cut into segments. Only a positive code joiner joins: a letter,
     digit or "_", "." and "/", "::" and "://", the "@" of a pin and its version ("maybe@1.2.3"), a "~" that starts a home path ("~/x"),
-    a run of dots only before "/" ("../x"), and a hyphen inside a URL host or inside a FILE OR DIRECTORY NAME (its hyphenated word is followed by "/" or by a dotted run that
-    ends in a known extension: "possible-values.md", "maybe-src/x.py"). Every other mark cuts: "," "(" ")" "=" "?" a lone ":" "#"
-    brackets, quotes, backticks, "|" "&" "+" "!" "*" "%" "^" "$" ";" "<" ">", a dash after a name ("src/emit.py-probably", an em or
-    en dash folded by canon()), and any mark this list does not name. Linear in the token: each run of [\w.-] is read once."""
+    a run of dots only before "/" ("../x"), and a hyphen inside a URL host or inside a FILE OR DIRECTORY NAME (its hyphenated word is
+    followed by "/" or by a dotted run that ends in a known extension: "possible-values.md", "maybe-src/x.py"). Every other mark cuts:
+    "," "(" ")" "=" "?" a lone ":" "#" brackets, quotes, backticks, "|" "&" "+" "!" "*" "%" "^" "$" ";" "<" ">", a dash after a name
+    ("src/emit.py-probably", an em or en dash folded by canon()), and any mark this list does not name. Linear in the token: each run
+    of word characters, dots and hyphens is read once."""
     keep, cut_dots = set(), set()
     for m in _PIN_SPAN.finditer(t, a, b):
         keep.update(range(m.start(), m.end()))
