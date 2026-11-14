@@ -1,0 +1,550 @@
+{
+ "_note": "Synthetic, source-only forms copied verbatim from the reviewer's probes of re-review 15 (cls15.py, fin15.py, sem15.py, hole15.py, hole15b.py, hole15c.py, conn15.py, neg15.py, eq15.py, eq15b.py). They exercise rules, not production behavior.",
+ "cls15_words": [
+  "probably",
+  "possible",
+  "perhaps",
+  "maybe",
+  "presumed",
+  "apparent",
+  "seems",
+  "appears",
+  "supposed",
+  "alleged",
+  "reputation",
+  "plausible",
+  "likely",
+  "unlikely",
+  "assumptions",
+  "guesswork",
+  "suspect",
+  "believe",
+  "roughly",
+  "approx",
+  "might",
+  "could",
+  "would",
+  "should",
+  "may",
+  "ish",
+  "apparently",
+  "reportedly"
+ ],
+ "cls15_shapes": [
+  "src/{w}/x.py",
+  "{w}.py",
+  "{w}_x.py",
+  "x_{w}.py",
+  "x-{w}.py",
+  "x{W}Y",
+  "a.{w}.b",
+  "https://h.io/{w}/p?q=1",
+  "{w}.py:12",
+  "src/{w}.rs#L3",
+  "{W}.java",
+  "{w}-case.md",
+  "lib/{w}",
+  "{W}Error",
+  "x_{w}",
+  "{w}_",
+  "./{w}.py",
+  "C:\\x\\{w}.py",
+  "{w}/",
+  "{w}.",
+  "@{w}",
+  "tests/test_{w}.py::t",
+  "{w}()",
+  "x.{w}()",
+  "{W}::new",
+  "obj.{w}",
+  "{w}=1",
+  "'{W}' handler",
+  "{w}-http",
+  "{w}s.md"
+ ],
+ "cls15_prose_words": [
+  "probably",
+  "maybe",
+  "perhaps",
+  "possibly",
+  "presumably",
+  "apparently",
+  "seems",
+  "appears",
+  "supposedly",
+  "allegedly",
+  "likely",
+  "unlikely",
+  "might",
+  "could",
+  "would",
+  "should",
+  "may",
+  "assumed",
+  "reportedly",
+  "suspect",
+  "believed",
+  "roughly",
+  "approximately"
+ ],
+ "cls15_prose_templates": [
+  "side=producer {w}",
+  "{w} side=producer",
+  "side=producer, {w} a.py:3",
+  "src/a.py:3 {w} side=producer",
+  "side=producer. {W} a.py:3",
+  "side=producer; {w}",
+  "side=producer ({w})",
+  "side=producer - {w}",
+  "\"{w}\" side=producer",
+  "side=producer {w}:",
+  "side=producer ... {w}",
+  "side=producer a.py:3 {w}.",
+  "side=producer a.py:3, {w} the other",
+  "side=producer: {W}",
+  "emits. {W} side=producer",
+  "side=producer a.py:3 {w}/{w}"
+ ],
+ "fin15_hedged": [
+  "yes I think side=producer",
+  "so I think side=producer a.py:3",
+  "side=producer, which I think is right",
+  "side=producer and I think so",
+  "it was I think side=producer",
+  "side=producer I Think",
+  "side=producer Not Sure",
+  "side=producer Needs Verification",
+  "side=producer Kind Of",
+  "the end may change side=producer",
+  "side=producer from may differ",
+  "side=producer by may be consumer",
+  "side=producer mid may change",
+  "Consumer Might Read This side=producer",
+  "the handler Seems to side=producer",
+  "side=producer or consumer.py",
+  "side=producer or consumer-v2",
+  "side=producer and `consumer`",
+  "side=producer or consumer_side",
+  "side=producer maybe/",
+  "side=producer might/",
+  "side=producer probably",
+  "maybe side=producer",
+  "side=producer or consumer",
+  "side=producer / adapter",
+  "side=producer, perhaps",
+  "side=producer might later change",
+  "side=producer?"
+ ],
+ "fin15_good": [
+  "side=producer",
+  "side=producer in May at a.py:3",
+  "side=producer since May a.py:3",
+  "side=producer in src/consumer/handler.py:9",
+  "side=producer at assumptions.md:3",
+  "side=producer in appearance.css:4",
+  "side=producer reputation.py:2",
+  "side=producer possible_values.py:1",
+  "side=producer maybe.py:3",
+  "side=producer Mighty.rs:1",
+  "side=producer via adapter-http a.py:4",
+  "side=producer, consumer_test.py:1",
+  "side=producer; see src/producers/x.py:2",
+  "side=producer at https://h/o/should/x.py#L3",
+  "side=producer at tests/test_could.py::test_a",
+  "side=producer at src/Probably.java:3",
+  "side=producer at Seems.java:3",
+  "side=producer a.py:3 AssumptionError",
+  "side=producer in config/assumed.yaml:2",
+  "side=producer at src/probably/emit.py:3",
+  "side=producer in 'Might' handler a.py:3",
+  "side=producer via crate::maybe_emit()",
+  "side=producer, class PossiblyEmitter in e.py:4",
+  "side=producer in possible-values.md:3",
+  "side=producer in should-fail-cases.md:3",
+  "side=producer calls maybe() at a.py:3",
+  "side=producer via should() helper a.py:3",
+  "side=producer in assumed-roles.yaml:1",
+  "side=producer in 'Should Not Happen' handler a.py:3",
+  "side=producer returns 404 Not Found at api.py:9"
+ ],
+ "sem15": [
+  [
+   "ident-bound",
+   "side=producer at src/probably/emit.py:3",
+   "producer"
+  ],
+  [
+   "ident-bound",
+   "side=producer in test_should_retry.py:12",
+   "producer"
+  ],
+  [
+   "ident-bound",
+   "side=producer, class PossiblyEmitter in e.py:4",
+   "producer"
+  ],
+  [
+   "ident-bound",
+   "side=producer in src/mayhem.rs:2",
+   "producer"
+  ],
+  [
+   "ident-bound",
+   "side=producer via crate::maybe_emit()",
+   "producer"
+  ],
+  [
+   "ident-bound",
+   "side=producer, probably in src/x.py:3",
+   "UNKNOWN"
+  ],
+  [
+   "ident-bound",
+   "side=producer at src/maybe.py:3, maybe",
+   "UNKNOWN"
+  ],
+  [
+   "ident-bound",
+   "side=producer in emit.py:3 it should work",
+   "UNKNOWN"
+  ],
+  [
+   "capital",
+   "side=producer in 'Might' handler e.py:3",
+   "producer"
+  ],
+  [
+   "capital",
+   "side=producer via the Could module e.py:3",
+   "producer"
+  ],
+  [
+   "capital",
+   "side=producer at e.py:3 (Probably.java)",
+   "producer"
+  ],
+  [
+   "capital",
+   "Maybe side=producer",
+   "UNKNOWN"
+  ],
+  [
+   "capital",
+   "emits. Possibly side=producer",
+   "UNKNOWN"
+  ],
+  [
+   "capital",
+   "side=producer; Perhaps",
+   "UNKNOWN"
+  ],
+  [
+   "capital",
+   "side=producer, which I think is right",
+   "UNKNOWN"
+  ],
+  [
+   "capital",
+   "side=producer and I think so",
+   "UNKNOWN"
+  ],
+  [
+   "capital",
+   "side=producer Probably",
+   "UNKNOWN"
+  ],
+  [
+   "capital",
+   "Handler Seems side=producer",
+   "UNKNOWN"
+  ],
+  [
+   "month",
+   "side=producer since May at e.py:3",
+   "producer"
+  ],
+  [
+   "month",
+   "side=producer as of mid May e.py:3",
+   "producer"
+  ],
+  [
+   "month",
+   "side=producer until may e.py:3",
+   "producer"
+  ],
+  [
+   "month",
+   "side=producer, it may change",
+   "UNKNOWN"
+  ],
+  [
+   "month",
+   "side=producer by may be",
+   "UNKNOWN"
+  ],
+  [
+   "month",
+   "side=producer from may differ",
+   "UNKNOWN"
+  ],
+  [
+   "month",
+   "the end may change side=producer",
+   "UNKNOWN"
+  ],
+  [
+   "bare-side",
+   "side=producer at src/adapter/send.py:3",
+   "producer"
+  ],
+  [
+   "bare-side",
+   "side=producer, see callers/x.py:3 and adapter-http",
+   "producer"
+  ],
+  [
+   "bare-side",
+   "side=producer or consumer",
+   "UNKNOWN"
+  ],
+  [
+   "bare-side",
+   "side=producer / adapter",
+   "UNKNOWN"
+  ],
+  [
+   "bare-side",
+   "side=producer and `consumer`",
+   "UNKNOWN"
+  ],
+  [
+   "bare-side",
+   "side=producer or consumer.py",
+   "UNKNOWN"
+  ],
+  [
+   "bare-side",
+   "side=producer or consumer-v2",
+   "UNKNOWN"
+  ],
+  [
+   "marks",
+   "side=producer a.py:1, side=consumer b.py:2",
+   null
+  ],
+  [
+   "marks",
+   "side=producer a.py:1, not side=consumer b.py:2",
+   "producer"
+  ],
+  [
+   "marks",
+   "side=producer a.py:1 side=consumer b.py:2 maybe",
+   "UNKNOWN"
+  ],
+  [
+   "marks",
+   "side=producer a.py:1 side=consumer b.py:2; maybe",
+   "both-or-unk"
+  ],
+  [
+   "marks",
+   "side=producer a.py:1. maybe side=consumer b.py:2",
+   "mixed"
+  ]
+ ],
+ "hole15_hedged": [
+  "side is producer I think",
+  "yes I think side=producer",
+  "side=producer I Think",
+  "side=producer Not Sure",
+  "side=producer Probably",
+  "Consumer Might Read This side=producer",
+  "the handler Seems to side=producer",
+  "side=producer by may be consumer",
+  "side=producer mid may change",
+  "the end may change side=producer",
+  "side=producer from may be",
+  "side=producer Needs Verification",
+  "side=producer To Be Confirmed",
+  "side=producer Unlikely",
+  "side=producer Believed",
+  "side=producer Perhaps",
+  "side=producer Maybe",
+  "side=producer Kind Of",
+  "side=producer Sort of",
+  "side=producer or consumer_side",
+  "side=producer maybe/",
+  "side=producer might/",
+  "side=producer probably.",
+  "side=producer Possibly the other",
+  "side=producer I Guess",
+  "side=producer, i think",
+  "side=producer yes I suspect"
+ ],
+ "hole15_good": [
+  "side=producer",
+  "side=producer in May at a.py:3",
+  "side=producer, May 3 release a.py:1",
+  "side=producer in src/consumer/handler.py:9",
+  "side=producer at assumptions.md:3",
+  "side=producer in appearance.css:4",
+  "side=producer reputation.py:2",
+  "side=producer possible_values.py:1",
+  "side=producer maybe.py:3",
+  "side=producer Mighty.rs:1",
+  "side=producer via adapter-http a.py:4",
+  "side=producer, consumer_test.py:1",
+  "side=producer; see src/producers/x.py:2",
+  "side=producer at https://h/o/should/x.py#L3",
+  "side=producer at tests/test_could.py::test_a",
+  "side=producer at src/Probably.java:3",
+  "side=producer at Seems.java:3",
+  "side=producer in Should::Not",
+  "side=producer a.py:3 AssumptionError",
+  "side=producer in config/assumed.yaml:2"
+ ],
+ "hole15b": [
+  "side=producer, which I think is right",
+  "side=producer and I think so",
+  "side=producer but I think not",
+  "the emitter, I think side=producer",
+  "emit.py is side=producer I think",
+  "side=producer; I think",
+  "side=producer. I think",
+  "side=producer I think",
+  "I think side=producer",
+  "so I think side=producer a.py:3",
+  "side=producer (I think)",
+  "side=producer - I think",
+  "side=producer, we think",
+  "it was I think side=producer"
+ ],
+ "hole15c": [
+  "side=producer",
+  "yes I think side=producer",
+  "so I think side=producer",
+  "yes, I think side=producer",
+  "side=producer yes I think",
+  "yes I think side=producer at a.py:3"
+ ],
+ "conn15": [
+  "side=producer or consumer",
+  "side=producer or consumer-side",
+  "side=producer or the consumer",
+  "side=producer and consumer",
+  "side=producer / consumer",
+  "side=producer/consumer",
+  "side=producer, consumer",
+  "side=producer | consumer",
+  "side=producer or consumer's",
+  "side=producer or consumer.",
+  "side=producer or consumers",
+  "side=producer & adapter",
+  "side=producer vs consumer",
+  "side=producer or caller (unclear)",
+  "side=producer or consumer_side",
+  "side=producer or consumer.py",
+  "side=producer or consumer/adapter",
+  "side=producer or consumer: see a.py",
+  "side=producer or consumer’s",
+  "side=producer or consumer-v2",
+  "side=producer or consumer_",
+  "side=producer or `consumer`",
+  "side=producer or \"consumer\"",
+  "side=producer or consumer=1",
+  "side=producer or *consumer*",
+  "side=producer or (consumer)",
+  "side=producer or consumer-",
+  "side=producer or consumer—",
+  "side=producer or consumer;",
+  "side=producer or consumer?",
+  "side=producer or Consumer",
+  "side=producer or CONSUMER",
+  "side=producer or consumer service",
+  "side=producer or consumer #3",
+  "side=producer or consumer@v2",
+  "side=producer or consumer:",
+  "side=producer or consumer~",
+  "side=producer or consumer,"
+ ],
+ "neg15": [
+  "side=producer in 'Should Not Happen' handler a.py:3",
+  "side=producer returns 404 Not Found at api.py:9",
+  "side=producer emits 'Not Found' event a.py:3",
+  "side=producer in NotFoundHandler a.py:3",
+  "side=producer raises NotImplementedError a.py:3",
+  "side=producer HTTP 304 Not Modified a.py:3",
+  "side=producer topic \"Do Not Disturb\" a.py:3",
+  "side=producer, class NoopSink a.py:1",
+  "side=producer in not_found.py:3",
+  "side=producer notifies via a.py:3",
+  "side=producer at Nothing.rs:2",
+  "side=producer in no_retry.py:4",
+  "side=producer in noindex.html:2"
+ ],
+ "eq15_vocab": [
+  "side=producer",
+  "side=consumer",
+  "side=adapter",
+  "side=caller",
+  "not",
+  "no",
+  "never",
+  "without",
+  "isn't",
+  "maybe",
+  "probably",
+  "a.py:3",
+  "emits",
+  "topic",
+  "; ",
+  "\n",
+  ". ",
+  "and",
+  "or",
+  "unchecked",
+  "evidence",
+  "that",
+  "may",
+  "in",
+  "—",
+  ",",
+  "(",
+  ")",
+  "verified",
+  "failed",
+  "zero",
+  "0",
+  "side=producer?",
+  "src/consumer/x.py",
+  "i think",
+  "should",
+  "unlikely",
+  "would"
+ ],
+ "eq15b_extra": [
+  "zero",
+  "0",
+  "no failures",
+  "failed",
+  "unchecked",
+  "not",
+  "fails"
+ ],
+ "eq15b_dropped": [
+  "may",
+  "in",
+  "i think",
+  "should",
+  "would",
+  "unlikely",
+  "maybe",
+  "probably",
+  "src/consumer/x.py",
+  "side=producer?",
+  "a.py:3"
+ ],
+ "d5_example": "side=consumer zero side=producer fails"
+}

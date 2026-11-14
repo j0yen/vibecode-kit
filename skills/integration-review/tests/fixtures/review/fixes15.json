@@ -1,0 +1,209 @@
+{
+ "_note": "Own synthetic, source-only fixtures for repair 16 of A1659 (the name-vs-hedge invariant, out/invariant.md). Nothing here is spelled in the code. They exercise rules, not production behavior.",
+ "cls15_refused_shapes": {
+  "{w}.": "a sentence end: the word is prose (review 15 agrees)",
+  "{w}/": "one segment and a trailing slash is no path by the shared code-token rule; review 15 counts it genuine in cls15 and as a hedge in fin15 (maybe/, might/): the invariant resolves the contradiction to refusal",
+  "{w}-http": "a kebab compound with no other code mark is a prose compound (would-be, likely-stale) and keeps its hedge: refusal"
+ },
+ "fin15_good_negation_layer": {
+  "side=producer in 'Should Not Happen' handler a.py:3": "the hedge layer reads a name; the negation layer reads Not (upheld dispute of review 15)",
+  "side=producer returns 404 Not Found at api.py:9": "the negation layer reads Not (pre-existing, same on 83bb0390 and 5de4632b)",
+  "side=producer in should-fail-cases.md:3": "the hedge layer now reads a name (D4); the negation layer reads the word fail inside the name (pre-existing, same on 83bb0390 and 5de4632b; same class as the upheld dispute)"
+ },
+ "hole15_good_negation_layer": {
+  "side=producer in Should::Not": "Should::Not is a name for the hedge layer; the negation layer reads Not (same class as the upheld dispute)"
+ },
+ "sem15_disputed": {
+  "side=producer via the Could module e.py:3": [
+   "UNKNOWN",
+   "an unquoted capital is no name evidence (D1): restate as 'Could' module or Could.py"
+  ],
+  "side=producer, see callers/x.py:3 and adapter-http": [
+   "UNKNOWN",
+   "a conjunction beside a prose side word (adapter-http has no code mark) adds a second side: refusal"
+  ],
+  "side=producer; Perhaps": [
+   "producer",
+   "a semicolon ends the clause, so the hedge belongs to the next clause (by design, same on base; review 15 agrees)"
+  ]
+ },
+ "sem15_info_expected": {
+  "side=producer a.py:1, side=consumer b.py:2": "UNKNOWN",
+  "side=producer a.py:1, not side=consumer b.py:2": "producer",
+  "side=producer a.py:1 side=consumer b.py:2 maybe": "UNKNOWN",
+  "side=producer a.py:1 side=consumer b.py:2; maybe": "UNKNOWN",
+  "side=producer a.py:1. maybe side=consumer b.py:2": "producer"
+ },
+ "hole15b_kept": {
+  "side=producer; I think": "a semicolon ends the clause (by design)",
+  "side=producer. I think": "a full stop ends the clause (by design)",
+  "side=producer, we think": "an unlisted wording of doubt (Y2 vocabulary residual, English only, SKILL.md states it)"
+ },
+ "conn15_kept": {
+  "side=producer, consumer": "a comma is no connective (pre-existing on 83bb0390 and 5de4632b; listed residual)"
+ },
+ "own_name_code": [
+  "side=producer at docs/would-be-owners.md:7",
+  "side=producer via probable.handler.run() a.py:3",
+  "side=producer, see Presumably::emit",
+  "side=producer per guess_count=3 in a.py:1",
+  "side=producer with assumed=true in cfg.toml:2",
+  "side=producer, owner @perhaps-team a.py:1",
+  "side=producer at seemingly-stale-cache.yml:2",
+  "side=producer in pkg.likely.Owner a.py:1"
+ ],
+ "own_prose_shape": [
+  "side=producer, would-be emitter",
+  "side=producer at seems/",
+  "side=producer maybe/perhaps",
+  "side=producer, possibly.",
+  "side=producer status=maybe",
+  "side=producer (likely)"
+ ],
+ "own_capital_prose": [
+  "side=producer Seems Right",
+  "Probably Fine: side=producer",
+  "side=producer, the Likely owner",
+  "side=producer as I Suspect",
+  "side=producer I Believe",
+  "Perhaps So, side=producer"
+ ],
+ "own_quoted_name": [
+  "side=producer emits 'Probably Fine' alert a.py:2",
+  "side=producer in \"Might Retry\" queue a.py:4",
+  "side=producer via ‘Seems Ok’ check a.py:1",
+  "side=producer, owner `Maybe` bot a.py:5"
+ ],
+ "own_quoted_prose": [
+  "side=producer 'Maybe' a.py:2",
+  "side=producer in 'maybe' handler a.py:3",
+  "side=producer, which 'I think' is right",
+  "\"Perhaps\" side=producer",
+  "side=producer, 'Might'"
+ ],
+ "own_month": [
+  "side=producer from May to June in a.py:3",
+  "side=producer during may (a.py:3)",
+  "side=producer, landed May 2026 a.py:1",
+  "side=producer by end May, see a.py:4",
+  "side=producer since May."
+ ],
+ "own_modal": [
+  "side=producer since may have changed",
+  "side=producer by may happen",
+  "side=producer until may become stale",
+  "side=producer, May Change",
+  "May side=producer"
+ ],
+ "own_alternative": [
+  "side=producer or caller.rs",
+  "side=producer vs adapter_v2.py:1",
+  "side=producer either consumers/x.py",
+  "side=producer | callers",
+  "consumer-svc or side=producer",
+  "side=producer nor CallerApi.java"
+ ],
+ "own_conjunction_second_side": [
+  "side=producer plus caller",
+  "side=producer & 'adapter'",
+  "side=producer and Consumer",
+  "consumer and side=producer",
+  "side=producer + callers"
+ ],
+ "own_conjunction_location": [
+  "side=producer and caller_stub.py:3",
+  "side=producer + adapters/http.go:2",
+  "side=producer and the consumer.proto:1",
+  "side=producer plus ConsumerQueue in q.py:2",
+  "side=producer & lib/caller"
+ ],
+ "own_name_beside_connective": [
+  "side=producer at /srv/consumer/app.py:3",
+  "side=producer at src/or/consumer.py",
+  "side=producer, see /usr/lib/adapter-x.so",
+  "side=producer in docs/and/callers.md:2"
+ ],
+ "own_scan": [
+  [
+   "side=consumer zero side=producer fails",
+   [
+    "consumer"
+   ]
+  ],
+  [
+   "side=adapter 0 side=caller tests failed",
+   [
+    "adapter"
+   ]
+  ],
+  [
+   "side=producer kind not side=consumer of",
+   []
+  ],
+  [
+   "side=caller in side=adapter may at a.py:1",
+   [
+    "caller"
+   ]
+  ],
+  [
+   "side=producer in side=consumer 'Might' handler",
+   [
+    "producer"
+   ]
+  ],
+  [
+   "side=producer zero side=consumer errors side=adapter",
+   [
+    "adapter",
+    "consumer",
+    "producer"
+   ]
+  ]
+ ],
+ "own_scan_vocab": [
+  "side=producer",
+  "side=consumer",
+  "side=adapter",
+  "zero",
+  "0",
+  "tests",
+  "failed",
+  "errors",
+  "fails",
+  "kind",
+  "of",
+  "not",
+  "no",
+  "in",
+  "may",
+  "at",
+  "'Might'",
+  "handler",
+  "i",
+  "think",
+  "or",
+  "and",
+  "consumer",
+  "consumer.py",
+  ",",
+  "; ",
+  "\n",
+  "n",
+  "/",
+  "a",
+  "to",
+  "do",
+  "passed",
+  "since",
+  "be",
+  "'",
+  "Maybe",
+  "(",
+  ")",
+  "?",
+  "a.py:3",
+  "timed",
+  "out"
+ ]
+}
