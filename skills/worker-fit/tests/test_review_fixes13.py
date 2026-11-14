@@ -494,5 +494,19 @@ class RetainedReviewerProbes13(unittest.TestCase):
         self.assertEqual(len(set(r[0] for r in refs)), 5)
 
 
+class BoundsFoundByMutants13(unittest.TestCase):
+    """Edges the mutant runner (mutants13.py) found open on its first run at this repair's head."""
+
+    def test_a_slug_never_sits_beside_a_hash_sized_id_even_where_the_template_matches(self):
+        """m74: the unit template takes anything around the id, so only the slug-beside-id bound refuses a slug next to a 32-hex id."""
+        hx = lambda n: J(*(_R.choice("0123456789abcdef") for _ in range(n)))
+        for v, f, k in (("wm-a1303rv8-%s.service" % hx(32), "worker.unit", "ident"), ("wfr11-%s.scope" % hx(32), "worker.unit", "ident"),
+                        ("/mnt/ssd/a1296p5rv5/result-%s.json" % hx(32), "result.artifact", "path")):
+            self.assertFalse(v in ev.show(f, v, k), (f, len(v)))
+        h = hx(32)
+        self.assertIn("wm-build-%s.service" % h, ev.show("worker.unit", "wm-build-%s.service" % h))
+        self.assertIn("wm-build-r7-a1303rv8-20261113.service", ev.show("worker.unit", "wm-build-r7-a1303rv8-20261113.service"))
+
+
 if __name__ == "__main__":
     unittest.main()
