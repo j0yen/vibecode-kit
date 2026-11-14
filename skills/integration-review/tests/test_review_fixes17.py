@@ -351,6 +351,32 @@ class TestD7PlaceholderVersionIsNoVersion(unittest.TestCase):
         self.assertTrue(check(reg)["ok"])
 
 
+# ---- linear time of the new paths ---------------------------------------------------------------------------------------------------
+class TestNewPathsStayLinear(unittest.TestCase):
+    """The amended name rule reads each token, segment and dotted name once (_token_cuts, _Toks.whole, _Toks.member, _Toks.scheme):
+    80K characters cost under 24x the CPU time of 10K (linear is 8x; the quadratic member scan this pins measured about 48x).
+    CPU time, best of 3, so host load does not flake it."""
+
+    SHAPES = {"dotted-members": "side=producer at obj" + ".maybe" * 14000, "url-host": "side=producer at https://" + "maybe-" * 14000 + "h/x",
+              "may-closers": "side=producer since " + "may)," * 17000, "hyphen-dots": "side=producer at " + "a-b." * 21000 + "py"}
+
+    def cpu(self, t):
+        import time
+        best = 1e9
+        for _ in range(3):
+            a = time.process_time()
+            ir_norm.hedged(t)
+            E._marks(t)
+            best = min(best, time.process_time() - a)
+        return best
+
+    def test_80k_costs_under_24x_of_10k(self):
+        for k, t in self.SHAPES.items():
+            small, big = t[:10000], t[:80000]
+            ratio = self.cpu(big) / max(self.cpu(small), 1e-4)
+            self.assertLess(ratio, 24, (k, ratio))
+
+
 # ---- structure ----------------------------------------------------------------------------------------------------------------------
 class TestOneRulePerConcept(unittest.TestCase):
 
