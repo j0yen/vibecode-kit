@@ -269,13 +269,16 @@ class PerFieldGrammars(unittest.TestCase):
         self.assertEqual(bad, [], "%d leaks, first %s" % (len(bad), bad[:5]))
 
     def test_random_lowercase_pieces_are_not_words(self):
-        """The word grammar of a unit/branch/repo name is phonotactic and bounded: a random lowercase run of 10 letters passes in about
-        2 % of draws, of 12 in under 1 %, and none of 13 or more (a word has at most 12 letters)."""
-        for n, limit in ((6, 0.12), (8, 0.06), (10, 0.03), (12, 0.015), (13, 0.0), (16, 0.0)):
-            hits = sum(1 for _ in range(4000) if ev._pronounceable(lc(n)))
-            self.assertLessEqual(hits / 4000.0, limit, n)
+        """Repair 13 (re-review 12 DEF-1): there is no name-word shape any more. A random lower-case run of 6-16 letters prints in a
+        unit, branch or repo name only when the closed vocabulary and the 5-character piece budget account for it (a vocabulary
+        word plus a short suffix); the bound is now on the gate itself and tighter than the old 2-12 % shape rate. The real fleet
+        words the old test listed print as enumerated vocabulary words."""
+        for n, limit in ((6, 0.03), (8, 0.02), (10, 0.01), (12, 0.01), (13, 0.0), (16, 0.0)):
+            hits = sum(1 for _ in range(1500) if (lambda w: w in ev.show("worker.unit", w + ".service"))(lc(n)))
+            self.assertLessEqual(hits / 1500.0, limit, n)
         for w in ("decide", "regrade", "memlog", "witness", "agorabus", "repair", "claude", "terminal", "director", "bootstrap"):
-            self.assertTrue(ev._pronounceable(w), w)
+            self.assertIn(w, ev._ID_WORDS, w)
+            self.assertIn("wm-%s.service" % w, ev.show("worker.unit", "wm-%s.service" % w), w)
 
     def test_effort_is_an_enum(self):
         for v in ("medium", "normal", "default", "minimal"):
@@ -292,7 +295,10 @@ class PerFieldGrammars(unittest.TestCase):
             self.assertNotIn(neg, ev.show("consumer", neg), neg)
 
     def test_the_grammar_does_not_apply_to_an_unknown_label_or_a_row(self):
-        for v in ("wm-decide-regrade.service", "claude-3947245-r7-a1303rv8-20261113-worker", "j0yen/swarm-decide"):
+        # repair 13: 'decide', 'regrade', 'swarm' are enumerated vocabulary now (vocabulary words print in any field, capped); the
+        # field grammar that must not reach an unknown label is the template, the slug and a word outside the vocabulary
+        for v in ("wm-build-%s.service" % hexmix(32), "tmux-spawn-%s.scope" % uu(), "claude-3947245-r7-a1303rv8-20261113-worker",
+                  "j0yen/lantern-thunder", "wm-velvet-meadow.service"):
             self.assertNotIn(v, ev.show("zzz-unknown", v))
 
 
@@ -368,10 +374,13 @@ class UnconfirmedConcerns(unittest.TestCase):
         self.assertNotEqual(ev.opaque("account", "x1"), ev.opaque("owner", "x1"))
 
     def test_target_head_is_a_hex_id_not_any_digit_run(self):
-        for v in ("4111111111111111", "1234567", "12345678901234567890", "9" * 40, "0" * 64, "4" * 13):
+        # repair 13 (re-review 12 DEF-3): an all-digit abbreviated id (7-12) and git's null object id are commit ids; every other
+        # digit run stays a number
+        for v in ("4111111111111111", "12345678901234567890", "9" * 40, "4" * 13, "9" * 64, "1" * 40, "5555555555554444"):
             self.assertNotIn(v, ev.show("head", v, "sha"), v)
             self.assertNotIn(v, probe("target.head", v), v)
-        for v in ("a9d096aa9f8d8cc45f9398375d1593579f8565ec", "74551e2", "74551e2c1813", hexmix(64), hexmix(40)):
+        for v in ("a9d096aa9f8d8cc45f9398375d1593579f8565ec", "74551e2", "74551e2c1813", hexmix(64), hexmix(40), "1234567", "0" * 64,
+                  "0" * 40):
             self.assertIn(v, ev.show("head", v, "sha"), v)
 
     def test_a_name_ending_in_a_hash_word_is_not_a_schema_field(self):
@@ -420,9 +429,9 @@ class GrammarEdges(unittest.TestCase):
 
     def test_the_name_grammar_is_absent_from_account_model_session_host_and_rows(self):
         for f in ("worker.account", "worker.model", "worker.session", "worker.invocation", "worker.host"):
-            for v in ("decide-regrade", "swarm-decide", "a1303rv8", "claude-bootstrap"):
+            for v in ("lantern-thunder", "velvet-meadow", "a1303rv8", "claude-pelican"):  # repair 13: non-enumerated words
                 self.assertNotIn(v, ev.show(f, v), (f, v))
-        for v in ("decide-regrade", "a1303rv8", "bootstrap-proof"):
+        for v in ("lantern-thunder", "a1303rv8", "biscuit-saffron"):
             self.assertNotIn(v, __import__("queue_adapter")._gate("owner", v), v)
 
     def test_a_repo_owner_is_one_short_piece(self):
@@ -514,17 +523,17 @@ class BoundsFoundByMutants12(unittest.TestCase):
 
     def test_name_words_are_two_per_value_and_twenty_letters_in_all(self):
         three = "purple-monkey-casual.service"  # three 6-letter words: 18 letters, three words
-        self.assertTrue(all(ev._pronounceable(w) for w in ("purple", "monkey", "casual")))
         self.assertNotIn(three, ev.show("worker.unit", three))
         long2 = "refrigerator-construction.service"  # two words, 24 letters
-        self.assertTrue(all(ev._pronounceable(w) for w in ("refrigerator", "construction")))
         self.assertNotIn(long2, ev.show("worker.unit", long2))
-        two = "purple-monkey.service"
-        self.assertIn(two, ev.show("worker.unit", two))
+        # repair 13 (re-review 12 DEF-1): two dictionary words were the admitted case of the removed name-word class; they are opaque
+        for two in ("purple-monkey.service", "purple.service", "monkey-casual", "Purple-Monkey.service"):
+            self.assertNotIn(two, ev.show("worker.unit", two))
+        self.assertFalse(hasattr(ev, "_pronounceable"))
 
     def test_a_name_word_never_sits_beside_a_hash_sized_id(self):
         h = hexmix(32)
-        for v in ("wm-regrade-%s.service" % h, "wm-witness-%s.service" % uu()):
+        for v in ("wm-lantern-%s.service" % h, "wm-velvet-%s.service" % uu()):  # repair 13: regrade/witness are enumerated now
             self.assertNotIn(v, ev.show("worker.unit", v), v)
         self.assertIn("wm-build-%s.service" % h, ev.show("worker.unit", "wm-build-%s.service" % h))
 

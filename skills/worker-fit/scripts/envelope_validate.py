@@ -224,14 +224,21 @@ _MARK_RX = re.compile(re.escape(_MARK_OPEN) + r"(.{0,600}?)" + re.escape(_MARK_C
 _HOLD_RX = re.compile("\ue002" + _NONCE + r"(\d+)\ue003")
 
 
+_ABBREV_LENS = range(7, 13)  # git's abbreviated object ids
+_NULL_OIDS = frozenset(("0" * 40, "0" * 64))  # git's null object id (sha1, sha256): the approved fixtures' head
+
+
 def head_ident(v):
-    """A commit id as the `target.head` field carries it: 7-64 hex characters of ONE case with at least one letter. A run of
-    digits is a number (a card, a phone, an account), never a commit id, whatever its length."""
+    """A commit id as the `target.head` field carries it (the field's one id template, a git object id): 7-64 hex characters of
+    ONE case. Digits only is an object id only where real ids are digits only with a non-negligible chance: an abbreviated id of
+    7-12 characters (3.7 % of 7-character ids, 0.4 % of 12) and git's null object id. Any other digit run (a 16-digit card,
+    13 or more digits, a 40-digit run that is not the null id) is a number, never a commit id."""
     if not isinstance(v, str):
         return None
     s = v.strip()
-    ok = bool(_SHA.fullmatch(s)) and (s.islower() or s.isupper() or s.isdigit()) and not s.isdigit()
-    return s if ok else None
+    if not (_SHA.fullmatch(s) and (s.islower() or s.isupper() or s.isdigit())):
+        return None
+    return s if not s.isdigit() or len(s) in _ABBREV_LENS or s in _NULL_OIDS else None
 
 
 _KINDS = {"ident": ident, "host": lambda x: ident(x, "host"), "path": path_ident, "sha": head_ident}
@@ -426,11 +433,30 @@ _DIGEST_FIELD = re.compile(r"(?i)(?:head|sha\d*|digest|commit|rev(?:ision)?|oid|
 _DIGIT = re.compile(r"\d")
 
 
+_TEMP_ROOTS = ("/tmp/", "/var/tmp/", "/dev/shm/")
+_TEMP_RAND = re.compile(r"[a-z0-9_]{8}")  # Python tempfile's random name part: 8 of 'abcdefghijklmnopqrstuvwxyz0123456789_'
+
+
+def _temp_name(v):
+    """A path whose first component under a temp root follows Python's own tempfile name template, `<prefix><8 random of
+    [a-z0-9_]>` (mkdtemp / TemporaryDirectory, prefix not empty): the path with that 8-character random part taken out, else None.
+    The template is exact and positional: the prefix and every other piece are still checked."""
+    roots = _TEMP_ROOTS + tuple(r.rstrip("/") + "/" for r in (os.environ.get("TMPDIR", ""),) if r.startswith("/") and len(r) > 1)
+    for root in roots:
+        if v.startswith(root):
+            comp, sep, rest = v[len(root):].partition("/")
+            if 9 <= len(comp) <= 96 and _TEMP_RAND.fullmatch(comp[-8:]):
+                return root + comp[:-8] + sep + rest
+    return None
+
+
 def _keyish(val):
     """True for a value that reads as a key and not as a name: a piece of 6+ characters that mixes letters and digits and
     is neither a plain id piece, a hex or date id, nor a word-like name ('Zq9Xk3Lm' is, 'WF1663Impl', 'r7wfr7review',
-    'abc123def456' are not). The name before it does not matter: this layer needs no credential word."""
+    'abc123def456' are not). The name before it does not matter: this layer needs no credential word. The random part of a
+    temp path in tempfile's own name template (`/tmp/wf3-k2j_x9ab/b.json`) is that template's id, not a key (re-review 12 DEF-3)."""
     v = val.strip("\"'`")
+    v = _temp_name(v) or v
     for seg in re.split(r"[-_./+=:,;@%~?&#]+", v):
         if (len(seg) >= 6 and seg.isascii() and seg.isalnum() and any(c.isdigit() for c in seg) and any(c.isalpha() for c in seg)
                 and not _piece_ok(seg)):
@@ -589,8 +615,9 @@ def _user_flag(m):
 def _random_looking(core):
     """True unless every piece of the run (split on - _ . / + =) is short (<= 8), digits, a lower-case word, a
     capitalised word, or a short word followed by digits: ids, branch names, unit names, paths and dates read that way,
-    a key, a hash or a base64 blob does not."""
-    return any(not _plain_piece(seg) for seg in re.split(r"[-_./+=]+", core))
+    a key, a hash or a base64 blob does not. The random part of a temp path in tempfile's own name template is that
+    template's id (see _temp_name); the prefix and every other piece are still read."""
+    return any(not _plain_piece(seg) for seg in re.split(r"[-_./+=]+", _temp_name(core) or core))
 
 
 def _plain_piece(seg):
@@ -696,11 +723,15 @@ _ID_WORDS = frozenset(("task tasks sess inv invocation run runs build builds wm 
                        "branch commit pr hook hooks cron tick wake loop agent agents bus hub fleet kit vibecode skill "
                        "fit trace span request req resp response msg message note notes doc docs journal acct account feat feature features hotfix bug "
                        "syn synthorg mcphost wintermute prd dream gate golden fixture fixtures sample demo example sandbox stage staging prod "
-                       "production dev canary shadow backup snapshot snap checkpoint ckpt metrics stats status state github gh remote origin "
+                       "production dev canary backup snapshot snap checkpoint ckpt metrics stats status state github gh remote origin "
                        "upstream tmux pane window screen term pty shell bash sh py python rs rust node npm yarn proc process thread tid name label "
                        "spec specs plan plans diff patch fix fixes test tests suite case cases shift clock "
                        "wfit impl implementation opus sonnet haiku fable root temp us eu ap west east north south central compute region zone cluster "
-                       "controller carbon hetzner josephsyen aide watch rotate refresh manager daemon runner quota ring monitor sync check").split())
+                       "controller carbon hetzner josephsyen aide watch rotate refresh manager daemon runner quota ring monitor sync check "
+                       # re-review 12 / repair 13: the fleet's own unit, consumer, branch, repo and path names that printed only through the
+                       # removed name-shape rule (wm-decide-regrade, agorabus-reap, memlog-witness, swarm-decide, app-gnome-Terminal,
+                       # feat/A1663-repair-12, hermes-director-bootstrap-proof, synthetic/repo-a). Enumerated, never inferred from a shape.
+                       "decide regrade agorabus reap memlog witness swarm repair director bootstrap proof gnome terminal synthetic").split())
 _ULID_ANY = re.compile(r"[0-7][0-9A-HJKMNP-TV-Z]{25}|[0-7][0-9a-hjkmnp-tv-z]{25}")
 _SHORT_HEX = re.compile(r"[0-9a-fA-F]{1,4}")
 
@@ -725,28 +756,16 @@ _MAX_PIECES = 40
 _MAX_VOCAB_WORDS = 6
 _STRUCT_WORDS = frozenset("mnt ssd cargo target tmp var home usr opt src out json log logs txt md service scope socket timer slice "
                           "mount path unit units scripts script".split())
-# DEF-4: the NAME grammar of the fields that carry names (unit, child, owner, consumer, branch, repo, task, path): up to a few
-# pronounceable lower-case words (_pronounceable) and one task slug (_slug) per value, with a total letter budget. Never beside
-# a hash-sized id, never in a field that carries no name (account, model, session, invocation, host, row fields).
-_LANG_WORD_MIN, _LANG_WORD_MAX = 6, 12  # a shorter piece is charged to the unlisted budget instead
-_PRON_ONS = (r"(?:squ|str|spr|spl|scr|shr|thr|chr|sch|bl|br|ch|cl|cr|dr|fl|fr|gl|gr|gn|kn|ph|pl|pr|qu|sc|sh|sk|sl|sm|sn|sp|st|sw|th|tr|"
-             r"tw|wh|wr|[bcdfghjklmnprstvwz])")
-_PRON_NUC = r"(?:ai|au|aw|ay|ea|ee|ei|eu|ew|ey|ia|ie|io|oa|oi|oo|ou|ow|oy|ua|ue|ui|[aeiouy])"
-_PRON_COD = (r"(?:ght|tch|nch|dge|ng|nk|nt|nd|ns|nc|ck|ct|ft|ld|lf|lk|lm|lp|lt|ls|lb|mp|mb|ms|pt|rd|rk|rm|rn|rp|rs|rt|rb|rg|rl|rc|"
-             r"sk|sp|st|ss|ll|ff|tt|nn|rr|mm|pp|dd|gg|bb|sh|ch|th|[bcdfgklmnprstxz])")
-_PRON = re.compile(r"(?:%s?%s%s?){1,5}" % (_PRON_ONS, _PRON_NUC, _PRON_COD))
+# THE IDENTITY INVARIANT (repair 13, re-review 12 DEF-1). An identity-field value prints only when every piece of it is accounted
+# for by something this source fixes in advance: a closed-vocabulary word or a literal of the field's own template, an exact id
+# template the field carries (including the task slug below), a bounded number or date; the rest must fit the unlisted budget.
+# How a value looks as language is never evidence: pronounceability, dictionary membership, case and syllable structure describe
+# human-chosen and generator-made passwords exactly, so no rule here reads them. A real name that is not enumerated is opaque until
+# a reviewed source change adds its word to _ID_WORDS.
+# The fleet's task-slug template ('a1303rv8', 'a1296p5rv5', 'wfr11'): an exact id template, at most one per value, never beside a
+# hash-sized id, only in a field whose profile carries slugs (unit, child, owner, consumer, branch, repo, task, path).
 _SLUG = re.compile(r"[a-z]{1,3}\d{2,5}(?:[a-z]{1,2}\d)?(?:[a-z]{1,2}\d)?")
 _MAX_SLUG = 10
-
-
-def _pronounceable(w):
-    """A lower-case word of 6-12 letters that parses as syllables (onset, nucleus, coda from closed English clusters), has a vowel
-    share of 20-70 % and no letter three times in a row: 'decide', 'regrade', 'witness', 'agorabus', 'bootstrap'. A random
-    lower-case run of 10 letters passes in about 2 % of draws, of 12 in under 1 %."""
-    if not (_LANG_WORD_MIN <= len(w) <= _LANG_WORD_MAX and w.isascii() and w.isalpha() and w.islower()):
-        return False
-    vowels = sum(c in "aeiouy" for c in w)
-    return (_PRON.fullmatch(w) is not None and 0.2 <= vowels / len(w) <= 0.7 and re.search(r"(.)\1\1", w) is None)
 
 
 def _slug(low):
@@ -808,28 +827,28 @@ _ROLES = "verifier|reviewer|coder|codex|claude|worker|agent|seat"
 _FILE_STEM = "evt|event|result|results|review|report|out|artifact|log|trace|journal|notes|dump"
 
 
-def _prof(alone=(), beside=(), tmpl=None, ip=False, unit_name=False, lang=0, lang_letters=20, enum=None, literals=(), ctx=False, slash=False, free_struct=False):
-    """One field's grammar: the id shapes it carries and the form each takes, whether it is a unit name, how many name words
-    (`lang`, at most `lang_letters` letters) a value may carry, a closed `enum` of values (the whole grammar of the field), the
+def _prof(alone=(), beside=(), tmpl=None, ip=False, unit_name=False, slug=False, enum=None, literals=(), ctx=False, slash=False, free_struct=False):
+    """One field's grammar: the id shapes it carries and the form each takes, whether it is a unit name, whether a value may carry
+    one task `slug` (the fleet's slug template, never a name word), a closed `enum` of values (the whole grammar of the field), the
     template `literals` its own id templates use, whether a model's context tag `[1m]` may follow, and whether the value is an
     `owner/name` pair (a repo) whose owner is gated on its own with the short budget."""
-    return {"alone": frozenset(alone), "beside": frozenset(beside), "ip": ip, "unit_name": unit_name, "lang": lang,
-            "lang_letters": lang_letters, "enum": None if enum is None else frozenset(enum), "literals": frozenset(literals), "ctx": ctx, "slash": slash, "free_struct": free_struct,
+    return {"alone": frozenset(alone), "beside": frozenset(beside), "ip": ip, "unit_name": unit_name, "slug": slug,
+            "enum": None if enum is None else frozenset(enum), "literals": frozenset(literals), "ctx": ctx, "slash": slash, "free_struct": free_struct,
             "tmpl": {k: re.compile(v, re.I) for k, v in (tmpl or {}).items()}}
 
 
 _UNIT_FORM = r"[\w.@+:-]*~[\w.@+:-]*" + _UNIT_SUFFIX
 _STEM_FORM = r"(?:.*/)?(?:%s)[-_.]~(?:\.[a-z]{2,5})?" % _FILE_STEM
 _EFFORTS = ("none", "minimal", "low", "medium", "normal", "default", "standard", "auto", "high", "xhigh", "max")
-_PATH_PROFILE = _prof(beside=("short", "h32", "h40", "uuid"), lang=2, free_struct=True, tmpl={"short": _STEM_FORM, "h32": _STEM_FORM, "h40": _STEM_FORM,
+_PATH_PROFILE = _prof(beside=("short", "h32", "h40", "uuid"), slug=True, free_struct=True, tmpl={"short": _STEM_FORM, "h32": _STEM_FORM, "h40": _STEM_FORM,
                                                                       "uuid": r".*/~(?:/.*|\.[a-z]{2,5})?"})
 _SESS_FORM = r"(?:sess|session|sid)[-_:]~"
 _PROFILES = {
     "host": _prof(beside=("inst",), tmpl={"inst": r"i-~"}, ip=True),
     "unit": _prof(beside=("short", "h32", "uuid"), tmpl={"short": _UNIT_FORM, "h32": _UNIT_FORM, "uuid": _UNIT_FORM}, unit_name=True,
-                  lang=2, literals=("spawn",)),
+                  slug=True, literals=("spawn",)),
     "child": _prof(alone=("short",), beside=("short", "h32", "h40", "uuid"), tmpl={
-        "short": _UNIT_FORM, "h32": r"child[-_.]~|" + _UNIT_FORM, "h40": r"child[-_.]~", "uuid": r"child[-_.]~|" + _UNIT_FORM}, lang=2,
+        "short": _UNIT_FORM, "h32": r"child[-_.]~|" + _UNIT_FORM, "h40": r"child[-_.]~", "uuid": r"child[-_.]~|" + _UNIT_FORM}, slug=True,
         literals=("spawn",)),
     "session": _prof(alone=("short", "h32", "uuid", "ulid"), beside=("short", "h32", "uuid", "ulid"), tmpl={
         "short": _SESS_FORM, "h32": _SESS_FORM, "uuid": _SESS_FORM, "ulid": _SESS_FORM}, literals=("session",)),
@@ -838,13 +857,13 @@ _PROFILES = {
     # a model, an effort, a repo and a host carry no id of a hash-like shape; an account, an owner and a branch carry one only
     # behind their own instance prefix (acct-<id>, r7-<id>, feat-<id>)
     "account": _prof(beside=("short", "uuid"), tmpl={k: r"(?:acct|account)[-_.]~" for k in ("short", "uuid")}),
-    "owner": _prof(beside=("short",), tmpl={"short": r"(?:r7|rb|ctl|hermes|orch|aide|controller|acct)[-_.]~"}, lang=2),
+    "owner": _prof(beside=("short",), tmpl={"short": r"(?:r7|rb|ctl|hermes|orch|aide|controller|acct)[-_.]~"}, slug=True),
     "branch": _prof(beside=("short", "h32"), tmpl={k: r"(?:.*/)?(?:feat|feature|fix|hotfix|bug|wip|r7|rb)[-_]~" for k in ("short", "h32")},
-                    lang=2),
-    "model": _prof(ctx=True), "effort": _prof(enum=_EFFORTS), "repo": _prof(lang=2, slash=True),
-    "named": _prof(beside=("short", "h32"), tmpl={"short": r"(?:%s)[-_.]~" % _ROLES, "h32": r"(?:%s)[-_.]~" % _ROLES}, lang=2),
+                    slug=True),
+    "model": _prof(ctx=True), "effort": _prof(enum=_EFFORTS), "repo": _prof(slug=True, slash=True),
+    "named": _prof(beside=("short", "h32"), tmpl={"short": r"(?:%s)[-_.]~" % _ROLES, "h32": r"(?:%s)[-_.]~" % _ROLES}, slug=True),
     "task": _prof(alone=("ulid",), beside=("short", "h32", "uuid", "ulid"), tmpl={
-        k: r"(?:task|wf|a|t)[-_]?~" for k in ("short", "h32", "uuid", "ulid")}, lang=2),
+        k: r"(?:task|wf|a|t)[-_]?~" for k in ("short", "h32", "uuid", "ulid")}, slug=True),
     "path": _PATH_PROFILE,
 }
 _PROFILE_ALIAS = {"sess-id": "session", "current_owner": "owner", "reviewed_by": "owner", "consumer": "named", "alternate": "named",
@@ -948,11 +967,8 @@ def _piece(seg, prev, st):
         return False
     if _compound(seg, words, st):
         return True
-    if st["lang_max"] and not _cred_name(low) and (_slug(low) or (seg.isalpha() and (seg.islower() or seg.istitle()) and _pronounceable(low))):
-        st["lang"] += 1  # a name word or a task slug: counted against the field's own name budget
-        st["lang_letters"] += len(seg)
-        if _slug(low):
-            st["slugs"] += 1
+    if st["slug_ok"] and not _cred_name(low) and _slug(low):
+        st["slugs"] += 1  # the fleet's task-slug template (an exact id template of the field), at most one per value
         return True
     for w in sorted((x for x in set(_ID_WORDS) | set(words) if len(x) >= 3 and not _cred_name(x)), key=len, reverse=True):
         rest = seg[len(w):]
@@ -1070,10 +1086,10 @@ def _gate_values(vals, words=frozenset(), max_ids=1, profile=None, max_cost=_MAX
         return all(isinstance(v, str) and v.lower() in prof["enum"] for v in vals)
     if prof["slash"] and len(vals) == 1 and isinstance(vals[0], str) and vals[0].count("/") == 1:
         owner, name = vals[0].split("/")  # owner/name: the owner is one short piece of its own, the name a name
-        flat = dict(prof, slash=False, lang=0)
+        flat = dict(prof, slash=False, slug=False)
         return (_gate_values([owner], words, max_ids, flat, _MAX_SHORT) and _gate_values([name], words, max_ids, dict(prof, slash=False)))
-    st = {"words": words, "cost": 0, "digits": 0, "ids": 0, "found": [], "vocab": 0, "lang": 0, "lang_letters": 0,
-          "lang_max": prof["lang"], "literals": prof["literals"], "free_struct": prof["free_struct"], "tail": None, "slugs": 0}
+    st = {"words": words, "cost": 0, "digits": 0, "ids": 0, "found": [], "vocab": 0,
+          "slug_ok": prof["slug"], "literals": prof["literals"], "free_struct": prof["free_struct"], "tail": None, "slugs": 0}
     npieces = 0
     for s in vals:
         if not isinstance(s, str) or not s or len(s) > 512:
@@ -1114,9 +1130,9 @@ def _gate_values(vals, words=frozenset(), max_ids=1, profile=None, max_cost=_MAX
             if shape not in prof["beside"] or (rx is not None and not rx.fullmatch(whole.replace(text, "~", 1))):
                 return False
     return (npieces <= _MAX_PIECES and st["cost"] <= max_cost and st["digits"] <= _MAX_DIGITS_TOTAL
-            and (profile is None or st["vocab"] <= _MAX_VOCAB_WORDS) and st["slugs"] <= 1 and st["lang"] <= prof["lang"] and st["lang_letters"] <= prof["lang_letters"]
+            and (profile is None or st["vocab"] <= _MAX_VOCAB_WORDS) and st["slugs"] <= 1
             and st["ids"] <= max_ids and not (st["ids"] and (st["cost"] > _MAX_UNLISTED_WITH_ID or st["digits"] > _MAX_DIGITS_WITH_ID
-                                                              or st["lang"])))
+                                                              or st["slugs"])))
 
 
 def _trusted_pieces(s, words=frozenset(), max_ids=1, profile=None):
@@ -1630,10 +1646,10 @@ _STRONG_NOUNS = frozenset("pass|passwd|password|passwords|passphrase|passcode|pw
                           "signingkey|accesskey|secretkey|sshkey|hmac".split("|"))
 # 'key', 'keys', 'auth' and 'bearer' are also ordinary words ('key point', 'auth service'): after one of them only a word of the
 # closed vocabulary may follow; after a strong noun only a state word.
-_WEAK_NOUNS = frozenset("key|keys|auth|bearer|code|codes|phrase".split("|"))
+_WEAK_NOUNS = frozenset("key|keys|auth|bearer|code|codes|phrase|unlock|vault".split("|"))
 _CRED_NOUNS = _STRONG_NOUNS | _WEAK_NOUNS
 _PROSE_NAME = re.compile(r"(?<![A-Za-z0-9_.-])[A-Za-z][A-Za-z0-9_.-]{0,60}")
-_PROSE_HINT = re.compile(r"(?i)pass|pw|pin|otp|token|secret|cred|key|auth|jwt|cookie|bearer|pswd|mfa|2fa|seed|mnemonic|code|phrase|hmac")
+_PROSE_HINT = re.compile(r"(?i)pass|pw|pin|otp|token|secret|cred|key|auth|jwt|cookie|bearer|pswd|mfa|2fa|seed|mnemonic|code|phrase|hmac|unlock|vault")
 _CRED_TAIL = re.compile(r"""(?P<mid>(?:\s+(?:is|are|was|were|to|with|as|be|set|use|using|equals|of))*(?:\s*[:=]+\s*|\s+)["'`(]?)"""
                         r"""(?P<v>[^\s,;)\]}"'`\ue002\[]+)""")
 _NAME_WORDS_RX = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+")
@@ -1641,9 +1657,38 @@ _EXPLICIT_SEP = re.compile(r"\s*[:=]")
 _MAX_NAME_CHAIN = 4  # credential nouns in a row ('secret key', 'api key secret')
 
 
-def _cred_noun(word):
+# A strong credential noun glued to a qualifier of one to eight letters is the name's last word ('dbpass', 'userpass', 'rootpw',
+# 'adminpwd', 'svctoken'; re-review 12 DEF-2): the rule is structural, a noun at the end of the word, not a list of names. English
+# words that only end in those letters are words, not names.
+_GLUE_NOUNS = tuple(sorted("password|passwd|passphrase|passcode|pass|pswd|pwd|pw|pin|otp|token|tokens|secret|secrets|cred|creds".split("|"),
+                           key=len, reverse=True))
+_MAX_GLUE_QUALIFIER = 8
+# ('|'-split literal: kept out of the tool's own sentence words, see _tool_words)
+_GLUE_ENGLISH = frozenset(("compass|bypass|surpass|trespass|overpass|underpass|encompass|spin|kingpin|hairpin|linchpin|lynchpin|tenpin|"
+                           "terrapin|pushpin|tiepin|backspin|topspin|tailspin|sacred|betoken").split("|"))
+
+
+def _noun_of(part):
+    """The credential noun a name word ends in: the word itself when it is one, a strong noun glued after a qualifier of one to eight
+    letters, else None."""
+    low = part.lower()
+    if low in _CRED_NOUNS:
+        return low
+    if not low.isalpha() or low in _GLUE_ENGLISH:
+        return None
+    for n in _GLUE_NOUNS:
+        if low.endswith(n) and 1 <= len(low) - len(n) <= _MAX_GLUE_QUALIFIER:
+            return n
+    return None
+
+
+def _cred_noun(word, glued=True):
+    """True when a prose name's last word is a credential noun; with glued=False only a bare noun counts (the chain of a name,
+    'secret key', 'api key secret'): a word after a name that merely ends in a noun is the value, not more name."""
     parts = _NAME_WORDS_RX.findall(word.strip(".-_"))
-    return bool(parts) and parts[-1].lower() in _CRED_NOUNS
+    if not parts:
+        return False
+    return _noun_of(parts[-1]) is not None if glued else parts[-1].lower() in _CRED_NOUNS
 
 
 # A bare 'key' or 'auth' reads as a credential only beside a credential qualifier: 'api key', 'private key', 'ssh_key', 'client auth'.
@@ -1659,7 +1704,7 @@ def _strong_name(word):
     parts = _NAME_WORDS_RX.findall(word.strip(".-_"))
     if not parts:
         return False
-    return parts[-1].lower() in _STRONG_NOUNS or any(p.lower() in _PROSE_QUALIFIERS for p in parts[:-1])
+    return _noun_of(parts[-1]) in _STRONG_NOUNS or any(p.lower() in _PROSE_QUALIFIERS for p in parts[:-1])
 
 
 def _qualified_before(text, start):
@@ -1693,7 +1738,7 @@ def _redact_cred_prose(text):
             if _EXPLICIT_SEP.match(t.group("mid")):
                 break  # 'name=value', 'name: value': the pair layers above decide (a credential name hides it whatever it is)
             v = t.group("v")
-            if _cred_noun(v) and v.isalpha():
+            if _cred_noun(v, glued=False) and v.isalpha():
                 e = t.end()  # 'secret key X': the value comes after the whole name
                 strong = strong or _strong_name(v)
                 continue

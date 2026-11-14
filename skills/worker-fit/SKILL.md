@@ -95,19 +95,25 @@ scheduler, coordinator, task store or mutation CLI.
   final file extension or unit type such as `.json` or `.service` are structure and do not count), so a passphrase of seven or
   more vocabulary words is an opaque ref in every field. Each field also has its OWN grammar (`_PROFILES`): `effort` is a closed
   set (`none minimal low medium normal default standard auto high xhigh max`); a `model` may end in a context tag (`[1m]`);
-  a `unit`, `child`, `owner`, consumer, `branch`, `repo`, task id and path may carry name words beyond the vocabulary: lower-case
-  pronounceable words of 6-12 letters (`decide`, `regrade`, `bootstrap`; a syllable grammar, not a list) or a task slug (one to
-  three letters, two to five digits, at most two more groups of one or two letters and one digit, at most ten characters:
-  `a1303rv8`, `wfr11`; at most one slug), at most two such pieces per value and twenty letters in all; a shorter piece is charged
-  to the unlisted budget above. Name words never sit beside a hash-sized id and never appear in an account, model, session, invocation, host or queue
-  row. A repo is `owner/name` with the owner one short piece of at most five characters; a `session` and a unit may carry the
-  literal of their own id template (`session-<uuid>`, `tmux-spawn-<uuid>.scope`); a host with colons is an exact IP literal (a
-  literal of random 16-bit groups is not one: at most two wide groups after the first). A pronounceable-looking random run is
-  not excluded by grammar: a random lower-case word of 6 to 8 letters passes in 4-8 % of draws, of 10 in about 2 %, of 12 in under
-  1 %, of 13 or more never, and a value carries at most two. That is the stated residual of the name grammar, next to the
-  short-value residual below. The cap on vocabulary words and the name budgets apply to every field of the recommender and the
-  adapter (each passes its own profile); only a library call that names no profile gets the bare gate. A value of up to six
-  vocabulary words prints (about 46 bits when drawn at random from the public list): that size is the stated residual of the cap.
+  a `unit`, `child`, `owner`, consumer, `branch`, `repo`, task id and path may carry ONE task slug, the fleet's exact slug
+  template (one to three letters, two to five digits, at most two more groups of one or two letters and one digit, at most ten
+  characters: `a1303rv8`, `wfr11`), never beside a hash-sized id and never in an account, model, session, invocation, host or
+  queue row. A repo is `owner/name` with the owner one short piece of at most five characters; a `session` and a unit may carry
+  the literal of their own id template (`session-<uuid>`, `tmux-spawn-<uuid>.scope`); a host with colons is an exact IP literal
+  (a literal of random 16-bit groups is not one: at most two wide groups after the first). Identity invariant (re-review 12):
+  a value prints only when every piece is accounted for by something this source fixes in advance (a word of the closed
+  vocabulary of 273 words, a literal of the field's own template, an exact id template the field carries, a bounded number or
+  date) and the rest fits the unlisted budget; how a value looks as language is never evidence. Pronounceability, dictionary
+  membership, letter case and syllable structure are not read by any rule, because human-chosen and generator-made passwords
+  (`sunshine`-class words, CV/CVC syllables) look exactly like names. A real name that is not enumerated is an opaque ref
+  (fail-closed) until a reviewed source change adds its word to `_ID_WORDS`; the fleet's own unit, consumer, branch, repo and
+  path words (`decide`, `regrade`, `agorabus`, `memlog`, `witness`, `swarm`, `repair`, `director`, `bootstrap`, `synthetic`, ...)
+  are enumerated there. Residuals of this gate, each bounded by the code: (b) a value of up to six vocabulary words prints (about
+  49 bits when drawn at random from the public list); (c) unlisted material of at most five characters a piece and eight a
+  value prints in any identity field (a five-letter word, or a vocabulary word with a suffix of at most five characters such as
+  `tail9z8y7`; about 38 bits as random lower-case letters, 0 beside an id). The cap on vocabulary words and the budgets apply to
+  every field of the recommender and the adapter (each passes its own profile); only a library call that names no profile gets
+  the bare gate; that size is the stated residual of the cap.
   Everything else (random letters, hex groups, digit groups, longer passphrases, a vocabulary word plus a random piece) is an opaque
   ref, whatever the field. A field grammar (no `user:password@` userinfo, ids as characters) makes a
   value VALID, never TRUSTED; the credential-name layers only refuse more and never let a value print. The envelope is never
@@ -131,23 +137,23 @@ scheduler, coordinator, task store or mutation CLI.
   Residual by size: a value of three characters or fewer prints under any name, and so does a number of at most two digits.
   A credential name followed in prose by its value (`the password is sunshine`, `pass swordfish`, `my pin 482917`, `the api_key is
   Xk9fQ2mP7zab`, `private key X`, `client_secret X`, `X-Auth-Token X`; a name is any word run whose last word is a credential noun
-  such as key, token, secret, pass, auth, creds) hides the next word, of any length, unless it is a state word (`required`,
+  such as key, token, secret, pass, auth, creds, or ends in a strong noun glued to a qualifier of one to eight letters: `dbpass`, `userpass`, `rootpw`, `adminpwd`, `svctoken`; an English word that only ends in those letters, such as `compass`, `bypass`, `spin`, `sacred`, is a word) hides the next word, of any length, unless it is a state word (`required`,
   `missing`, `expired`, ...); the separator may be a space, `is`, `:`, `=`, `:=` or a quote, and a run of nouns (`secret key`)
-  is one name. A bare `key`, `auth`, `bearer` or `code` is also an ordinary word (`key point`, `exit code 2`): after one of them
+  is one name. A bare `key`, `auth`, `bearer`, `code`, `unlock` or `vault` is also an ordinary word (`key point`, `exit code 2`): after one of them
   (and no credential qualifier such as api, private, client, recovery) a plain lower-case word, a closed-vocabulary word or a number
   of two digits reads as prose and prints, and anything else (a capital, a digit run, a mixed piece) is hidden; that is a stated residual. A credential word joined to
   a value in one token (`token-<v>`, `secret_run_<v>`, `tokenArYYbbah`) is hidden. The credential-name list above is an extra
   layer that hides more; it is never what lets a value print. Key names: only keys the schema defines print; any other key is an opaque
   `[opaque key <8 hex>]`, whatever it looks like. A value that does not validate is
   printed as an opaque keyed reference `[opaque <field> <8 hex>]` (HMAC-SHA256 over the field name and the value with a
-  per-process random 256-bit key, 32 bits shown: equal values give equal refs inside one run, nothing is recoverable, the ref
+  per-process random 128-bit key (`os.urandom(16)`), 32 bits shown: equal values give equal refs inside one run, nothing is recoverable, the ref
   does not depend on `PYTHONHASHSEED`, not stable across runs), never as the
   raw value; a placeholder stays UNKNOWN. A required identity (host, unit, child of a RUNNING record) that does not
   validate is UNKNOWN evidence, so the record is refused rather than reused. Mismatch findings (wrong task, repo,
   branch, head; duplicate task; conflicting target; unknown or duplicate key names) name the fields and carry opaque
   refs, never the raw values; a hex run in an evidence `ref` is read as a commit only after its credential layers are
   applied, so a hex under a credential name is never a head. Free narrative (coverage gaps, prose evidence refs)
-  has no grammar and is printed through the redaction layers above. A `target.head` prints when it is 7-64 hex characters of one case with at least one letter: a run of digits is a number, never a head. The run rule (b) applies to free text only. On top of that
+  has no grammar and is printed through the redaction layers above. A `target.head` prints when it is a git object id: 7-64 hex characters of one case; digits only is an id only at the abbreviated lengths 7-12 or as git's null object id (40 or 64 zeros): any other run of digits (a 16-digit card, 13 or more digits) is a number, never a head. The run rule (b) applies to free text only. A temp path in Python's own tempfile name template (`/tmp/wf3-k2j_x9ab/b.json`: under `/tmp`, `/var/tmp`, `/dev/shm` or `$TMPDIR`, a first component `<prefix><8 of [a-z0-9_]>`) is echoed in a usage error: its 8-character random part is that template's id, in that position only; the prefix and every other piece still pass the key-shape check, the credential layers and the run rule (residual: an 8-character lower-case secret placed as such a component in the operator's own argv echoes). On top of that
   the named shapes stay: `Authorization:` values (Basic/Bearer/...), `bearer <x>`, `sk-...` keys,
   provider token prefixes as a class (AWS key ids `AKIA/ASIA/AGPA/AIDA/AROA/...`; Slack `xox?-`, `xoxe.`, `xapp-` and
   webhook URLs; Google `ya29.`, `AIza`, `GOCSPX-`, refresh tokens; npm `npm_`; GitLab `glpat-` and siblings; GitHub

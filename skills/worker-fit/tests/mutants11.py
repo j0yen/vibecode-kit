@@ -46,7 +46,7 @@ M = [
  ("m31", "hex head name bypass", EV, "return bool(re.fullmatch(r\"[0-9a-fA-F]{4,64}\", core)) and not core.isdigit()", "return True"),
  ("m32", "piece count bound removed", EV, "_MAX_PIECES = 40", "_MAX_PIECES = 4000"),
  ("m33", "one-letter id prefix", EV, "if (k >= 2 or seg[0] == \"r\") and", "if True and"),
- ("m34", "ids beside unlisted or digits", EV, 'and not (st["ids"] and (st["cost"] > _MAX_UNLISTED_WITH_ID or st["digits"] > _MAX_DIGITS_WITH_ID\n                                                              or st["lang"])))', ')'),
+ ("m34", "ids beside unlisted or digits", EV, 'and not (st["ids"] and (st["cost"] > _MAX_UNLISTED_WITH_ID or st["digits"] > _MAX_DIGITS_WITH_ID\n                                                              or st["slugs"])))', ')'),
  ("m35", "single letter between numbers free anywhere", EV, "if len(seg) == 1 and seg.isalpha() and any(c.isdigit() for c in prev) and any(c.isdigit() for c in nxt):", "if len(seg) == 1 and seg.isalpha():"),
  ("m36", "uuid not counted", EV, 'st["ids"] += len(st["found"])', "pass"),
  ("m40", "profile argument ignored", EV, "    prof = profile or _ANY_PROFILE", "    prof = _ANY_PROFILE"),
