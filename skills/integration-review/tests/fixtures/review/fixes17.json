@@ -529,7 +529,6 @@
   "viz",
   "incl",
   "resp",
-  "approx",
   "esp",
   "al",
   "ca",
@@ -540,7 +539,7 @@
  ],
  "d5_own": [
   "side=producer, see the list, i.e.\nlikely the caller",
-  "side=producer at a.py:3 (approx.\nmight be the adapter)",
+  "side=producer at a.py:3 (cf.\nmight be the adapter)",
   "side=producer, a.k.a.\npossibly a consumer"
  ],
  "d5_vocab": [
