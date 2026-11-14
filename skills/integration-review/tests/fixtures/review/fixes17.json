@@ -205,7 +205,7 @@
   "/ before": "path line file",
   "\\ before": "path line file",
   ". after": "key path url dotted file",
-  ". before": "path line call file",
+  ". before": "path line call file dotted",
   "= before": "*",
   "- before": "path line file",
   "— before": "path line file",
