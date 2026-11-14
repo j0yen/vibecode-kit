@@ -88,8 +88,8 @@ def negated(text, state=False, doubt=False):
 # THE NAME-VS-HEDGE RULE (_is_name, one place), DEFAULT INVERTED (D1-D4, D6): a hedge word or a side word is part of a NAME only on
 # positive evidence that it is not prose; whatever the rule does not recognise (a mark, a following word, a modifier, a context) leaves
 # it prose. (1) Its SEGMENT (the token cut at every mark that does not join a code name, _token_cuts) is code by the shared code-token
-# rule (_token_kind: ::, URL, name@version, file, path, module or dotted name; a bare dotted name only as a whole token and only for a
-# member, D6) or names a call ("maybe()", "x.maybe()"); (2) its word run is an identifier (an underscore, or a capital after the first
+# rule (_token_kind: ::, URL, name@version, file, path, module or dotted name; a bare dotted name only as a whole token, a two-part one
+# only for a member, D6) or names a call ("maybe()", "x.maybe()"); (2) its word run is an identifier (an underscore, or a capital after the first
 # letter, not all capitals), a key ("maybe=1") or a handle ("@maybe" at its token start); (3) a QUOTED NAME: an opening quote glued to it,
 # every word Title-case, the quote after a word of the same text, closed, then an artifact noun that ends the text or is followed by a
 # location ("in 'Might' handler at h.py:3", D2). For "may" only (_is_hedge_word), (4) the MONTH: a date after it ("May 12"; a lowercase
@@ -113,7 +113,6 @@ def abbreviation(word):
 
 _SIDE = re.compile(r"\b(?:producer|consumer|caller|adapter)", re.I)
 _ALT = frozenset(("or", "nor", "either", "vs", "versus", "alternatively", "/", "|"))
-_CONJ = frozenset(("and", "plus", "&", "+"))
 _CONN = r"(?:\b(?P<w>or|nor|either|vs|versus|alternatively|and|plus)\b\.?|(?<![\w.\\/-])(?P<s>[/|&+])(?=\s|$))"
 # FWD: a connective, then the token it joins (after "the"/"a" and a "side=" / "side:" label). REV: a token, then a connective. A symbol
 # connective is standalone (blanks or the text edge on its right); glued to a word it is GLUED: a side word glued to / | & + in a token
@@ -269,9 +268,10 @@ class _Toks:
         return a <= core[0] and b >= core[1]
 
     def member(self, a, b, s):
-        """D6: the word at s is a MEMBER of the dotted segment t[a:b]: a component before it is no abbreviation ("obj.maybe",
-        "pkg.mod.maybe", "a.maybe.b"); a word that heads the name ("probably.ok", "maybe.later") or follows only abbreviations
-        ("cf.maybe", "e.g.maybe") is not. The components of a segment are read once (_dotted_heads)."""
+        """D6: the word at s is a MEMBER of the two-part dotted segment t[a:b]: the component before it is no abbreviation
+        ("obj.maybe", "x.maybe"); a word that heads the name ("probably.ok", "maybe.later") or follows only an abbreviation
+        ("cf.maybe", "e.g.maybe") is not. A module path of three or more parts ("pkg.mod.maybe", "consumer.mod.run") is code as a
+        whole token. The components of a segment are read once (_dotted_heads)."""
         d = self._dots.get((a, b))
         if d is None:
             d = self._dots[(a, b)] = _dotted_heads(self.t, a, b)
@@ -320,8 +320,8 @@ def _is_name(tx, s, e, lo=0, words=None):
     kind = tx.seg_kind(a, b)
     if kind == "url" and tx.scheme(a, b) >= s:
         return False                                  # a word in the scheme position of a URL ("maybe.https://h/x") names nothing
-    if kind in ("dotted", "module") and not (tx.whole(k, a, b) and tx.member(a, b, s)):
-        return False                                  # D6: a bare dotted name is code only as a whole token, and only for a member
+    if kind in ("dotted", "module") and not (tx.whole(k, a, b) and (kind == "module" or tx.member(a, b, s))):
+        return False                                  # D6: a bare dotted name is code only as a whole token; a two-part one only for a member
     if kind in _CODE_KINDS:
         return True                                   # code: possible-values.md, obj.maybe, lib/should
     return (s - 1 == tx.starts[k] and t[s - 1] in _OPEN_QUOTES and k > 0 and tx.starts[k - 1] >= lo
