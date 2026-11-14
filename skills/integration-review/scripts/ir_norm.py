@@ -144,7 +144,6 @@ _NAME_HEADS = frozenset(
     "crate library plugin hook test case file branch tag release version feature error exception warning header key value record "
     "template rule policy role team project repo app endpoint route command tool script table column index schema config macro trait "
     "interface struct constant variable worker daemon timer channel stream bucket".split())
-_SEG_CUT = frozenset(",()=?#")
 _ANSWERS = frozenset("yes no true false y n on off ok".split())
 _MONTH_AFTER = frozenset(("in", "since", "until", "till", "during", "from", "by"))
 _MONTH_PART = frozenset(("early", "late", "mid", "end"))          # a time word only after a preposition (N3)
@@ -154,6 +153,52 @@ _DATE_NUM = re.compile(r"\d{1,4}(?:st|nd|rd|th)?[,.;:)]*", re.I)
 _FUNCTION_WORDS = frozenset("at in on by for to from with of and or nor the a an as via into onto per than then when while until till "
                             "since during before after through".split())
 _KINDS = (("qm", _QM), ("fwd", _FWD), ("rev", _REV), ("glued", _GLUED), ("word", _HEDGE_WORD))
+
+
+_PIN_SPAN = re.compile(r"(?<=\w)@[\w.{~^-]*[0-9][\w.+-]*")
+_RUNS = re.compile(r"[\w.-]+")
+_DOT_RUN = re.compile(r"\.{2,}(?=[^\s/])")
+
+
+def _token_cuts(t, a, b):
+    """D1, THE INVERTED DEFAULT: the positions where token t[a:b] is cut into segments. Only a positive code joiner joins: a letter,
+    digit or "_", "." and "/", "::" and "://", the "@" of a pin and its version ("maybe@1.2.3"), a "~" that starts a home path ("~/x"),
+    a run of dots only before "/" ("../x"), and a hyphen inside a URL host or inside a FILE OR DIRECTORY NAME (its hyphenated word is followed by "/" or by a dotted run that
+    ends in a known extension: "possible-values.md", "maybe-src/x.py"). Every other mark cuts: "," "(" ")" "=" "?" a lone ":" "#"
+    brackets, quotes, backticks, "|" "&" "+" "!" "*" "%" "^" "$" ";" "<" ">", a dash after a name ("src/emit.py-probably", an em or
+    en dash folded by canon()), and any mark this list does not name. Linear in the token: each run of [\w.-] is read once."""
+    keep, cut_dots = set(), set()
+    for m in _PIN_SPAN.finditer(t, a, b):
+        keep.update(range(m.start(), m.end()))
+    sch = t.find("://", a, b)
+    if sch >= 0:
+        host_end = t.find("/", sch + 3, b)
+        keep.update(i for i in range(sch + 3, host_end if host_end >= 0 else b) if t[i] == "-")
+    for m in _RUNS.finditer(t, a, b):
+        run = m.group()
+        if "-" not in run:
+            continue
+        tail = run.rstrip(".").rsplit(".", 1)
+        ext = len(tail) == 2 and tail[1].lower() in _EXT
+        p = m.start()
+        parts = run.split(".")
+        for n, part in enumerate(parts):
+            if "-" in part and (ext if n < len(parts) - 1 else t[m.end():m.end() + 1] == "/"):
+                keep.update(p + i for i, c in enumerate(part) if c == "-")
+            p += len(part) + 1
+    for m in _DOT_RUN.finditer(t, a, b):
+        cut_dots.update(range(m.start(), m.end()))    # an ellipsis glued between words ("emit.py...perhaps"); "../x" joins
+    cuts = []
+    for i in range(a, b):
+        c = t[i]
+        if (c.isalnum() or c in "_./" or i in keep) and i not in cut_dots:
+            continue
+        if c == ":" and ((i > a and t[i - 1] == ":") or t[i + 1:i + 2] == ":" or t[i + 1:i + 3] == "//"):
+            continue
+        if c == "~" and t[i + 1:i + 2] == "/" and (i == a or not (t[i - 1].isalnum() or t[i - 1] in "_.-")):
+            continue
+        cuts.append(i)
+    return cuts
 
 
 class _Toks:
@@ -182,14 +227,11 @@ class _Toks:
         return self._code[k]
 
     def segment(self, k, pos):
-        """The SEGMENT of token k that holds pos: the token cut at the glue marks , ( ) = ? and a lone ":" (not "::", not "://"),
-        which prose also uses to join words without a blank. Each token is cut once."""
+        """The SEGMENT of token k that holds pos: the token cut at every mark that does not join a code name (_token_cuts). Each
+        token is cut once."""
         cuts = self._cuts.get(k)
         if cuts is None:
-            t = self.t
-            cuts = [i for i in range(self.starts[k], self.ends[k]) if t[i] in _SEG_CUT or (
-                t[i] == ":" and t[i - 1] != ":" and t[i + 1:i + 2] != ":" and t[i + 1:i + 3] != "//")]
-            self._cuts[k] = cuts
+            cuts = self._cuts[k] = _token_cuts(self.t, self.starts[k], self.ends[k])
         j = bisect_right(cuts, pos)
         return (cuts[j - 1] + 1 if j else self.starts[k]), (cuts[j] if j < len(cuts) else self.ends[k])
 
@@ -226,16 +268,19 @@ def _is_name(tx, s, e, lo=0, words=None):
     run = t[s:e]
     if "_" in run or (run[1:] != run[1:].lower() and not run.isupper()):
         return True                                   # an identifier: possible_values, MightyEmit
-    if s > tx.starts[k] and t[s - 1] == "@":
-        return True                                   # a handle: @maybe
+    if s > tx.starts[k] and t[s - 1] == "@" and (s - 1 == tx.starts[k] or t[s - 2] in "([{<" + _OPEN_QUOTES):
+        return True                                   # a handle: @maybe, (@maybe); not emit.py@maybe, emit()@maybe
     a, b = tx.segment(k, s)
     if e < len(t) and t[e] == "=" and e + 1 < len(t) and not t[e + 1].isspace():
         _, vb = tx.segment(k, e + 1)
         if t[e + 1:vb].strip(_TOK_EDGE).lower() not in _ANSWERS or tx.located(k):
             return True                               # a key: maybe=1, assumed=true in cfg.toml:2 (not likely=yes: the hedge, answered)
-    if b < tx.ends[k] and t[b] == "(" and _CALLARGS.match(t, b):
-        return True                                   # a call name: maybe(), x.maybe()
+    c = b + 1 if t[b:b + 2] == "!(" else b
+    if c < tx.ends[k] and t[c] == "(" and _CALLARGS.match(t, c) and _QUALIFIED.fullmatch(t, a, b):
+        return True                                   # a call name: maybe(), x.maybe(), maybe!(x); not maybe/emit()
     kind = tx.seg_kind(a, b)
+    if kind == "url" and t.find("://", s, b) >= 0:
+        return False                                  # a word in the scheme position of a URL ("maybe.https://h/x") names nothing
     if kind in ("dotted", "module") and not (tx.whole(k, a, b) and _member(t, a, s)):
         return False                                  # D6: a bare dotted name is code only as a whole token, and only for a member
     if kind in _CODE_KINDS:
@@ -618,6 +663,7 @@ _RESULT_AFTER = frozenset("passed passing failed failing fail fails errors error
                           "succeeded skipped failures".split())
 _TOK_EDGE = " \t\r\n.,;:!'\"`()[]{}<>*_~|=?-"
 _CALLARGS = re.compile(r"\([^()\s]*\)")
+_QUALIFIED = re.compile(r"\w+(?:(?:\.|::)\w+)*")
 _SCOPE = re.compile(r"\w::\w")
 _PIN = re.compile(r"\w@[\w.{~^-]*[0-9]")
 _LINE_SUFFIX = re.compile(r"(?::\d+(?:-\d+)?|#l\d+(?:-l?\d+)?)$")
