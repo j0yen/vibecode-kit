@@ -215,7 +215,7 @@ def _token_cuts(t, a, b):
 class _Toks:
     """The blank-delimited tokens of a canonical text, found once; the code kind of a token or of a segment is judged once (linear in
     the text)."""
-    __slots__ = ("t", "starts", "ends", "_code", "_cuts", "_seg")
+    __slots__ = ("t", "starts", "ends", "_code", "_cuts", "_seg", "_core", "_words", "_dots", "_scheme")
 
     def __init__(self, t):
         self.t = t
@@ -225,6 +225,10 @@ class _Toks:
         self._code = {}
         self._cuts = {}
         self._seg = {}
+        self._core = {}
+        self._words = {}
+        self._dots = {}
+        self._scheme = {}
 
     def at(self, pos):
         """Index of the token that holds pos (pos is no blank)."""
@@ -255,14 +259,38 @@ class _Toks:
         return self._seg[(a, b)]
 
     def whole(self, k, a, b):
-        """Segment t[a:b] is all of token k but its edge punctuation ("(obj.maybe)," is obj.maybe; "status=obj.maybe" is not)."""
-        tok = self.t[self.starts[k]:self.ends[k]]
-        return (a <= self.starts[k] + len(tok) - len(tok.lstrip(_TOK_EDGE))
-                and b >= self.ends[k] - len(tok) + len(tok.rstrip(_TOK_EDGE)))
+        """Segment t[a:b] is all of token k but its edge punctuation ("(obj.maybe)," is obj.maybe; "status=obj.maybe" is not). The
+        token's core is found once."""
+        core = self._core.get(k)
+        if core is None:
+            tok = self.t[self.starts[k]:self.ends[k]]
+            core = self._core[k] = (self.starts[k] + len(tok) - len(tok.lstrip(_TOK_EDGE)),
+                                    self.ends[k] - len(tok) + len(tok.rstrip(_TOK_EDGE)))
+        return a <= core[0] and b >= core[1]
+
+    def member(self, a, b, s):
+        """D6: the word at s is a MEMBER of the dotted segment t[a:b]: a component before it is no abbreviation ("obj.maybe",
+        "pkg.mod.maybe", "a.maybe.b"); a word that heads the name ("probably.ok", "maybe.later") or follows only abbreviations
+        ("cf.maybe", "e.g.maybe") is not. The components of a segment are read once (_dotted_heads)."""
+        d = self._dots.get((a, b))
+        if d is None:
+            d = self._dots[(a, b)] = _dotted_heads(self.t, a, b)
+        first, lo, hi = d
+        return first is not None and first < s and not (lo < s <= hi)
+
+    def scheme(self, a, b):
+        """The start of the last "://" in segment t[a:b] (-1 if none), found once: a word at or before it is in a scheme position."""
+        r = self._scheme.get((a, b))
+        if r is None:
+            r = self._scheme[(a, b)] = self.t.rfind("://", a, b)
+        return r
 
     def word(self, k):
-        """Token k as a bare lower-case word (edge punctuation removed)."""
-        return self.t[self.starts[k]:self.ends[k]].strip(_TOK_EDGE).lower()
+        """Token k as a bare lower-case word (edge punctuation removed), found once."""
+        w = self._words.get(k)
+        if w is None:
+            w = self._words[k] = self.t[self.starts[k]:self.ends[k]].strip(_TOK_EDGE).lower()
+        return w
 
     def located(self, k):
         """A location follows token k: the next token is code, or a function word and then a code token ("in cfg.toml:2")."""
@@ -290,9 +318,9 @@ def _is_name(tx, s, e, lo=0, words=None):
     if c < tx.ends[k] and t[c] == "(" and _CALLARGS.match(t, c) and _QUALIFIED.fullmatch(t, a, b):
         return True                                   # a call name: maybe(), x.maybe(), maybe!(x); not maybe/emit()
     kind = tx.seg_kind(a, b)
-    if kind == "url" and t.find("://", s, b) >= 0:
+    if kind == "url" and tx.scheme(a, b) >= s:
         return False                                  # a word in the scheme position of a URL ("maybe.https://h/x") names nothing
-    if kind in ("dotted", "module") and not (tx.whole(k, a, b) and _member(t, a, s)):
+    if kind in ("dotted", "module") and not (tx.whole(k, a, b) and tx.member(a, b, s)):
         return False                                  # D6: a bare dotted name is code only as a whole token, and only for a member
     if kind in _CODE_KINDS:
         return True                                   # code: possible-values.md, obj.maybe, lib/should
@@ -300,12 +328,25 @@ def _is_name(tx, s, e, lo=0, words=None):
             and t[tx.ends[k - 1] - 1].isalnum() and _quoted_name(tx, k, s))
 
 
-def _member(t, a, s):
-    """D6: the word at s is a MEMBER of the dotted name that starts at a: a component before it is no abbreviation ("obj.maybe",
-    "pkg.mod.maybe"); a word that heads the name ("probably.ok", "maybe.later") or follows only abbreviations ("cf.maybe",
-    "e.g.maybe") is not."""
-    head = t[a:s].strip(_TOK_EDGE)
-    return not abbreviation(head) and any(c and not abbreviation(c) for c in head.split("."))
+def _dotted_heads(t, a, b):
+    """For _Toks.member: (first, lo, hi) of the dotted segment t[a:b] with its edge punctuation removed. `first` is the end of its
+    first component that is no listed abbreviation (None if there is none): a word after it is a member. A leading run of two or more
+    single letters ("e.g", "a.k.a") is an abbreviation as a whole: a word at a position in (lo, hi] follows only that run. One pass."""
+    seg = t[a:b]
+    i = a + len(seg) - len(seg.lstrip(_TOK_EDGE))
+    first, ends, letters = None, [], True
+    while i <= b:
+        j = t.find(".", i, b)
+        j = b if j < 0 else j
+        c = t[i:j].strip(_TOK_EDGE).casefold()
+        if letters and len(c) == 1 and "a" <= c <= "z":
+            ends.append(j)
+        else:
+            letters = False
+        if first is None and c and c.lstrip("([{\"'`") not in ABBREVIATIONS:
+            first = j
+        i = j + 1
+    return first, (ends[0] if len(ends) >= 2 else 0), (ends[-1] + 1 if len(ends) >= 2 else 0)
 
 
 def _quoted_name(tx, k, s):
@@ -371,10 +412,13 @@ def _month_after(tx, k, e):
     a location within one word ("by end May, see a.py:4"), or a month range ("from May to June"). Anything else, an unlisted word
     included, reads "may" as the modal ("from may differ", "reads from may at times differ", "runs in may, in theory, differ")."""
     t, n = tx.t, len(tx.starts)
-    rest = t[e:tx.ends[k]].lstrip(_CLOSERS)
-    if rest[:1] in (".", ";", "!"):
+    i, z = e, tx.ends[k]
+    while i < z and t[i] in _CLOSERS:
+        i += 1
+    rest = t[i] if i < z else ""
+    if rest in (".", ";", "!"):
         return True
-    if rest[:1] == ",":
+    if rest == ",":
         return k + 1 < n and (tx.code(k + 1) or (k + 2 < n and tx.code(k + 2)))
     if rest:
         return False
