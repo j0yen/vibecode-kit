@@ -620,14 +620,15 @@ def doubted_suffixes(pieces):
     if len(pieces) == 1:
         return [negated(pieces[0], doubt=True) or hedged(pieces[0])]
     flags = _suffix_flags(pieces, False)
-    if any(has_glue(p) for p in pieces):                        # THE GLUE RULE: either reading (a suffix with no glue mark reads alike)
-        flags = [a or b for a, b in zip(flags, _suffix_flags(pieces, True))]
+    if not all(flags) and any(has_glue(p) for p in pieces):     # THE GLUE RULE: either reading (a suffix with no glue mark reads alike)
+        flags = _suffix_flags(pieces, True, flags)              # each flag is its own judgement: only the unflagged ones are read again
     return flags
 
 
-def _suffix_flags(pieces, glue):
-    """doubted_suffixes in one reading of the pieces (glue=False: canon(); glue=True: the glue reading)."""
-    flags = [False] * len(pieces)
+def _suffix_flags(pieces, glue, done=None):
+    """doubted_suffixes in one reading of the pieces (glue=False: canon(); glue=True: the glue reading). A suffix flagged in `done`
+    stays flagged and is not judged again (the OR of the readings)."""
+    flags = list(done) if done else [False] * len(pieces)
     # negation: zero counts are found once; a hit after a cut is a hit of that suffix unless a zero count that starts in the suffix
     # cancels it, and a zero count that crosses the cut is not applied there (its words after the cut are read raw)
     t, cuts = _joined(pieces, True, glue)
@@ -640,6 +641,8 @@ def _suffix_flags(pieces, glue):
     last = max(_last_start(_ZERO_PASS, g), _last_start(NEG_DOUBT, g), _last_start(NEG_CORE, g))
     zstarts = [a for a, _ in zs]
     for i, q in enumerate(cuts):
+        if flags[i]:
+            continue
         if last >= q:
             flags[i] = True
             continue
