@@ -47,7 +47,7 @@ N = [
  ("m157", "split name not read as one", EV, "            if len(parts) > 1 and _noun_of(parts[-1]) is None and _noun_of(parts[-2] + parts[-1]) is not None:", "            if False:"),
  # DEF-3
  ("m143", "peer slug of any case", EV, '_PEER_SLUG = r"[a-z]{1,3}\\d{2,5}(?:[a-z]{1,2}\\d{0,2}){0,3}"', '_PEER_SLUG = r"[A-Za-z0-9]{1,16}"'),
- ("m144", "peer slug length unbounded", EV, '(name == "peer" and len(slug) > _PEER_SLUG_MAX)', "False"),
+ ("m144", "peer slug length unbounded", EV, 'if name == "peer" and len(slug) > _PEER_SLUG_MAX:', "if False:"),
  ("m145", "prd slug of any characters", EV, r'prd-(?P<slug>[a-z]+(?:-[a-z]+){0,%d})', r'prd-(?P<slug>[A-Za-z0-9]+(?:-[A-Za-z0-9]+){0,%d})'),
  ("m146", "prd slug letters unbounded", EV, 'if m is None or len(m.group("slug").replace("-", "")) > _PRD_SLUG_LETTERS:', "if m is None:"),
  ("m147", "inner unit template widened", EV, r'"inner": re.compile(r"wm-build-inner\d{1,%d}-[a-z]\.service" % _INNER_DIGITS)', r'"inner": re.compile(r"wm-build-inner\w{1,%d}-\w+\.service" % (_INNER_DIGITS * 4))'),
