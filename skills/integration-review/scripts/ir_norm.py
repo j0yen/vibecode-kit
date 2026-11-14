@@ -118,13 +118,12 @@ _CONN = r"(?:\b(?P<w>or|nor|either|vs|versus|alternatively|and|plus)\b\.?|(?<![\
 _FWD = re.compile(_CONN + r"\s*(?:(?:the|a)\s+)?(?:side\s*[=:]?\s*)?(?P<tok>\S*)", re.I)
 _REV = re.compile(r"(?<!\S)(?P<tok>\S+?)(?:\s+\b(?P<w>or|nor|either|vs|versus|alternatively|and|plus)\b|\s*(?<![\w.\\/-])(?P<s>[/|&+])(?=\s|$))", re.I)
 _GLUED = re.compile(r"[/|&+](?=(?:producer|consumer|caller|adapter))|\b(?:producer|consumer|caller|adapter)s?[/|&+]", re.I)
-# N5: an alternative connective WORD reaches a side word of the prose across up to _ALT_REACH plain words (a determiner, possessive or
-# adjective: "or the legacy consumer", "or its consumer", "or rather consumer", "or else consumer"); a punctuated token, a connective or
-# a function word other than a determiner stops it, and a side word inside a code token there is a location ("or see docs/consumers.md").
-# Beside the connective any side token counts (D3); a symbol connective (/ |), a conjunction and a side word BEFORE a connective still
-# need the side token beside them (the reach reads rightward only, so the one-pass suffix scan stays exact).
+# N5, D4: an alternative connective (a word, or a standalone / or |) reaches a side word of the prose across up to _ALT_REACH tokens of
+# ANY kind ("or the legacy consumer", "or the 2 consumers", "or the third-party consumer", "or on the consumer side", "/ the legacy
+# consumer"): no modifier kind stops it, so an unlisted modifier never hides the alternative; a side word inside a code token there is
+# a location ("or see docs/consumers.md"). Beside the connective any side token counts (D3); a conjunction and a side word BEFORE a
+# connective still need the side token beside them (the reach reads rightward only, so the one-pass suffix scan stays exact).
 _ALT_REACH = 3
-_DETERMINERS = frozenset("the a an its their his her our your my this that these those some any another other each every".split())
 _QM = re.compile(r"\?(?![\w=&/#.%:-])")
 _HEDGE_WORD = re.compile(
     r"\b(?:(?:probab|possib|perhap|maybe|mayb|presum|apparent|seem|appear|suppos|alleg|reput|purport|ostensib|conceiv|plausib|putativ|"
@@ -418,24 +417,22 @@ def _decide(tx, kind, m, lo):
     conn = (m.group("w") or m.group("s")).lower()
     if _side_hit(tx, m.start("tok"), m.group("tok"), conn, lo):
         return True
-    return kind == "fwd" and conn in _ALT and conn.isalpha() and _alt_reach(tx, m.start("tok"))
+    return kind == "fwd" and conn in _ALT and _alt_reach(tx, m.start("tok"))
 
 
 def _alt_reach(tx, p):
-    """N5: from the token at p, just after an alternative connective word, walk right over up to _ALT_REACH plain words to a side word of
-    the prose. It reads only text right of the connective, so a suffix judged alone (doubted_suffixes) sees the same reach."""
+    """N5, D4: from the token at p, just after an alternative connective (a word or a standalone "/" "|"), walk right over up to
+    _ALT_REACH tokens of ANY kind (a determiner, number, version, hyphenated or quoted word, preposition, comma) to a side word of the
+    prose; a path or file that holds the side word is a location. It reads only text right of the connective, so a suffix judged
+    alone (doubted_suffixes) sees the same reach."""
     t, n = tx.t, len(tx.starts)
     j = bisect_left(tx.starts, p)
     for _ in range(_ALT_REACH + 1):
         if j >= n:
             return False
-        a, b = tx.starts[j], tx.ends[j]
-        if _SIDE.search(t, a, b):
+        if _SIDE.search(t, tx.starts[j], tx.ends[j]):
             return not tx.code(j)                     # a prose side word; a path or file that holds one is a location
-        w = t[a:b].lower()
-        if not w.isalpha() or w in _ALT or w in _CONJ or w == "side" or (w in _FUNCTION_WORDS and w not in _DETERMINERS):
-            return False
-        j += 1
+        j += 1                                        # D4: any token kind is crossed (number, hyphen, quote, preposition, comma)
     return False
 
 
