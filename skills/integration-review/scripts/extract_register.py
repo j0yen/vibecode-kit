@@ -104,9 +104,19 @@ def evidence_text(row):
 
 
 _CLAUSE_END = re.compile(r"[;\n]|\.\s")
+_NEG_HEAD = re.compile(r"(?i)\b(?:not|no|never|without|isn['\u2019]t)\s+(?=side=)")
 
 
-_NEGATOR_TAIL = re.compile(r"(?i)\b(?:not|no|never|without|isn['\u2019]t)\s+$")
+def _after_pieces(t, marks, z):
+    """The pieces of the after-text of each of `marks` (the side marks of one clause, which ends at z), as the pre-repair scan read
+    them: a negator just before a "side=" removed, the marks themselves the joining blanks (see ir_norm.doubted_suffixes)."""
+    pieces = []
+    for i, m in enumerate(marks):
+        if i + 1 < len(marks):
+            pieces.append(_NEG_HEAD.sub(" ", t[m.end():marks[i + 1].start()] + "side=")[:-5])
+        else:
+            pieces.append(_NEG_HEAD.sub(" ", t[m.end():z]))
+    return pieces
 
 
 def _marks(t):
@@ -116,15 +126,14 @@ def _marks(t):
     "maybe side=producer", "side=producer?", "side=producer or consumer") between the start of its
     clause and the mark, counted from the end of the previous side mark, or one after it up to the end of its clause
     (; newline or a full stop ends the clause). A negation that heads another side mark does not reach this one
-    ("side=producer, not side=consumer" keeps the producer mark); a zero count of failures is no negation."""
+    ("side=producer, not side=consumer" keeps the producer mark); a zero count of failures is no negation. The after-text is the rest
+    of the clause with the other marks blanked, judged as one text (ir_norm.doubted_suffixes: one pass, linear in the clause)."""
     marks = list(SIDE_MARK.finditer(t))
     if not marks:
         return set()
     ends = [(c.start(), c.end()) for c in _CLAUSE_END.finditer(t)]
-    # one pass: each mark gets the span before it (back to the previous mark or the clause start) and the span after it (to the next
-    # mark of its clause or the clause end); a span is examined once as "before" and once as "after", never re-sliced per mark
-    bad_before, bad_after, z_of = [], [], []
-    k, a, prev_end = 0, 0, 0
+    bad_before, bad_after, group = [], [], []
+    k, a, prev_end, z_group = 0, 0, 0, None
     for m in marks:
         while k < len(ends) and ends[k][1] <= m.start():
             a = ends[k][1]
@@ -132,20 +141,16 @@ def _marks(t):
         j = k
         while j < len(ends) and ends[j][0] < m.end():
             j += 1
-        z_of.append(ends[j][0] if j < len(ends) else len(t))
+        z = ends[j][0] if j < len(ends) else len(t)
+        if group and z != z_group:               # the marks of one clause share its end; their after-texts are judged together
+            bad_after += _N.doubted_suffixes(_after_pieces(t, group, z_group))
+            group = []
+        group.append(m)
+        z_group = z
         before = t[max(a, prev_end):m.start()]
         prev_end = m.end()
         bad_before.append(_N.negated(before, doubt=True) or _N.hedged(before))
-    carry = False
-    for i in range(len(marks) - 1, -1, -1):
-        m, z = marks[i], z_of[i]
-        heads = i + 1 < len(marks) and marks[i + 1].start() < z
-        span = t[m.end():marks[i + 1].start() if heads else z]
-        if heads:
-            span = _NEGATOR_TAIL.sub(" ", span)
-        carry = (carry and heads) or _N.negated(span, doubt=True) or _N.hedged(span)
-        bad_after.append(carry)
-    bad_after.reverse()
+    bad_after += _N.doubted_suffixes(_after_pieces(t, group, z_group))
     return {m.group(1) for m, b, f in zip(marks, bad_before, bad_after) if not (b or f)}
 
 

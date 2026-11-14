@@ -9,6 +9,7 @@ redact() replaces text shaped like a credential (or an e-mail address) by a fixe
 """
 import re
 import unicodedata
+from bisect import bisect_right
 from functools import lru_cache
 from urllib.parse import unquote
 
@@ -78,48 +79,151 @@ def negated(text, state=False, doubt=False):
 
 
 # HEDGE (hedged(): the one rule for a side mark): a clause that doubts or alternates its claim does not state it. Three kinds: (1)
-# a hedge WORD of the prose, read by its STEM so a derived form is caught too (probably, probability; any -edly adverb such as reportedly; presumed, presumably;
-# supposed, supposedly; a modal verb might / could / would / should / may; "i think", "i guess", "sort of", "not sure", "needs verification"); (2) a
-# question mark that ends a word ("side=producer?"; "a?b=1" in a URL is no hedge); (3) an ALTERNATIVE or a second side: a
-# connective (or, and, nor, either, vs, / & + |) beside another side word ("side=producer or consumer"). English only; an
-# unlisted wording of doubt is read as plain (SKILL.md states the limit).
-# A hedge is a whole word, never a fragment of a name: a stem inside a path or an identifier (possible_values.py, maybe.py, assumptions.md,
-# src/should.rs, MightyEmit) is no hedge, a Capitalised hedge word after another word is a name ("in May", 'Should Not Happen'), and "may"
-# after in / since / until / during / from / by / early / late / mid / end is the month. A side word that is a path component
-# (src/consumer/x.py, adapter.py, producers/, adapter-http, consumer_test) is no second side: only a BARE side word is.
-_SIDE_WORDS = r"(?:producer|consumer|caller|adapter)s?"
-_SIDE_BARE = _SIDE_WORDS + r"(?![\w/\\]|\.\w|-(?!side\b)\w)"
-_CONNECTIVE = r"\b(?:or|and|nor|vs\.?|versus|either|plus)\b"
+# a hedge WORD of the prose, read by its STEM so a derived form is caught too (probably, probability; any -edly adverb such as reportedly;
+# presumed, presumably; supposed, supposedly; a modal verb might / could / would / should / may; "i think", "i guess", "sort of", "not
+# sure", "needs verification"); (2) a question mark that ends a word ("side=producer?"; "a?b=1" in a URL is no hedge); (3) an
+# ALTERNATIVE or a second side: an alternative connective (or, nor, either, vs, versus, a standalone / or |) beside any token that holds
+# a side word, a conjunction (and, plus, a standalone & or +) beside a side word that is prose, or a side word glued to / | & + in a
+# token that is no name ("side=producer/consumer"). English only; an unlisted wording of doubt is read as plain (SKILL.md states it).
+# THE NAME-VS-HEDGE RULE (_is_name, one place): a hedge word or a side word is part of a NAME only on evidence that it is not prose:
+# (1) its blank-delimited token is code by the shared code-token rule (_token_kind: call, ::, URL, name@version, file, path, module or
+# dotted name); (2) its word run is an identifier (an underscore, or a capital after the first letter, not all capitals), a key ("maybe=1")
+# or a handle ("@maybe"); (3) a QUOTED NAME: an opening quote glued to it, every word Capitalised, and the quote after a word of the same
+# text ("in 'Might' handler"). For "may" only (_is_hedge_word), (4) the MONTH: a number after it ("May 12"), or a time word just before it
+# and no verb-able word after it ("since may at emit.py:3", "in early may (emit.py:3)"; not "the end may change"). Nothing else is
+# evidence: a capital alone (Title Case, the pronoun I, a sentence start), a preposition alone or a compound with no code mark
+# ("maybe-http", "would-be") leave the word prose, so an ambiguous form refuses the role and never asserts it.
+_SIDE = re.compile(r"\b(?:producer|consumer|caller|adapter)", re.I)
+_ALT = frozenset(("or", "nor", "either", "vs", "versus", "/", "|"))
+_CONJ = frozenset(("and", "plus", "&", "+"))
+_CONN = r"(?:\b(?P<w>or|nor|either|vs|versus|and|plus)\b\.?|(?<![\w.\\/-])(?P<s>[/|&+])(?=\s|$))"
+# FWD: a connective, then the token it joins (after "the"/"a" and a "side=" / "side:" label). REV: a token, then a connective. A symbol
+# connective is standalone (blanks or the text edge on its right); glued to a word it is GLUED: a side word glued to / | & + in a token
+# that is no name ("side=producer/consumer"; "/srv/consumer/app.py" is a path). A connective word inside a name ("src/or/x.py") is none.
+# QM: a question mark that ends a word.
+_FWD = re.compile(_CONN + r"\s*(?:(?:the|a)\s+)?(?:side\s*[=:]?\s*)?(?P<tok>\S*)", re.I)
+_REV = re.compile(r"(?<!\S)(?P<tok>\S+?)(?:\s+\b(?P<w>or|nor|either|vs|versus|and|plus)\b|\s*(?<![\w.\\/-])(?P<s>[/|&+])(?=\s|$))", re.I)
+_GLUED = re.compile(r"[/|&+](?=(?:producer|consumer|caller|adapter))|\b(?:producer|consumer|caller|adapter)s?[/|&+]", re.I)
+_QM = re.compile(r"\?(?![\w=&/#.%:-])")
 _HEDGE_WORD = re.compile(
-    r"(?<![/.\\@])\b(?:(?:probab|possib|perhap|maybe|mayb|presum|apparent|seem|appear|suppos|alleg|reput|purport|ostensib|conceiv|plausib|putativ|"
+    r"\b(?:(?:probab|possib|perhap|maybe|mayb|presum|apparent|seem|appear|suppos|alleg|reput|purport|ostensib|conceiv|plausib|putativ|"
     r"arguab|likel|unlikel|assum|tentativ|hopeful|guess|suspect|believ|roughl|approx|might|could|would|should|iirc|afaik|imo|kinda|sorta)\w*"
-    r"|\w+edly|may(?!\s+\d)|ish|(?:kind|sort) of|i think|(?:need|needs|needed|to be|to) (?:verif|confirm|check|valid)\w*"
-    r"|not (?:sure|certain|clear|confirmed))\b(?![/\\]|\.\w)", re.I)
-_HEDGE_OTHER = re.compile(
-    r"\?(?![\w=&/#.%:-])"
-    r"|(?:" + _CONNECTIVE + r"|(?<![\w.\\/-])[/&+|])\s*(?:the |a )?(?:side\s*[=:]?\s*)?" + _SIDE_BARE
-    + r"|(?<![\w.\\/-])" + _SIDE_WORDS + r"\s*(?:" + _CONNECTIVE + r"|[/&+|](?=\s|$|(?:side\s*[=:]\s*)?" + _SIDE_BARE + r"))", re.I)
+    r"|\w+edly|may|ish|(?:kind|sort) of|i think|(?:need|needs|needed|to be|to) (?:verif|confirm|check|valid)\w*"
+    r"|not (?:sure|certain|clear|confirmed))\b", re.I)
+_CODE_KINDS = frozenset(("call", "scope", "url", "pin", "file", "path", "module", "dotted"))
+_OPEN_QUOTES = "'\"`‘“"
 _MONTH_AFTER = frozenset(("in", "since", "until", "till", "during", "from", "by", "early", "late", "mid", "end"))
-_QUOTES = " '\"\u2018\u2019\u201c\u201d"
+# A word after the month that is no verb: a function word (the modal "may" takes a verb: "may be", "may change").
+_FUNCTION_WORDS = frozenset("at in on by for to from with of and or nor the a an as via into onto per than then when while until till "
+                            "since during before after through".split())
+_KINDS = (("qm", _QM), ("fwd", _FWD), ("rev", _REV), ("glued", _GLUED), ("word", _HEDGE_WORD))
 
 
-def _is_hedge_word(t, m):
-    """One _HEDGE_WORD match is a hedge unless it is a name: an identifier (an underscore, an inner capital), a Capitalised word after
-    another word, or the month May."""
-    tok = m.group()
-    if "_" in tok or (tok[1:] != tok[1:].lower() and not tok.isupper()):
+class _Toks:
+    """The blank-delimited tokens of a canonical text, found once; the code kind of a token is judged once (linear in the text)."""
+    __slots__ = ("t", "starts", "ends", "_code")
+
+    def __init__(self, t):
+        self.t = t
+        spans = [m.span() for m in re.finditer(r"\S+", t)]
+        self.starts = [a for a, _ in spans]
+        self.ends = [b for _, b in spans]
+        self._code = {}
+
+    def at(self, pos):
+        """Index of the token that holds pos (pos is no blank)."""
+        return bisect_right(self.starts, pos) - 1
+
+    def code(self, k):
+        """Token k is code by the shared code-token rule, a hyphen inside it read as a word joiner (kebab-case names such as
+        possible-values.md are files; a compound with no other code mark, maybe-http, stays prose)."""
+        if k not in self._code:
+            self._code[k] = _token_kind(self.t[self.starts[k]:self.ends[k]].casefold().replace("-", "_")) in _CODE_KINDS
+        return self._code[k]
+
+    def word(self, k):
+        """Token k as a bare lower-case word (edge punctuation removed)."""
+        return self.t[self.starts[k]:self.ends[k]].strip(_TOK_EDGE).lower()
+
+
+def _is_name(tx, s, e, lo=0, words=None):
+    """THE NAME-VS-HEDGE RULE (see the HEDGE note): True when the word t[s:e] (a hedge word or a side word; `words` is the whole match
+    of a phrase) is part of a name: a code token, an identifier, a key or a handle, or a quoted Capitalised name after a word. Nothing
+    left of `lo` is read (a suffix judged alone has no text before it)."""
+    t = tx.t
+    k = tx.at(s)
+    run = t[s:e]
+    if "_" in run or (run[1:] != run[1:].lower() and not run.isupper()):
+        return True                                   # an identifier: possible_values, MightyEmit
+    if (e < len(t) and t[e] == "=" and e + 1 < len(t) and not t[e + 1].isspace()) or (s > tx.starts[k] and t[s - 1] == "@"):
+        return True                                   # a key (maybe=1) or a handle (@maybe)
+    if tx.code(k):
+        return True                                   # a code token: possible-values.md, maybe(), obj.maybe, lib/should
+    return (s - 1 == tx.starts[k] and t[s - 1] in _OPEN_QUOTES and k > 0 and tx.starts[k - 1] >= lo
+            and t[tx.ends[k - 1] - 1].isalnum() and all(w[0].isupper() for w in (words or run).split()))
+
+
+def _is_hedge_word(tx, m, lo=0):
+    """One _HEDGE_WORD match is a hedge unless it is a name (_is_name) or the month May (a number after it, or a time word before it
+    and no verb-able word after it)."""
+    t, w = tx.t, m.group()
+    first = w.split(" ", 1)[0]
+    if _is_name(tx, m.start(), m.start() + len(first), lo, w):
         return False
-    if tok[0].isupper() and not tok.isupper():
-        i = m.start()
-        while i > 0 and t[i - 1] in _QUOTES:
-            i -= 1
-        if i > 0 and t[i - 1].isalnum():
-            return False
-    if tok.lower() == "may":
-        words = t[max(0, m.start() - 12):m.start()].lower().split()
-        if words and words[-1] in _MONTH_AFTER:
-            return False
+    if w.lower() == "may":
+        k = tx.at(m.start())
+        nxt = k + 1 < len(tx.starts)
+        if nxt and t[tx.starts[k + 1]].isdigit():
+            return False                              # May 12, may 2026
+        if k > 0 and tx.starts[k - 1] >= lo and tx.word(k - 1) in _MONTH_AFTER:
+            if (m.end() < tx.ends[k] or not nxt or not t[tx.starts[k + 1]].isalpha() or tx.code(k + 1)
+                    or tx.word(k + 1) in _FUNCTION_WORDS):
+                return False                          # since may at emit.py:3, in early may (emit.py:3), since May.
     return True
+
+
+def _side_hit(tx, s0, tok, conn, lo):
+    """A side word in `tok` (which starts at s0) beside a connective: any side word after an alternative connective; a side word that
+    is prose (not _is_name) after a conjunction."""
+    for m in _SIDE.finditer(tx.t, s0, s0 + len(tok)):
+        s = m.start()
+        e = s
+        while e < len(tx.t) and (tx.t[e].isalnum() or tx.t[e] == "_"):
+            e += 1
+        if conn in _ALT or not _is_name(tx, s, e, lo):
+            return True
+    return False
+
+
+def _decide(tx, kind, m, lo):
+    """Is candidate match m (of _KINDS) a hedge, reading nothing left of lo?"""
+    if kind == "qm":
+        return True
+    if kind == "word":
+        return _is_hedge_word(tx, m, lo)
+    if kind == "glued":
+        s = m.start() + 1 if m.group()[0] in "/|&+" else m.start()
+        e = s
+        while e < len(tx.t) and (tx.t[e].isalnum() or tx.t[e] == "_"):
+            e += 1
+        return not _is_name(tx, s, e, lo)
+    if m.group("w") and _is_name(tx, m.start("w"), m.end("w"), lo):
+        return False                                  # a connective word inside a name: src/or/x.py
+    conn = (m.group("w") or m.group("s")).lower()
+    return _side_hit(tx, m.start("tok"), m.group("tok"), conn, lo)
+
+
+def _candidates(t):
+    """Every candidate hedge match of the canonical text t, one per (kind, start), in start order (a later candidate that overlaps an
+    earlier one is kept: each start is tried)."""
+    out = []
+    for kind, rx in _KINDS:
+        m = rx.search(t)
+        while m:
+            out.append((m.start(), kind, m))
+            m = rx.search(t, m.start() + 1)
+    out.sort(key=lambda x: x[0])
+    return out
 
 
 def hedged(text):
@@ -127,7 +231,99 @@ def hedged(text):
     if not isinstance(text, str):
         return False
     t = canon(text, slashes=True, fold_case=False)
-    return bool(_HEDGE_OTHER.search(t)) or any(_is_hedge_word(t, m) for m in _HEDGE_WORD.finditer(t))
+    cands = _candidates(t)
+    if not cands:
+        return False
+    tx = _Toks(t)
+    return any(_decide(tx, kind, m, 0) for _, kind, m in cands)
+
+
+# THE AFTER-TEXT OF A SIDE MARK (doubted_suffixes, used by extract_register._marks): the rest of its clause with the other marks blanked
+# is judged as ONE text, as the pre-repair scan judged it. Judging each suffix from scratch costs time quadratic in the marks of a
+# clause; one pass gives the same answers because a judgement reads at most ONE token left of a word (the time word before "may", the
+# word before a quoted name) and a zero count reads at most two words left of the failure word it cancels. Every hit of the whole text
+# that starts in a suffix is a hit of that suffix (removing text on the left removes name evidence and zero counts, never a hit); the
+# only hits a suffix adds are in its first token (re-judged without the text before it) and inside a zero count that crosses its start.
+
+
+def _joined(pieces, fold_case):
+    """canon() of " ".join(pieces) (slashes folded) and the offset in it where each piece starts, in one pass."""
+    parts = [_canon_chars(p, True) for p in pieces]
+    if fold_case:
+        parts = [p.casefold() for p in parts]
+    out, cuts, last = [], [], " "
+    for i, p in enumerate(parts):
+        if i:
+            if last != " ":
+                out.append(" ")
+            last = " "
+        cuts.append(len(out))
+        for c in p:
+            if c == " " and last == " ":
+                continue
+            out.append(c)
+            last = c
+    return "".join(out), cuts
+
+
+def _last_start(rx, t):
+    last, m = -1, rx.search(t)
+    while m:
+        last = m.start()
+        m = rx.search(t, m.start() + 1)
+    return last
+
+
+def doubted_suffixes(pieces):
+    """flags[i] == negated(" ".join(pieces[i:]), doubt=True) or hedged(" ".join(pieces[i:])) for every i, in time linear in the
+    total length (see the note above). A piece is the text between two side marks (the mark itself is the joining blank)."""
+    if len(pieces) == 1:
+        return [negated(pieces[0], doubt=True) or hedged(pieces[0])]
+    flags = [False] * len(pieces)
+    # negation: zero counts are found once; a hit after a cut is a hit of that suffix unless a zero count that starts in the suffix
+    # cancels it, and a zero count that crosses the cut is not applied there (its words after the cut are read raw)
+    t, cuts = _joined(pieces, True)
+    t = t.replace("’", "'")
+    zs = [m.span() for m in _ZERO_FAIL.finditer(t)]
+    g = list(t)
+    for a, b in zs:
+        g[a:b] = " " * (b - a)
+    g = "".join(g)
+    last = max(_last_start(_ZERO_PASS, g), _last_start(NEG_DOUBT, g), _last_start(NEG_CORE, g))
+    zstarts = [a for a, _ in zs]
+    for i, q in enumerate(cuts):
+        if last >= q:
+            flags[i] = True
+            continue
+        j = bisect_right(zstarts, q - 1) - 1
+        if j >= 0 and zs[j][0] < q < zs[j][1]:
+            raw = t[q:zs[j][1]]
+            flags[i] = bool(_ZERO_PASS.search(raw) or NEG_DOUBT.search(raw) or NEG_CORE.search(raw))
+    # hedge: every hit is found once with the whole text as context; each suffix re-judges only its first token without it
+    t, cuts = _joined(pieces, False)
+    cands = _candidates(t)
+    if not cands:
+        return flags
+    tx = _Toks(t)
+    hits = [p for p, kind, m in cands if _decide(tx, kind, m, 0)]
+    last = hits[-1] if hits else -1
+    starts = [p for p, _, _ in cands]
+    seen = {}
+    for i, q in enumerate(cuts):
+        if flags[i]:
+            continue
+        if last >= q:
+            flags[i] = True
+            continue
+        k = bisect_right(tx.starts, q - 1)            # the first token at or after q
+        if k >= len(tx.starts):
+            continue
+        if q not in seen:
+            hi = tx.ends[k]
+            a = bisect_right(starts, q - 1)
+            seen[q] = any(_decide(tx, kind, m, q) for _, kind, m in cands[a:bisect_right(starts, hi - 1)])
+        flags[i] = seen[q]
+    return flags
 
 
 def fold(v):
@@ -143,6 +339,12 @@ def canon(v, slashes=False, fold_case=True):
     characters removed, every dash/minus variant folded to "-", case folded, whitespace collapsed. With slashes=True
     every slash look-alike and the backslash fold to "/" too: used for placeholders and negations only, never for
     a path (a look-alike inside /proc/<n>/exe is not that path)."""
+    t = re.sub(r"\s+", " ", _canon_chars(v, slashes)).strip()
+    return t.casefold() if fold_case else t
+
+
+def _canon_chars(v, slashes):
+    """canon() before whitespace is collapsed: one output character per kept character, every blank a single space."""
     t = unicodedata.normalize("NFKD", v)
     out = []
     for c in t:
@@ -156,8 +358,7 @@ def canon(v, slashes=False, fold_case=True):
         elif slashes and c in _SLASHES:
             c = "/"
         out.append(" " if (c.isspace() or cat in ("Zs", "Zl", "Zp")) else c)
-    t = re.sub(r"\s+", " ", "".join(out)).strip()
-    return t.casefold() if fold_case else t
+    return "".join(out)
 
 
 def repo_id(repo):
