@@ -144,7 +144,7 @@ _NAME_HEADS = frozenset(
     "crate library plugin hook test case file branch tag release version feature error exception warning header key value record "
     "template rule policy role team project repo app endpoint route command tool script table column index schema config macro trait "
     "interface struct constant variable worker daemon timer channel stream bucket".split())
-_SEG_CUT = frozenset(",()=?")
+_SEG_CUT = frozenset(",()=?#")
 _ANSWERS = frozenset("yes no true false y n on off ok".split())
 _MONTH_AFTER = frozenset(("in", "since", "until", "till", "during", "from", "by"))
 _MONTH_PART = frozenset(("early", "late", "mid", "end"))          # a time word only after a preposition (N3)
@@ -193,13 +193,19 @@ class _Toks:
         j = bisect_right(cuts, pos)
         return (cuts[j - 1] + 1 if j else self.starts[k]), (cuts[j] if j < len(cuts) else self.ends[k])
 
-    def seg_code(self, a, b):
-        """Segment t[a:b] is code by the shared code-token rule (hyphen read as a word joiner, as in code()); a leading abbreviation
-        glued by its dot ("e.g.maybe") is prose, not a dotted name."""
+    def seg_kind(self, a, b):
+        """The code kind of segment t[a:b] by the shared code-token rule (hyphen read as a word joiner, as in code()); a leading
+        abbreviation glued by its dot ("e.g.maybe") is prose, not a dotted name."""
         if (a, b) not in self._seg:
             seg = _ABBR_HEAD.sub("", self.t[a:b].casefold())
-            self._seg[(a, b)] = bool(seg) and _token_kind(seg.replace("-", "_")) in _CODE_KINDS
+            self._seg[(a, b)] = _token_kind(seg.replace("-", "_")) if seg else None
         return self._seg[(a, b)]
+
+    def whole(self, k, a, b):
+        """Segment t[a:b] is all of token k but its edge punctuation ("(obj.maybe)," is obj.maybe; "status=obj.maybe" is not)."""
+        tok = self.t[self.starts[k]:self.ends[k]]
+        return (a <= self.starts[k] + len(tok) - len(tok.lstrip(_TOK_EDGE))
+                and b >= self.ends[k] - len(tok) + len(tok.rstrip(_TOK_EDGE)))
 
     def word(self, k):
         """Token k as a bare lower-case word (edge punctuation removed)."""
@@ -227,10 +233,23 @@ def _is_name(tx, s, e, lo=0, words=None):
         _, vb = tx.segment(k, e + 1)
         if t[e + 1:vb].strip(_TOK_EDGE).lower() not in _ANSWERS or tx.located(k):
             return True                               # a key: maybe=1, assumed=true in cfg.toml:2 (not likely=yes: the hedge, answered)
-    if tx.seg_code(a, b) or (b < tx.ends[k] and t[b] == "(" and _CALLARGS.match(t, b)):
-        return True                                   # code: possible-values.md, obj.maybe, lib/should; a call name: maybe()
+    if b < tx.ends[k] and t[b] == "(" and _CALLARGS.match(t, b):
+        return True                                   # a call name: maybe(), x.maybe()
+    kind = tx.seg_kind(a, b)
+    if kind in ("dotted", "module") and not (tx.whole(k, a, b) and _member(t, a, s)):
+        return False                                  # D6: a bare dotted name is code only as a whole token, and only for a member
+    if kind in _CODE_KINDS:
+        return True                                   # code: possible-values.md, obj.maybe, lib/should
     return (s - 1 == tx.starts[k] and t[s - 1] in _OPEN_QUOTES and k > 0 and tx.starts[k - 1] >= lo
             and t[tx.ends[k - 1] - 1].isalnum() and _quoted_name(tx, k, s))
+
+
+def _member(t, a, s):
+    """D6: the word at s is a MEMBER of the dotted name that starts at a: a component before it is no abbreviation ("obj.maybe",
+    "pkg.mod.maybe"); a word that heads the name ("probably.ok", "maybe.later") or follows only abbreviations ("cf.maybe",
+    "e.g.maybe") is not."""
+    head = t[a:s].strip(_TOK_EDGE)
+    return not abbreviation(head) and any(c and not abbreviation(c) for c in head.split("."))
 
 
 def _quoted_name(tx, k, s):
