@@ -30,7 +30,7 @@ N = [
   "return s if not s.isdigit() else None"),
  ("m113", "a fleet word dropped from the vocabulary", EV, '"decide regrade agorabus reap memlog witness', '"decide agorabus reap memlog witness'),
  ("m115", "a glued word after a name chains into the name", EV, "if _cred_noun(v, glued=False) and v.isalpha():", "if _cred_noun(v) and v.isalpha():"),
- ("m114", "Title-case words trusted as names", EV, 'if st["slug_ok"] and not _cred_name(low) and _slug(low):', 'if st["slug_ok"] and not _cred_name(low) and (_slug(low) or (seg.istitle() and seg.isalpha() and len(seg) >= 6)):'),
+ ("m114", "Title-case words trusted as names", EV, 'if st["slug_ok"] and (seg.islower() or seg.isupper()) and not _cred_name(low) and _slug(low):', 'if st["slug_ok"] and not _cred_name(low) and (_slug(low) or (seg.istitle() and seg.isalpha() and len(seg) >= 6)):'),
 ]
 M = mutants12.M + N
 MODS = [a for a in sys.argv[1:] if not a.startswith("--")] or ["test_review_fixes10", "test_review_fixes11", "test_review_fixes12",

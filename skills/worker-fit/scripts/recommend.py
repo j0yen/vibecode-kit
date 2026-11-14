@@ -56,11 +56,11 @@ def ev_norm(v):
 
 
 def _author_identities(d):
-    """Every identity the worker's own side holds: its actor (account name), session, invocation, child, and the
-    current / source owner. reviewed_by is an actor or session identity, never a subscription account: an equal
-    identity is the same author. No signing or account boundary is demanded."""
+    """Every identity the worker's own side holds: its actor (account name), session, invocation, child, unit (the worker's own
+    process: a review by it is the worker's own, re-review 14), and the current / source owner. reviewed_by is an actor or session
+    identity, never a subscription account: an equal identity is the same author. No signing or account boundary is demanded."""
     w = d["worker"]
-    vals = [w[k] for k in ("session", "invocation", "account", "child")]
+    vals = [w[k] for k in ("session", "invocation", "account", "child", "unit")]
     vals += [d.get("current_owner"), d["source"].get("owner")]
     return {ev_norm(v) for v in vals if isinstance(v, str) and not ev.is_unknown(v)}
 

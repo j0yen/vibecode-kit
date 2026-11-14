@@ -3,9 +3,10 @@ of the skill in a temp directory and runs the named test modules against it; a m
 m1..m36 are the earlier mutants (digit bound, DNS exemption, adapter raw, pair gate off, composites off, letters bound, strict
 piece, pair loop, unredacted usage lines, each bound of the gate) with their anchors moved to the field-profile code; m40..
 are changes to the profile table, the templates, the free-text numeric and passphrase bounds and the unit-name rule.
-EXIT STATUS: 0 only when every mutant is caught; any survivor or NOT-APPLIED mutant (its anchor no longer in the source) exits 1,
+EXIT STATUS: 0 only when every mutant is caught; any survivor or NOT-APPLIED mutant (its anchor no longer in the source, or the
+mutated scripts no longer import) exits 1,
 and a red baseline exits 2. Every result line is printed before the status.
-usage: python3 tests/mutants11.py [test_module ...]   |   python3 tests/mutants11.py --selftest survivor|not-applied|caught
+usage: python3 tests/mutants11.py [test_module ...]   |   python3 tests/mutants11.py --selftest survivor|not-applied|caught|import-breaking
 (not collected by unittest discovery)"""
 import os, shutil, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -13,7 +14,7 @@ SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EV, QA, RC = "scripts/envelope_validate.py", "scripts/queue_adapter.py", "scripts/recommend.py"
 M = [
  ("m1", "digit piece bound removed", EV, "_MAX_DIGIT_PIECE = 7 ", "_MAX_DIGIT_PIECE = 700 "),
- ("m2", "DNS exempt from the gate", EV, 'not _trusted_pieces(core, max_ids=2 if kind == "path" else 1, profile=prof):', 'not (_trusted_pieces(core, max_ids=2 if kind == "path" else 1, profile=prof) or (kind == "host" and _dns_host(v))):'),
+ ("m2", "DNS exempt from the gate", EV, 'not _trusted_pieces(core, max_ids=2 if kind == "path" else 1, profile=prof, digits0=tag):', 'not (_trusted_pieces(core, max_ids=2 if kind == "path" else 1, profile=prof, digits0=tag) or (kind == "host" and _dns_host(v))):'),
  ("m3", "adapter prints raw", QA, "return ev.show_row(label, v, words)", "return str(v)"),
  ("m4", "pair gate always benign", EV, "def _benign_value(raw, name=\"\", cred_context=False):", "def _benign_value(raw, name=\"\", cred_context=False):\n    return True"),
  ("m5", "composites off", EV, "def _redact_composites(text):", "def _redact_composites(text):\n    return text"),
@@ -46,7 +47,7 @@ M = [
  ("m31", "hex head name bypass", EV, "return bool(re.fullmatch(r\"[0-9a-fA-F]{4,64}\", core)) and not core.isdigit()", "return True"),
  ("m32", "piece count bound removed", EV, "_MAX_PIECES = 40", "_MAX_PIECES = 4000"),
  ("m33", "one-letter id prefix", EV, "if (k >= 2 or seg[0] == \"r\") and", "if True and"),
- ("m34", "ids beside unlisted or digits", EV, 'and not (st["ids"] and (st["cost"] > _MAX_UNLISTED_WITH_ID or st["digits"] > _MAX_DIGITS_WITH_ID\n                                                              or st["slugs"])))', ')'),
+ ("m34", "ids beside unlisted or digits", EV, 'and not (st["ids"] and (st["cost"] > _MAX_UNLISTED_WITH_ID or st["digits"] > _MAX_DIGITS_WITH_ID\n                                                              or st["slugs"]))\n            and (profile', 'and (profile'),
  ("m35", "single letter between numbers free anywhere", EV, 'if (len(seg) == 1 and seg.isalpha() and st["gap"] < _MAX_LETTER_GAP and any(c.isdigit() for c in prev)\n                    and any(c.isdigit() for c in nxt)):', "if len(seg) == 1 and seg.isalpha():"),
  ("m36", "uuid not counted", EV, 'st["ids"] += len(st["found"])', "pass"),
  ("m40", "profile argument ignored", EV, "    prof = profile or _ANY_PROFILE", "    prof = _ANY_PROFILE"),
@@ -79,6 +80,11 @@ def run(m, mods, tmp):
     if old not in s:
         return mid, desc, "NOT-APPLIED"
     open(p, "w").write(s.replace(old, new, 1))
+    # a mutant that breaks the import or the syntax of a script tests nothing: NOT-APPLIED (non-zero exit), never caught (re-review 14)
+    imp = subprocess.run([sys.executable, "-B", "-c", "import envelope_validate, queue_adapter, recommend"], cwd=d + "/wf/scripts",
+                         capture_output=True, text=True, timeout=300)
+    if imp.returncode != 0:
+        return mid, desc, "NOT-APPLIED (import-breaking: %s)" % ((imp.stderr.strip().splitlines() or [""])[-1][:40])
     r = subprocess.run([sys.executable, "-m", "unittest"] + mods, cwd=d + "/wf/tests", capture_output=True, text=True, timeout=1800)
     tail = (r.stderr.strip().splitlines() or [""])[-1]
     return mid, desc, ("SURVIVED" if r.returncode == 0 else "caught") + " " + tail[:60]
@@ -108,6 +114,7 @@ if __name__ == "__main__":
         probe_old = 'UNKNOWN = "UNKNOWN"'
         mut = {"survivor": ("t1", "no-op change", EV, probe_old, probe_old),
                "not-applied": ("t2", "missing anchor", EV, "THIS TEXT IS NOT IN THE SOURCE", "x"),
-               "caught": ("t3", "constant changed", EV, probe_old, 'UNKNOWN = "NOT-UNKNOWN"')}[mode]
+               "caught": ("t3", "constant changed", EV, probe_old, 'UNKNOWN = "NOT-UNKNOWN"'),
+               "import-breaking": ("t4", "syntax broken", EV, probe_old, 'UNKNOWN = = "UNKNOWN"')}[mode]
         sys.exit(main([mut], ["test_validate"]))
     sys.exit(main(M, MODS))

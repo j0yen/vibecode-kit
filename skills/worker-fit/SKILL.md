@@ -98,18 +98,24 @@ scheduler, coordinator, task store or mutation CLI.
   a `unit`, `child`, `owner`, consumer, `branch`, `repo`, task id and path may carry ONE task slug, the fleet's exact slug
   template (one to three letters, two to five digits, at most two more groups of one or two letters and one digit, at most ten
   characters: `a1303rv8`, `wfr11`), never beside a hash-sized id and never in an account, model, session, invocation, host or
-  queue row. A repo is `owner/name`, ONE value with ONE set of budgets, the owner at most five unlisted characters; a `session` and a unit may carry
+  queue row. A repo is `owner/name`, ONE value with ONE set of budgets, the owner a word of the closed owner list (`j0yen`,
+  `joeyen-atscale`, charged as one vocabulary word, re-review 14 DEF-G) or at most five unlisted characters; a `session` and a unit may carry
   the literal of their own id template (`session-<uuid>`, `tmux-spawn-<uuid>.scope`); a host with colons is an exact IP literal
   (a literal of random 16-bit groups is not one: at most two wide groups after the first). Identity invariant (re-review 12):
   a value prints only when every piece is accounted for by something this source fixes in advance (a word of the closed
-  vocabulary of 277 words, a literal of the field's own template, an exact id template the field carries, a bounded number or
+  vocabulary of 280 words, a literal of the field's own template, an exact id template the field carries, a bounded number or
   date) and the rest fits the unlisted budget; how a value looks as language is never evidence. Pronounceability, dictionary
-  membership, letter case and syllable structure are not read by any rule, because human-chosen and generator-made passwords
+  membership and syllable structure are not read by any rule, and letter case only as charged material (a vocabulary word is that
+  word in one of three case forms, all lower, ALL UPPER or Capitalised, or the closed mixed spelling `RedBaron`; the choice among them
+  is charged; any other case pattern is not the word), because human-chosen and generator-made passwords
   (`sunshine`-class words, CV/CVC syllables) look exactly like names. A real name that is not enumerated is an opaque ref
   (fail-closed) until a reviewed source change adds its word to `_ID_WORDS`; the fleet's own unit, consumer, branch, repo and
   path words (`decide`, `regrade`, `agorabus`, `memlog`, `witness`, `swarm`, `repair`, `director`, `bootstrap`, `synthetic`, ...)
   are enumerated there (re-review 13 added `dotfiles`, `ledger`, `follow`, `prio`). Every piece, and every character between
-  the pieces, is charged to a counted cap; nothing is removed or skipped before it is charged (re-review 13 DEF-1). Per value:
+  the pieces, is charged to a counted cap after NFKC and with ASCII digits only (every digit slot of the gate, its templates and
+  its date and timestamp grammar is `[0-9]`; a value carrying a non-ASCII decimal digit is an opaque ref, re-review 14 DEF-D); the
+  gate's own marker for a uuid or timestamp it has already charged is a per-process random private-use string, and a value carrying
+  any private-use character is refused, so no input supplies a free piece (re-review 14 DEF-C). Per value:
   at most 6 vocabulary words (DNS labels and field-template literals count as words); in a path, at most 8 structure words
   (`mnt`, `ssd`, `out`, ...) instead, and one final extension or unit type (`.json`, `.service`, `.net`) is free; at most 14
   digits, 7 in a piece and 8 beside an id, which also carry the fraction digits of a timestamp; at most 2 dates or timestamps
@@ -118,20 +124,30 @@ scheduler, coordinator, task store or mutation CLI.
   skipped: one single letter between two numbered pieces, such as `r7-x-20261113`, is counted against its own cap of one per
   value, every other one is an unlisted character), every separator after the first in a run (`-_-_.`), every joiner outside
   the six fleet joiners `- _ . / : @`, and every whitespace character beyond one between the tokens of a queue row; one id of
-  the field's own shapes (two in a path); one task slug. A real fleet name whose words cannot all be enumerated prints through an
+  the field's own shapes (two in a path); one task slug; and ONE BIT BUDGET over all of them (re-review 14): every charged item also has a stated capacity in bits (a
+  vocabulary word about 8.2 plus 1.6 for its case form, a structure word about 5.4 plus 1.6, a digit 3.3, a date 15.2, a timestamp
+  43.4 with its fraction digits charged as digits, an unlisted character 6.1, the counted single letter 5.7, a task slug its own
+  letters and digits plus 4, the joiner choice 2.6 a boundary), and a value carries at most 160 bits of non-id material per value
+  (192 bits in a path field), plus at most one id of the field's own shapes (two in a path), so a value filling every cap at once
+  (about 220-300 bits) is an opaque ref; a model's context tag `[<1-4 digits><k|m>]` charges its digits to the value's digit
+  budget. A real fleet name whose words cannot all be enumerated prints through an
   exact whole-value template of the field it belongs to, whose slots have a fixed grammar and whose capacity is at most the
   largest id class the same field carries: `wm-build-inner<1-5 digits>-<letter>.service` in a unit or consumer (about 21 bits),
   the peer id `claude-<pid>-<seat>-<run slug of at most 12 characters>-<yyyymmdd>[-worker]` in a consumer or alternate (at most
-  about 104 bits, under the 128-bit id those fields carry), and `/home/<user of 1-4 letters>/Notes/prd-<1-4 lower-case words of
-  at most 24 letters>-<yyyymmdd>.md` in a path (at most about 158 bits, under the 160-bit id a path carries); a credential word
-  in a template slot, a longer slot or a key-shaped slot is an opaque ref. Residuals of this gate, as the caps above bound them:
+  about 104 bits, measured from its slot grammar with the ASCII digits its slots take, under the 128-bit id those fields carry);
+  each exact template is checked after NFKC and the field's character grammar; a credential word in a template slot, a longer slot
+  or a key-shaped slot is an opaque ref. A PRD note path `/home/<user of 1-4 letters>/Notes/prd-<slug>-<yyyymmdd>.md` is a FRAME,
+  not an id template (re-review 14 DEF-E: its slug slot is a free word slot, neither the closed vocabulary nor an id grammar): a path
+  field prints the frame with the slug as an opaque ref (`/home/jsy/Notes/prd-[opaque prd-slug 1a2b3c4d]-20261111.md`), and a PRD
+  path whose slug words are all closed-vocabulary words (`prd-priority-selective-unpark`) passes the ordinary gate and prints whole;
+  free text never trusts a frame. Residuals of this gate, as the caps above bound them:
   (b) a value of up to six vocabulary words prints (about 49 bits when drawn at random from the public list); (c) unlisted
   material of at most five characters a piece and eight a value prints in any identity field (a five-letter word, or a
   vocabulary word with a suffix of at most five characters such as `tail9z8y7`; about 38 bits as random lower-case letters, 0
-  beside an id); (e) the CHOICE of a single fleet joiner at each boundary between pieces is not charged (about 2.6 bits a
-  boundary; the pieces themselves are); (f) an exact template slot carries its stated capacity: a lower-case word in the PRD slug
-  slot prints in a path field, and a run slug of at most 12 characters in a peer id prints in a consumer or alternate. The caps are counted separately, so one value may carry several of them at once (six
-  vocabulary words, fourteen digits, two dates and eight unlisted characters together), each inside its own count. The caps apply
+  beside an id); (e) the CHOICE of a single fleet joiner at each boundary between pieces, and of a word's case form, is charged to the bit
+  budget only (about 2.6 bits a boundary, 1.6 a word), not to a cap; (f) the peer id's run slug of at most 12 characters prints in a
+  consumer or alternate. The caps are counted separately, so one value may carry several of them at once, each inside its own count,
+  and all of them together inside the bit budget. The caps apply
   to every field of the recommender and the adapter (each passes its own profile); only a library call that names no profile
   gets the bare gate; that size is the stated residual of the cap.
   Everything else (random letters beyond the budget, hex groups, digit groups beyond the digit cap, longer passphrases, a
@@ -155,24 +171,39 @@ scheduler, coordinator, task store or mutation CLI.
   on the list. Whatever the NAME is, a plain word or a number outside the closed numeric list is hidden (`sessionkey=sunshine`,
   `code=abcdefgh`, `mfa=4821`, `mypass=1234`, `seedphrase=abc-def`, `mfa_number=482917`). No name is exempt: `code` is a name like any other.
   Residual by size: a value of three characters or fewer prints under any name, and so does a number of at most two digits.
+  A pair's name is read through its label decoration (re-review 14 DEF-A): up to four punctuation or symbol characters that are not
+  a delimiter, a quote or a bracket, and one bracketed group of at most 32 characters on the same line, may stand between the name and
+  its separator (`Password*:`, `PIN #:`, `"password!":`, `[password]:`, `(token):`, `Password (required):`, `api_key [prod]:`);
+  the name run nearest the separator, and with a bracketed group the run inside it and the run before it, are the name, so a
+  credential label hides its value exactly as `password:` does and any other label is a name like any other. Format characters
+  (zero-width space, joiners, word joiner, BOM, soft hyphen) never split a name: every layer also reads the text with them removed.
   A credential name followed in prose by its value (`the password is sunshine`, `pass swordfish`, `my pin 482917`, `the api_key is
   Xk9fQ2mP7zab`, `private key X`, `client_secret X`, `X-Auth-Token X`; a name is any word run whose last word is a credential noun
   such as key, token, secret, pass, auth, creds, or ends in a strong noun glued to a qualifier of one to eight letters: `dbpass`, `userpass`, `rootpw`, `adminpwd`, `svctoken`; an English word that only ends in those letters, such as `compass`, `bypass`, `spin`, `sacred`, is a word) hides the next word, of any length, unless it is a state word (`required`,
-  `missing`, `expired`, ...) or a closed-class function word (`for`, `from`, `my`, `and`, ...); the separator may be a space, `is`, `:`, `=`, `:=` or a quote, and a run of nouns (`secret key`)
+  `missing`, `expired`, ...) or a closed-class function word (`for`, `from`, `my`, `and`, ...); the separator may be a space, `is`, `:`, `=`, `:=`, a spaced dash (`password - X`), a quote, or label decoration before any of
+  them (`password! X`), and a run of nouns (`secret key`)
   is one name. The name is recognised by a RULE over closed stems, not by a list of spellings (re-review 13 DEF-2): the word is
-  read after de-leet (a digit run between letters stands for letters: 0 o, 1 l or i, 3 e, 4 a, 5 s, 7 t; `passw0rd`, `s3cret`,
-  `t0ken`), and its last part is a name when it is a credential noun or a strong noun with one plural ending (`passcodes`,
-  `secretz`; not `passes`, `pins` or `seeds`), a misspelt password (read with `z` as `s`: an ordered subsequence of `password` of three
-  to eight letters that starts with `p`, holds a `w` and ends in `d`, such as `pword`, `pswrd`, `passwrd`, `pazzword`, or one edit
-  from `password`, `passphrase`, `passcode` or `credential`), a strong noun, such a misspelling or a sign-on noun glued after a
-  qualifier of one to eight letters, a weak glue noun (`key`, `code`, `phrase`, `pat`) glued after a qualifier (`masterkey`,
+  read with its accents folded and after de-leet (the full map, re-review 14 DEF-F: 0 o, 1 l or i, 2 z, 3 e, 4 a, 5 s, 6 g,
+  7 t, 8 b, 9 g, @ a, $ s, for a run between letters and for a trailing run: `passw0rd`, `s3cret`, `p@ssword`, `pa$$word`, `pa55`;
+  a name read only through de-leet is strong, so `k3y` and `c0de` are names), and its last part is a name when it is a credential
+  noun, a word of the closed abbreviation set (`psw`, `tkn`, `tok`, `privk`, `pinno`, `apitok`, ...) or the closed non-English set
+  (`passwort`, `kennwort`, `contrasena`, `motdepasse`, `senha`, `haslo`, `wachtwoord`, `salasana`, ...), or a strong noun with one
+  plural ending (`passcodes`, `secretz`; not `passes`, `pins` or `seeds`), a misspelt password (read with `z` as `s`: an ordered
+  subsequence of `password` of three to eight letters that starts with `p`, holds a `w` and ends in `d`, such as `pword`, `pswrd`,
+  `passwrd`, `pazzword`), one edit (insert, delete, substitute, adjacent swap) from any closed strong stem of five to seven letters
+  (`secret`, `token`, `passwd`, ...) or two from one of eight or more (`password`, `passphrase`, `passcode`, `credential`,
+  `kennwort`, ...), unless it is one of the 131 English words within that radius (`taken`, `passport`, `secretary`, generated from the
+  system word lists; stems of four letters or fewer take no edit), a strong noun, such a misspelling, an abbreviation, a non-English
+  word or a sign-on noun glued after a qualifier of one to eight letters, a strong noun followed by a value tail (`pin-number`,
+  `PIN_CODE`, `token_value`, `pinnumber`), a weak noun after a strong part (`otpCode`, `mfa_key`), a weak glue noun (`key`, `code`, `phrase`, `pat`) glued after a qualifier (`masterkey`,
   `dbkey`, `pincode`, `unlockcode`, `keyphrase`, `gitpat`) unless the compound is a readable word (`monkey`, `turkey`, `barcode`,
   `encode`, `decode`, `exitcode`, `statuscode`, `catchphrase`, `compat`, ...) or a closed-vocabulary word, or a sign-on noun
   (`signin`, `signon`, `login`, `logon`); the last two parts of a camelCase or joined name are also read together when only together
-  they are a name (`PassWord`, `pass_phrase`, `Sign-In`). Each such name is strong: only a state word may follow it. Accepted cost, fail-closed:
+  they are a name (`PassWord`, `pass_phrase`, `Sign-In`), and a name of three or more parts also as one word (`oneTimeCode`). Each such name is strong: only a state word may follow it. Accepted cost, fail-closed:
   an unlisted English compound in those forms hides its next word (`login page` hides `page`). A quoted value after a credential
   name extends to its closing quote on the same line (at most 400 characters): every word inside the quotes is hidden, and an
-  unclosed quote hides to the end of the line. A bare `key`, `auth`, `bearer`, `code`, `unlock` or `vault` is also an ordinary word (`key point`, `exit code 2`): after one of them
+  unclosed quote hides to the end of the line; every quote pair counts (straight, backtick, curly, low `„ ‚`, guillemets `« » ‹ ›`,
+  CJK corner brackets `「 」 『 』`, double prime quotes `〝 〞`, primes `′ ″`, full width), in prose and in a `name: value` pair alike. A bare `key`, `auth`, `bearer`, `code`, `unlock` or `vault` is also an ordinary word (`key point`, `exit code 2`): after one of them
   (and no credential qualifier such as api, private, client, recovery) a plain lower-case word, a closed-vocabulary word or a number
   of two digits reads as prose and prints, and anything else (a capital, a digit run, a mixed piece) is hidden; that is a stated residual. A credential word joined to
   a value in one token (`token-<v>`, `secret_run_<v>`, `tokenArYYbbah`) is hidden. The credential-name list above is an extra
@@ -181,7 +212,10 @@ scheduler, coordinator, task store or mutation CLI.
   printed as an opaque keyed reference `[opaque <field> <8 hex>]` (HMAC-SHA256 over the field name and the value with a
   per-process random 128-bit key (`os.urandom(16)`), 32 bits shown: equal values give equal refs inside one run, nothing is recoverable, the ref
   does not depend on `PYTHONHASHSEED`, not stable across runs), never as the
-  raw value; a placeholder stays UNKNOWN. A required identity (host, unit, child of a RUNNING record) that does not
+  raw value; a placeholder prints as the canonical word `UNKNOWN`, or as itself when it is exactly one word of the closed
+  placeholder set in a canonical case (`unknown`, `N/A`, `TBD`, `-`); digits, symbols or punctuation that ride with a placeholder
+  (`unknown 4111...`, `N/A 482917`) never print (re-review 14 DEF-B). An opaque ref passes through unchanged only when this process
+  minted it; an input that imitates one is a value like any other. A required identity (host, unit, child of a RUNNING record) that does not
   validate is UNKNOWN evidence, so the record is refused rather than reused. Mismatch findings (wrong task, repo,
   branch, head; duplicate task; conflicting target; unknown or duplicate key names) name the fields and carry opaque
   refs, never the raw values; a hex run in an evidence `ref` is read as a commit only after its credential layers are
