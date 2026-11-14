@@ -1,0 +1,188 @@
+{
+ "_note": "Own fixtures for repair 17 (review 16 N1-N5). Synthetic evidence text only; written for this file, not copied from any input. The class templates generate forms; the own_* rows are written here and use words that no list in the code holds.",
+ "n2_own_hedges": [
+  "side=producer at lib/emit.go:9(presumably)",
+  "side=producer via run_emit(),perhaps",
+  "side=producer conceivably=yes",
+  "side=producer in handlers/out.rs:12,arguably",
+  "side=producer queue.py(ostensibly)",
+  "side=producer tentatively=true"
+ ],
+ "n2_own_names": [
+  "side=producer with likely=yes in flags.toml:3",
+  "side=producer per maybe=0 in cfg.ini:2",
+  "side=producer at emit.py:3 (probable_cause())",
+  "side=producer calls guess(x) at a.py:3",
+  "side=producer at https://ci.example/run/12?possible_values=1",
+  "side=producer in handlers.py:12,14"
+ ],
+ "n1_quotes": [
+  "'{T}'",
+  "\"{T}\"",
+  "“{T}”",
+  "‘{T}’",
+  "`{T}`"
+ ],
+ "n1_contexts": [
+  "side=producer status {q}",
+  "side=producer, verdict {q}",
+  "side=producer at a.py:3 {q}",
+  "side=producer, which {q} be right",
+  "side=producer marked {q} by the reviewer"
+ ],
+ "n1_name_contexts": [
+  "side=producer in the {q} handler at a.py:3",
+  "side=producer emits {q} events at a.py:3"
+ ],
+ "n1_own_hedges": [
+  "side=producer, which 'Might' sound odd",
+  "side=producer per triage ‘Perhaps’",
+  "side=producer verdict \"Presumably Fine\" today",
+  "side=producer, owner says `Probably` again"
+ ],
+ "n1_own_names": [
+  "side=producer raises 'Maybe Later' error at a.py:3",
+  "side=producer in the \"Seems Ok\" widget at ui.tsx:2",
+  "side=producer via ‘Possibly Stale’ flag at a.py:9"
+ ],
+ "n3_prefixes": [
+  "side=producer, though the front end",
+  "side=producer but the back end",
+  "side=producer, the end",
+  "side=producer though it",
+  "side=producer, mid"
+ ],
+ "n3_suffixes": [
+  "may in some builds read it",
+  "may at times consume it",
+  "may then call it",
+  "may (rarely) read it",
+  "may, in theory, change",
+  "may, at times, call it",
+  "may when retried",
+  "may for now skip it",
+  "may 2x the load",
+  "may 10x the calls",
+  "may 3x it"
+ ],
+ "n3_own_hedges": [
+  "side=producer, though the rear end may in tests drop it",
+  "side=producer while the far end may, oddly, retry",
+  "side=producer, the tail end may (sometimes) skip it",
+  "side=producer though this may 4x the cost"
+ ],
+ "n3_own_months": [
+  "side=producer since may at a.py:3",
+  "side=producer by end may in a.py:3",
+  "side=producer until late May, per a.py:3",
+  "side=producer from May 3rd at a.py:3",
+  "side=producer in May 2026 at a.py:3",
+  "side=producer since May 12, see a.py:4"
+ ],
+ "n4_templates": [
+  "side=producer {a} or consumer",
+  "side=producer, {a} consumer or adapter",
+  "side=producer, {a} probably",
+  "side=producer, {a} maybe the consumer"
+ ],
+ "n4_own_hedges": [
+  "side=producer, a.k.a. maybe the consumer",
+  "side=producer, n.b. probably stale",
+  "side=producer, q.v. or caller"
+ ],
+ "n4_own_sentence_ends": [
+  "side=producer emits to db. Maybe later",
+  "side=producer at a.py:3. Perhaps more",
+  "side=producer runs etl. Possibly a consumer too"
+ ],
+ "n5_connectives": [
+  "or",
+  "or else",
+  "or rather",
+  "nor",
+  "either"
+ ],
+ "n5_fillers": [
+  "the legacy",
+  "its",
+  "their old",
+  "a downstream",
+  "some older",
+  "the other"
+ ],
+ "n5_sides": [
+  "consumer",
+  "caller",
+  "adapter"
+ ],
+ "n5_own_hedges": [
+  "side=producer or our older adapter",
+  "side=producer nor any hidden consumer",
+  "side=producer, or rather the upstream caller",
+  "side=producer either this legacy consumer"
+ ],
+ "n5_own_kept": [
+  "side=producer emits a or b to the consumer.proto:1 at a.py:3",
+  "side=producer retries or backs off at a.py:3",
+  "side=producer, exit 0 or 1 at run.sh:4"
+ ],
+ "eq16_vocab": [
+  "by",
+  "end",
+  "may",
+  "the",
+  "front",
+  "in",
+  "early",
+  "mid",
+  "late",
+  "2x",
+  "12",
+  "3rd",
+  "change",
+  "or",
+  "else",
+  "rather",
+  "its",
+  "legacy",
+  "consumer",
+  "caller",
+  "adapter",
+  "'Might'",
+  "handler",
+  "'Maybe",
+  "`Maybe`",
+  "status",
+  "\"Probably",
+  "Fine\"",
+  "alert",
+  "e.g.",
+  "vs.",
+  "i.e.",
+  "src/emit.py:3(probably)",
+  "emit.py,maybe",
+  "likely=yes",
+  "assumed=true",
+  "cfg.toml:2",
+  "maybe=1",
+  "maybe()",
+  "at",
+  "a.py:3",
+  "zero",
+  "fails",
+  "not",
+  "since",
+  "of",
+  "which",
+  "be",
+  "right",
+  "nor",
+  "some",
+  "older",
+  "alternatively",
+  "to",
+  "docs/consumers.md",
+  "approx.py",
+  "e.g.maybe"
+ ]
+}
