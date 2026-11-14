@@ -18,7 +18,7 @@ EV = base.EV
 SK = "SKILL.md"
 N = [
  # DEF-1
- ("m120", "timestamp fraction unbounded", EV, r'(?P<frac>\.\d{1,%d}(?!\d))?', r'(?P<frac>\.\d+)?'),
+ ("m120", "timestamp fraction unbounded", EV, r'(?P<frac>\.\d{1,%d}(?!\d))?', r'(?P<frac>\.\d{1,%d}\d*)?'),
  ("m121", "timestamp fraction not charged", EV, 'st["digits"] += len(m.group(1) or ".") - 1', "pass"),
  ("m122", "single letters between numbers: no cap", EV, "_MAX_LETTER_GAP = 1 ", "_MAX_LETTER_GAP = 99 "),
  ("m123", "dates not counted", EV, 'and st["dates"] <= _MAX_DATES and', "and"),
