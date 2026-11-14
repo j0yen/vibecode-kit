@@ -151,6 +151,20 @@ class TestD2QuotedLabelNeedsALocatedArtifact(unittest.TestCase):
         bad = [e for e in forms if role(e) != U]
         self.assertEqual(bad, [], "%d of %d asserted, e.g. %r" % (len(bad), len(forms), bad[:5]))
 
+    def test_a_noun_that_ends_the_text(self):
+        """The pinned fixes15 cls15 shape ("side=producer at 'Probably' handler"): an artifact noun that ends the text names the quoted
+        label (Title case only); a value word ("status", "state", "verdict" ...) takes the label as its value, so it stays prose."""
+        rows = []
+        for h in FX["d2_hedges"]:
+            for o, c in FX["d2_quotes"]:
+                for tp in FX["d2_end_templates"]:
+                    rows += [(tp.format(q=o + title(h) + c, n=n), U) for n in FX["d2_value_words"]]
+                    rows += [(tp.format(q=o + h.upper() + c, n=n), U) for n in FX["d2_artifacts"]]
+                    if h != "may" and not h.startswith("not "):       # "Not Sure" is refused by the negation layer, as 'Should Not Happen' is
+                        rows += [(tp.format(q=o + title(h) + c, n=n), P) for n in FX["d2_artifacts"]]
+        bad = wrong(rows)
+        self.assertEqual(bad, [], "%d of %d wrong, e.g. %r" % (len(bad), len(rows), bad[:5]))
+
     def test_caps_and_value_nouns_are_no_name_even_when_located(self):
         rows = ["side=producer in the 'MAYBE' handler at h.py:3", "side=producer in the `PROBABLY` queue at q.py:3",
                 "side=producer, marked it 'Maybe' status at a.py:3", "side=producer in 'Likely' state at s.py:2"]

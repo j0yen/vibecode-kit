@@ -304,10 +304,35 @@
  ],
  "d2_templates": [
   "side=producer, reviewer says {q} {n} again",
-  "side=producer, ticket in {q} {n}",
-  "side=producer ({n} {q} {n})",
   "side=producer, lead said {q} {n} later",
-  "side=producer, owner set {q} {n}, then left"
+  "side=producer, owner set {q} {n}, then left",
+  "side=producer, owner marks {q} {n} done",
+  "side=producer ({n} {q} {n} soon)"
+ ],
+ "d2_end_templates": [
+  "side=producer, ticket in {q} {n}",
+  "side=producer ({n} {q} {n})"
+ ],
+ "d2_value_words": [
+  "status",
+  "state",
+  "result",
+  "verdict",
+  "outcome",
+  "value",
+  "answer",
+  "rating",
+  "level"
+ ],
+ "d2_artifacts": [
+  "handler",
+  "module",
+  "queue",
+  "alert",
+  "bot",
+  "banner",
+  "widget",
+  "daemon"
  ],
  "d2_own": [
   "side=producer, the team calls it 'Probably' build now",
