@@ -226,7 +226,7 @@
  "d2_own": [
   "side=producer, the bot posted 'Maybe' alert",
   "side=producer, owner typed 'Likely' tag at t.py:3",
-  "side=producer in the 'Needs Verification' handler at h.py:3",
+  "side=producer in the 'Needs Verification' column at c.py:3",
   "side=producer, lead wrote \u201cProbably\u201d step at s.py:2"
  ],
  "d2_quotes": [
