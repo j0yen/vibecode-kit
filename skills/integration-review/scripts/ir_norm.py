@@ -85,14 +85,18 @@ def negated(text, state=False, doubt=False):
 # ALTERNATIVE or a second side: an alternative connective (or, nor, either, vs, versus, a standalone / or |) beside any token that holds
 # a side word, a conjunction (and, plus, a standalone & or +) beside a side word that is prose, or a side word glued to / | & + in a
 # token that is no name ("side=producer/consumer"). English only; an unlisted wording of doubt is read as plain (SKILL.md states it).
-# THE NAME-VS-HEDGE RULE (_is_name, one place): a hedge word or a side word is part of a NAME only on evidence that it is not prose:
-# (1) its blank-delimited token is code by the shared code-token rule (_token_kind: call, ::, URL, name@version, file, path, module or
-# dotted name); (2) its word run is an identifier (an underscore, or a capital after the first letter, not all capitals), a key ("maybe=1")
-# or a handle ("@maybe"); (3) a QUOTED NAME: an opening quote glued to it, every word Capitalised, and the quote after a word of the same
-# text ("in 'Might' handler"). For "may" only (_is_hedge_word), (4) the MONTH: a number after it ("May 12"), or a time word just before it
-# and no verb-able word after it ("since may at emit.py:3", "in early may (emit.py:3)"; not "the end may change"). Nothing else is
-# evidence: a capital alone (Title Case, the pronoun I, a sentence start), a preposition alone or a compound with no code mark
-# ("maybe-http", "would-be") leave the word prose, so an ambiguous form refuses the role and never asserts it.
+# THE NAME-VS-HEDGE RULE (_is_name, one place), DEFAULT INVERTED (D1-D4, D6): a hedge word or a side word is part of a NAME only on
+# positive evidence that it is not prose; whatever the rule does not recognise (a mark, a following word, a modifier, a context) leaves
+# it prose. (1) Its SEGMENT (the token cut at every mark that does not join a code name, _token_cuts) is code by the shared code-token
+# rule (_token_kind: ::, URL, name@version, file, path, module or dotted name; a bare dotted name only as a whole token and only for a
+# member, D6) or names a call ("maybe()", "x.maybe()"); (2) its word run is an identifier (an underscore, or a capital after the first
+# letter, not all capitals), a key ("maybe=1") or a handle ("@maybe" at its token start); (3) a QUOTED NAME: an opening quote glued to it,
+# every word Title-case, the quote after a word of the same text, closed, then an artifact noun that ends the text or is followed by a
+# location ("in 'Might' handler at h.py:3", D2). For "may" only (_is_hedge_word), (4) the MONTH: a date after it ("May 12"; a lowercase
+# "may" needs the date to end there), or a time word just before it and then the clause end, a location or a month range ("since may at
+# emit.py:3", "in early may (emit.py:3)"; not "the end may change", "reads from may at times differ", D3). Nothing else is evidence: a
+# capital alone (Title Case, the pronoun I, a sentence start), a preposition alone or a compound with no code mark ("maybe-http",
+# "would-be") leave the word prose, so an ambiguous form refuses the role and never asserts it.
 # ABBREVIATIONS (one list; extract_register's clause end reads it): a dot after one of these words, or after dotted single letters
 # ("e.g.", "i.e.", "a.k.a."), ends no clause. A word glued by its dot to dotted single letters ("e.g.maybe") is prose, not a dotted
 # name; a listed word glued to an extension stays a file ("approx.py").
@@ -132,9 +136,11 @@ _HEDGE_WORD = re.compile(
     r"|not (?:sure|certain|clear|confirmed))\b", re.I)
 _CODE_KINDS = frozenset(("call", "scope", "url", "pin", "file", "path", "module", "dotted"))
 _OPEN_QUOTES = "'\"`‘“"
-# N2: code evidence belongs to the segment of a token that holds the word (_Toks.segment); a key whose value is only an answer to the
-# hedge ("likely=yes", "maybe=true") is a key only when a location follows it.
-# N1: a quoted name is followed by an ARTIFACT NOUN, the kind of thing it names; the quote closes within _QUOTE_WORDS words.
+# N2, D1: code evidence belongs to the segment of a token that holds the word (_Toks.segment, _token_cuts); a key whose value is only an
+# answer to the hedge ("likely=yes", "maybe=true") is a key only when a location follows it (_Toks.located).
+# N1, D2: a quoted name is followed by an ARTIFACT NOUN, the kind of thing it names, and then the text end or a location (_Toks.located,
+# the same rule as the key's); the quote closes within _QUOTE_WORDS words. A value word (status, state, value) takes the quoted label as
+# its value, so it is no artifact noun.
 _CLOSE_QUOTES = {"'": "'’", '"': '"”', "`": "`", "‘": "’'", "“": '”"'}
 _QUOTE_WORDS = 8
 _NAME_HEADS = frozenset(
@@ -302,9 +308,11 @@ def _member(t, a, s):
 
 
 def _quoted_name(tx, k, s):
-    """N1: the quote that opens token k (just before s) closes within a few Capitalised words, and an artifact noun follows the closing
-    quote ("'Might' handler", "'Probably Fine' alert", "`Maybe` bot"). A quoted label that ends its text or is followed by any other
-    word ("status 'Needs Verification'", "'Might' be right", "'Maybe' a.py:2") is no name."""
+    """N1, D2: the quote that opens token k (just before s) closes within a few Title-case words, an artifact noun follows the closing
+    quote, and the noun ends the text or a location follows it ("at 'Might' handler", "'Probably Fine' alert a.py:2", "`Maybe` bot
+    a.py:5"). A quoted label that ends its text, is followed by any other word, or by a noun and then another word ("status 'Needs
+    Verification'", "'Might' be right", "'Maybe' a.py:2", "says 'Maybe' test again"), or is in capitals ("'MAYBE' handler"), is no
+    name."""
     t = tx.t
     close = _CLOSE_QUOTES[t[s - 1]]
     for j in range(k, min(k + _QUOTE_WORDS, len(tx.starts))):
