@@ -106,6 +106,9 @@ def evidence_text(row):
 _CLAUSE_END = re.compile(r"[;\n]|\.\s")
 
 
+_NEGATOR_TAIL = re.compile(r"(?i)\b(?:not|no|never|without|isn['\u2019]t)\s+$")
+
+
 def _marks(t):
     """Side marks of one evidence ref that are stated positively. A mark is negated, as a class and at any distance,
     by a negation or doubt word (ir_norm NEG_CORE and NEG_DOUBT: "no evidence that side=producer", "never really
@@ -114,19 +117,36 @@ def _marks(t):
     clause and the mark, counted from the end of the previous side mark, or one after it up to the end of its clause
     (; newline or a full stop ends the clause). A negation that heads another side mark does not reach this one
     ("side=producer, not side=consumer" keeps the producer mark); a zero count of failures is no negation."""
-    out = set()
-    prev_end = 0
-    for m in SIDE_MARK.finditer(t):
-        a = max([c.end() for c in _CLAUSE_END.finditer(t, 0, m.start())] or [0])
-        c = _CLAUSE_END.search(t, m.end())
-        z = c.start() if c else len(t)
+    marks = list(SIDE_MARK.finditer(t))
+    if not marks:
+        return set()
+    ends = [(c.start(), c.end()) for c in _CLAUSE_END.finditer(t)]
+    # one pass: each mark gets the span before it (back to the previous mark or the clause start) and the span after it (to the next
+    # mark of its clause or the clause end); a span is examined once as "before" and once as "after", never re-sliced per mark
+    bad_before, bad_after, z_of = [], [], []
+    k, a, prev_end = 0, 0, 0
+    for m in marks:
+        while k < len(ends) and ends[k][1] <= m.start():
+            a = ends[k][1]
+            k += 1
+        j = k
+        while j < len(ends) and ends[j][0] < m.end():
+            j += 1
+        z_of.append(ends[j][0] if j < len(ends) else len(t))
         before = t[max(a, prev_end):m.start()]
         prev_end = m.end()
-        after = SIDE_MARK.sub(" ", re.sub(r"(?i)\b(?:not|no|never|without|isn['\u2019]t)\s+(?=side=)", " ", t[m.end():z]))
-        if _N.negated(before, doubt=True) or _N.negated(after, doubt=True) or _N.hedged(before) or _N.hedged(after):
-            continue
-        out.add(m.group(1))
-    return out
+        bad_before.append(_N.negated(before, doubt=True) or _N.hedged(before))
+    carry = False
+    for i in range(len(marks) - 1, -1, -1):
+        m, z = marks[i], z_of[i]
+        heads = i + 1 < len(marks) and marks[i + 1].start() < z
+        span = t[m.end():marks[i + 1].start() if heads else z]
+        if heads:
+            span = _NEGATOR_TAIL.sub(" ", span)
+        carry = (carry and heads) or _N.negated(span, doubt=True) or _N.hedged(span)
+        bad_after.append(carry)
+    bad_after.reverse()
+    return {m.group(1) for m, b, f in zip(marks, bad_before, bad_after) if not (b or f)}
 
 
 def norm_role(row, ev):

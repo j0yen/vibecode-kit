@@ -78,25 +78,56 @@ def negated(text, state=False, doubt=False):
 
 
 # HEDGE (hedged(): the one rule for a side mark): a clause that doubts or alternates its claim does not state it. Three kinds: (1)
-# a hedge word, read by its STEM so a derived form is caught too (probably, probability; any -edly adverb such as reportedly; presumed, presumably; supposed, supposedly;
-# a modal verb might / could / would / should / may; "i think", "i guess", "sort of", "not sure", "needs verification"); (2) a
+# a hedge WORD of the prose, read by its STEM so a derived form is caught too (probably, probability; any -edly adverb such as reportedly; presumed, presumably;
+# supposed, supposedly; a modal verb might / could / would / should / may; "i think", "i guess", "sort of", "not sure", "needs verification"); (2) a
 # question mark that ends a word ("side=producer?"; "a?b=1" in a URL is no hedge); (3) an ALTERNATIVE or a second side: a
 # connective (or, and, nor, either, vs, / & + |) beside another side word ("side=producer or consumer"). English only; an
 # unlisted wording of doubt is read as plain (SKILL.md states the limit).
+# A hedge is a whole word, never a fragment of a name: a stem inside a path or an identifier (possible_values.py, maybe.py, assumptions.md,
+# src/should.rs, MightyEmit) is no hedge, a Capitalised hedge word after another word is a name ("in May", 'Should Not Happen'), and "may"
+# after in / since / until / during / from / by / early / late / mid / end is the month. A side word that is a path component
+# (src/consumer/x.py, adapter.py, producers/, adapter-http, consumer_test) is no second side: only a BARE side word is.
 _SIDE_WORDS = r"(?:producer|consumer|caller|adapter)s?"
-_HEDGE = re.compile(
-    r"\b(?:(?:probab|possib|perhap|maybe|mayb|presum|apparent|seem|appear|suppos|alleg|reput|purport|ostensib|conceiv|plausib|putativ|"
+_SIDE_BARE = _SIDE_WORDS + r"(?![\w/\\]|\.\w|-(?!side\b)\w)"
+_CONNECTIVE = r"\b(?:or|and|nor|vs\.?|versus|either|plus)\b"
+_HEDGE_WORD = re.compile(
+    r"(?<![/.\\@])\b(?:(?:probab|possib|perhap|maybe|mayb|presum|apparent|seem|appear|suppos|alleg|reput|purport|ostensib|conceiv|plausib|putativ|"
     r"arguab|likel|unlikel|assum|tentativ|hopeful|guess|suspect|believ|roughl|approx|might|could|would|should|iirc|afaik|imo|kinda|sorta)\w*"
     r"|\w+edly|may(?!\s+\d)|ish|(?:kind|sort) of|i think|(?:need|needs|needed|to be|to) (?:verif|confirm|check|valid)\w*"
-    r"|not (?:sure|certain|clear|confirmed))\b"
-    r"|\?(?![\w=&/#.%:-])"
-    r"|(?:\b(?:or|and|nor|vs\.?|versus|either|plus)\b|[/&+|])\s*(?:the |a )?(?:side\s*[=:]?\s*)?" + _SIDE_WORDS + r"\b"
-    r"|\b" + _SIDE_WORDS + r"\s*(?:\b(?:or|and|nor|vs\.?|versus|plus)\b|[/&+|])")
+    r"|not (?:sure|certain|clear|confirmed))\b(?![/\\]|\.\w)", re.I)
+_HEDGE_OTHER = re.compile(
+    r"\?(?![\w=&/#.%:-])"
+    r"|(?:" + _CONNECTIVE + r"|(?<![\w.\\/-])[/&+|])\s*(?:the |a )?(?:side\s*[=:]?\s*)?" + _SIDE_BARE
+    + r"|(?<![\w.\\/-])" + _SIDE_WORDS + r"\s*(?:" + _CONNECTIVE + r"|[/&+|](?=\s|$|(?:side\s*[=:]\s*)?" + _SIDE_BARE + r"))", re.I)
+_MONTH_AFTER = frozenset(("in", "since", "until", "till", "during", "from", "by", "early", "late", "mid", "end"))
+_QUOTES = " '\"\u2018\u2019\u201c\u201d"
+
+
+def _is_hedge_word(t, m):
+    """One _HEDGE_WORD match is a hedge unless it is a name: an identifier (an underscore, an inner capital), a Capitalised word after
+    another word, or the month May."""
+    tok = m.group()
+    if "_" in tok or (tok[1:] != tok[1:].lower() and not tok.isupper()):
+        return False
+    if tok[0].isupper() and not tok.isupper():
+        i = m.start()
+        while i > 0 and t[i - 1] in _QUOTES:
+            i -= 1
+        if i > 0 and t[i - 1].isalnum():
+            return False
+    if tok.lower() == "may":
+        words = t[max(0, m.start() - 12):m.start()].lower().split()
+        if words and words[-1] in _MONTH_AFTER:
+            return False
+    return True
 
 
 def hedged(text):
-    """True when the text hedges or alternates the claim it belongs to (see _HEDGE)."""
-    return isinstance(text, str) and bool(_HEDGE.search(canon(text, slashes=True)))
+    """True when the text hedges or alternates the claim it belongs to (see the HEDGE note above)."""
+    if not isinstance(text, str):
+        return False
+    t = canon(text, slashes=True, fold_case=False)
+    return bool(_HEDGE_OTHER.search(t)) or any(_is_hedge_word(t, m) for m in _HEDGE_WORD.finditer(t))
 
 
 def fold(v):
@@ -107,7 +138,7 @@ def fold(v):
     return t.strip().lower()
 
 
-def canon(v, slashes=False):
+def canon(v, slashes=False, fold_case=True):
     """Placeholder-comparable form: NFKD, combining marks (Mn) and variation selectors removed, format/control
     characters removed, every dash/minus variant folded to "-", case folded, whitespace collapsed. With slashes=True
     every slash look-alike and the backslash fold to "/" too: used for placeholders and negations only, never for
@@ -125,7 +156,8 @@ def canon(v, slashes=False):
         elif slashes and c in _SLASHES:
             c = "/"
         out.append(" " if (c.isspace() or cat in ("Zs", "Zl", "Zp")) else c)
-    return re.sub(r"\s+", " ", "".join(out)).strip().casefold()
+    t = re.sub(r"\s+", " ", "".join(out)).strip()
+    return t.casefold() if fold_case else t
 
 
 def repo_id(repo):

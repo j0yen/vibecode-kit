@@ -1,0 +1,53 @@
+{
+ "_note": "Own negatives for H1 (synthetic, not spelled in the code): a hedge stem or side word inside a path or identifier is no hedge; a real hedge or alternative beside a path still is.",
+ "own_good_names": [
+  "side=producer in couldnt_parse.py:2",
+  "side=producer at docs/Believers/x.md:4",
+  "side=producer in guessing_game.py:7",
+  "side=producer in SuspectList.java:3",
+  "side=producer at allegation.txt:2",
+  "side=producer in Hopeful.cs:3",
+  "side=producer in mayfly_notes.md:4",
+  "side=producer, see seemly/emit.go:8",
+  "side=producer in wouldbe.rs:5",
+  "side=producer since May",
+  "side=producer, shipped in late May by emit.py:3",
+  "side=producer at crates/likelyhood-core/src/lib.rs:2",
+  "side=producer in Roughly.py:1 line 4",
+  "side=producer at tests/assumed/emit.py:6",
+  "side=producer, from ProbableCause.kt:9",
+  "side=producer since may at emit.py:3",
+  "side=producer, done by end may in emit.py:3",
+  "side=producer, landed in early may (emit.py:3)"
+ ],
+ "own_good_side_paths": [
+  "side=producer at src/callers/x.py:3",
+  "side=producer at lib/adapter_test.go:4",
+  "side=producer at app/consumer-api/main.ts:1",
+  "side=producer at pkg/producer.proto:2",
+  "side=producer and callers.md:4",
+  "side=producer, see docs/adapters/readme.md:1",
+  "side=producer at emit.go:4 and adapter_http.go:9",
+  "side=producer in a/b/consumers.rs:3 + x.rs:1",
+  "side=producer at src/consumer",
+  "side=producer, see lib/adapter"
+ ],
+ "own_still_hedged": [
+  "side=producer, perhaps in emit.py:3",
+  "side=producer, it may be in emit.py:3",
+  "MAYBE side=producer",
+  "Probably side=producer at emit.py:3",
+  "side=producer at emit.py:3 (Maybe)",
+  "side=producer and/or caller",
+  "side=producer or the consumer.",
+  "side=producer/consumer",
+  "side=producer at emit.py:3, Probably so",
+  "side=producer, but may be wrong in src/emit.py:3",
+  "side=producer at emit.py:3 / adapter",
+  "side=producer at src/consumer/x.py:3, or consumer",
+  "side=producer in 'possible_values.py:4', maybe",
+  "side=producer, maybe.",
+  "side=producer probably.",
+  "side=producer, it seems."
+ ]
+}
