@@ -223,6 +223,9 @@ classification. Sonnet medium: narrow amendments, drafting an approved vision. F
 new vision, prioritization, difficult decomposition (evidence refs required). Fable xhigh:
 evidence-linked consequential uncertainty. Max only as an exception recorded in the ledger first.
 Nested skills (wwhtbt, 5whysandrhyme) resolve their own route.
+On a host without `.config/skill-routing/policy.json` and `fable-launch.sh` (redbaron
+and ryzen7 on 2026-11-14), `/dream` runs on the invoking session's own model and effort;
+no pin stands in for the absent route, and the Phase 4 run note writes `Route: ungoverned`.
 
 **Review:** one review turn per batch of at most 4 PRDs, with one verdict line per PRD;
 approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one that

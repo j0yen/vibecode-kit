@@ -31,3 +31,26 @@ doubts a rule can see what it cost when it was missing. Append-only.
   nothing tied a PRD to the failure it was meant to remove. The answer was code, not
   more prose: the `Seed:` key, draft-time lint hooks, and a persist hook that checks
   eligibility before the batch leaves the drafter.
+- **No model or effort pin; the routing policy is the one source (2026-11-14).** The
+  frontmatter pinned `model: fable` and `effort: max` after Joe's 2026-10-24 instruction,
+  quoted verbatim: "make /dream use Fable Max". On 2026-11-08 Joe approved the A1301
+  five-step plan in Discord #general ("Approved. build it now"); its task file
+  (`dream-phase-routing.task.md` line 3) reads, verbatim: "This expressly supersedes the
+  old blanket Fable/max instruction for /dream." The routing policy
+  (`.config/skill-routing/policy.json`, ledger A1300) sets `forbidden_efforts: ["max"]`
+  and routes Dream by decision class. A1301's commit 11cd41be (branch
+  `dream-phase-routing`) removed both pins and replaced the drafting paragraph with the
+  Phase routing paragraph, but sat unmerged for six days because the drift test still
+  required the pins. The decisions log (`decisions.jsonl`, 156 rows, 2026-11-09 to 11-14)
+  showed Dream launches at fable-xhigh 38, sonnet-medium 16, fable-high 1, denied 11, and
+  at effort `max` 0: the launcher sets model and effort itself, so the pin was read by no
+  governed launch and misstated the model to every reader. Installed state on 2026-11-14:
+  carbon holds the policy, resolver, `fable-launch.sh` and the spawn gate; redbaron holds
+  only the spawn gate; ryzen7 holds neither the policy nor the launcher (re-read on
+  ryzen7 2026-11-15: still absent). One SKILL.md serves all three hosts, so the skill now
+  says that an ungoverned host runs `/dream` on the invoking session's own model and
+  effort, and the drift test fails on any `model:` or `effort:` line in the frontmatter.
+  As read on 2026-11-14, no approvals number is recorded for either instruction (none
+  in the task file, `policy.json`, the approvals report or ledger rows A1300 and
+  A1301), and none is invented here. The Joe 2026-10-24 quote now lives in this entry rather than in
+  SKILL.md (PRD dream-route-pin-removal).
