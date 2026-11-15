@@ -1,0 +1,2 @@
+# verdicts (fixture)
+foo APPROVE fable

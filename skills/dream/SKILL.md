@@ -8,8 +8,6 @@ description: >
   the same skill drives any builder without edits. Use when the user says /dream,
   /dream <topic>, /dream project <name>, /dream loop <name>, /dream amend <slug>, or
   asks to "draft PRDs for X" or "turn these notes into product docs."
-model: fable
-effort: max
 fable-spawn: true
 ---
 
@@ -115,7 +113,9 @@ the run log.
 
 **Five whys (failure seeds).** Ask why up to five levels, each answered by an
 observation, stopping at a level outside the system's control. PRDs target the deepest
-actionable level; a shallower fix ships only as a guard beside the root fix.
+actionable level; a shallower fix ships only as a guard beside the root fix. A failure
+within the fleet's incident scope gets a `/5whysandrhyme` page (the Phase 2 table says
+when); any other failure keeps this why-chain inline, recorded as `5whys=inline`.
 
 **Rhyme (levels 6-8).** When a vision holds two or more failure addenda within seven
 days, lay the chains side by side and ask once why their roots rhyme, up to three more
@@ -135,6 +135,21 @@ the first PRD or the first open question; when the `/wwhtbt` skill is installed,
 and cite its `decisions/*-wwhtbt.md` page here instead of re-deriving, and when the seed
 is a failure, cite its `/5whysandrhyme` page) · Cross-chain whys (when due) · Components
 (one line each) · Order · Loop contract (loop-ready only) · Open questions with owners.
+
+**Run, reuse or skip.** Each analysis skill gets one value in the run note's `Analysis:`
+line (Phase 4):
+
+| skill | run | reuse | skip |
+|---|---|---|---|
+| `/wwhtbt` | `ran <page>`: its subject is in scope and no valid page covers the seed | `reused <page>`: an existing page's end-state names the seed's subject and no input it cites has changed; the vision records the path and the reason | `skipped: <reason>` (an amendment of an approved vision, say) |
+| `/5whysandrhyme` | `page <page>`: a failure within the fleet's incident scope | — | `inline`: a failure outside that scope keeps the Phase 1 why-chain; `skipped: <reason>`: not a failure seed |
+
+A run with `Task: none` records `reused` or `skipped:`, never `ran`. Launch a governed
+analysis with a session id drawn first, so its page binds to its launch row before the
+page exists: `sid=$(cat /proc/sys/kernel/random/uuid)`, then
+`fable-launch.sh --route-request <request> --session-id "$sid" ...`, and ask the worker
+in its prompt to write `session: <sid>` in the page header. The decisions row the
+launcher appends carries the same `session`, which is what the run-note lint checks.
 
 ## Loop-ready fleets (`/dream loop <name>` or a profile `Loop:` line)
 
@@ -217,9 +232,42 @@ hedging, too big, cargo-cult features, an engineering spec posing as a PRD.
 Fix the PRD, never the check. A finding you believe is wrong goes to the user as one
 line; the PRD waits.
 
-**Drafting model:** Fable at max effort, pinned in the frontmatter (Joe 2026-10-24
-"make /dream use Fable Max"; the pin holds for the invoking turn only); mechanical work (collation,
-reads, manifest, git) goes to the cheapest capable model.
+**Phase routing:** each phase runs the model the shared policy resolves, never an inherited
+dream model (`.config/skill-routing/policy.json`, skill `dream`, launched through
+`fable-launch.sh --route-request` with `decision_class` = the phase). Deterministic code:
+discovery, contract, duplicates, lint, manifest, persistence. Haiku: extraction, inventory,
+classification. Sonnet medium: narrow amendments, drafting an approved vision. Fable high:
+new vision, prioritization, difficult decomposition (evidence refs required). Fable xhigh:
+evidence-linked consequential uncertainty. Max only as an exception recorded in the ledger first.
+Nested skills (wwhtbt, 5whysandrhyme) resolve their own route.
+On a host without `.config/skill-routing/policy.json` and `fable-launch.sh` (redbaron
+and ryzen7 on 2026-11-14), `/dream` runs on the invoking session's own model and effort;
+no pin stands in for the absent route, and the Phase 4 run note writes `Route: ungoverned`.
+
+**Adversarial pass (before review):** for each PRD in the batch, write a table with the
+columns `invariant` (the requirement or AC id), `still-broken implementation` (a
+plausible one that passes the ACs as written), `counterexample`, `discriminating check`
+(the AC or test that tells the two apart, or `uncovered`) and `evidence` (its state and
+owner), over the six case families of the Hermes adapter's
+`references/adversarial-planning-pass.md`: Identity and provenance; Boundary environment;
+Evidence interpretation; Alternative bypasses and ordering; Falsifier quality;
+Whole-scope coverage and handoff. One file per run, `notes/reviews/<ISO-ts>-adversarial.md`
+under the PRD home, holds one section per PRD, headed by a line reading `## PRD-<slug>`
+and nothing else (text before the first is a preamble; a section ends at the next `##`
+heading of any kind). Inside it each family is a heading line `### <family name>` (the
+six names above, alone on the line, once each) over its table, or that heading followed
+by one line `n/a: <reason>`; a family named only in prose is not a heading. In
+`### Alternative bypasses and ordering`, when applied, two rows have `invariant` cells
+beginning `unconditional fallback:` and `conditional fallback:` (a case that does not
+apply keeps its prefix and continues `n/a: <reason>`). The file closes with one
+`## Uncovered` listing every row whose check is `uncovered` (`none` allowed). A reviewer
+finding counts as resolved only when its failure class has a discriminating check. Lint
+the matrix before launching the review turn (`scripts/dream-run-note-lint.sh --matrix
+<path> --states <slug=value ...>`) and fix a refusal first. The file goes into the review
+packet beside the PRDs, and the review prompt asks the reviewer to end with its verdict
+lines verbatim in its final message, so a `result=` capture can verify the verdict file.
+It is the run note's `adversarial=<path> uncovered=<n>`; `adversarial=skipped: <reason>`
+only when the run's `Review:` line is `none`.
 
 **Review:** one review turn per batch of at most 4 PRDs, with one verdict line per PRD;
 approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one that
@@ -262,8 +310,35 @@ Seeds: <Seed values>
 Lineage: extend <repo> | fork <repo> | greenfield
 Drafted: PRD-foo.md, PRD-bar.md   Build order: foo → bar
 Lint: <clean | findings fixed>   Eligibility: <per slug>
+Task: <canonical id | none>   Consumer: <name | none>
+Route: <route> <model_id> <effort> session=<id> decision=<decisions.jsonl ts>
+Analysis: wwhtbt=<ran <path> | reused <path> | skipped: <reason>> 5whys=<page <path> | inline | skipped: <reason>> adversarial=<<path> uncovered=<n> | skipped: <reason>>
+Review: <verdict file path> reviewer-session=<id> [result=<json path>]
+State: <slug>=<value> [<slug>=<value> ...]
 Open questions: <items>
 ```
+The five record lines, each on one line:
+- `Route:` names the launcher's decisions row (its `ts`) and the drafting session. On a
+  host with no decisions log write `Route: ungoverned session=<id> host=<hostname>`. On a
+  host that has one, only a launcher-started run passes: a typed `/dream` there writes
+  `Route: ungoverned`, and the lint's `route-ungoverned-on-governed-host` stays in the
+  note. `Task: none` admits only `Route: ungoverned`. No `account=`: the row holds it.
+- `Review:` one line per reviewer session, or exactly one `Review: none`.
+- `State:` values: `drafted`, `linted`, `reviewed:APPROVE|FIX|REJECT`, `persisted:<sha>`,
+  `pending-scan`, `eligible`, `ineligible`. A slug repeats once per state it reached, in
+  order (`foo=reviewed:FIX foo=persisted:<sha>` is a push after a FIX verdict). Its
+  `reviewed:` tokens are exactly the verdicts the `Review:` files give it, in line order.
+- Paths are relative to the PRD home or absolute.
+
+After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md --last
+--json` on it. Fix a finding you can fix and rerun the lint before the reply. A finding
+you cannot fix (`route-ungoverned-on-governed-host`; `analysis-page-unbound` for a page
+another worker wrote) stays in the note and is quoted in the reply with the lint's JSON.
+The reply quotes the `State:` line and the provenance labels. The labels mean consistent
+with the launcher's record on this host (`boundary`), a verified `result=` capture
+(`checked`), a gate-protected wiki page (`gated`) or the drafter's word (`self`); the
+decisions log is a same-user file, so none of them is authentication (`trust: same-uid`).
+
 `Status: queued` in `build-queue/` is the queue; end by stating the build order. Wiki
 publication is opt-in: ask when write tools exist.
 
