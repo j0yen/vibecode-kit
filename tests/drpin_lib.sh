@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # variables are read by the tests that source this file
 # Shared helpers for the drpin_* tests (PRD-dream-route-pin-removal).
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$here/.." && pwd)"

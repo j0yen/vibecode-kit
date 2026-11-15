@@ -3,7 +3,7 @@
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/drpin_lib.sh"
 tmp=$(mktemp -d); trap 'chmod -R u+rw "$tmp"; rm -rf "$tmp"' EXIT
-out=$(DREAM_SKILL_MD= bash "$DRIFT" 2>&1); rc=$?
+out=$(DREAM_SKILL_MD='' bash "$DRIFT" 2>&1); rc=$?
 [ "$rc" = 2 ] || fail "empty: rc=$rc: $out"
 printf '%s\n' "$out" | grep -qF "''" || fail "empty: message does not name the empty path: $out"
 out=$(DREAM_SKILL_MD="$tmp/nope/SKILL.md" bash "$DRIFT" 2>&1); rc=$?
