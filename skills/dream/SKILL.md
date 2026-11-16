@@ -150,6 +150,13 @@ page exists: `sid=$(cat /proc/sys/kernel/random/uuid)`, then
 `fable-launch.sh --route-request <request> --session-id "$sid" ...`, and ask the worker
 in its prompt to write `session: <sid>` in the page header. The decisions row the
 launcher appends carries the same `session`, which is what the run-note lint checks.
+Launch each reviewer (Phase 3) the same way: draw its session id first and pass it as
+`--session-id`, and name in the request a `review.snapshot` = a `sha256sum` manifest of
+the frozen files the reviewer reads (the PRDs, the vision, the matrix), its paths absolute
+or relative to the manifest's own directory, because `sha256sum -c` is run there. The
+launcher's row then carries `role` review, `scope` and `scope_id`; a request without a
+snapshot launches as an author, which the lint refuses on a `Review:` line. Keep the
+manifest until the run note is linted.
 
 ## Loop-ready fleets (`/dream loop <name>` or a profile `Loop:` line)
 
@@ -273,7 +280,9 @@ only when the run's `Review:` line is `none`.
 approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one that
 touches more than one repo or surface, is reviewed alone and persists in a batch of
 one. Write each verdict as `<slug> APPROVE|FIX|REJECT <reviewer>`, one line per PRD, to a
-review file.
+review file. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
+slug's current PRD file with the digest in its reviewer's `review.snapshot` manifest, so a
+later edit to that PRD needs a new review (FIX and REJECT are not pinned).
 
 ## Amend (`/dream amend <slug>`)
 
@@ -334,7 +343,10 @@ After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md
 --json` on it. Fix a finding you can fix and rerun the lint before the reply. A finding
 you cannot fix (`route-ungoverned-on-governed-host`; `analysis-page-unbound` for a page
 another worker wrote) stays in the note and is quoted in the reply with the lint's JSON.
-The reply quotes the `State:` line and the provenance labels. The labels mean consistent
+The reply quotes the `State:` line and the provenance labels, `snapshot` among them:
+`verified` when every `Review:` row is a reviewer launched with a snapshot whose bytes its
+APPROVEs still match, `legacy` for reviewer rows written before the launcher recorded a
+role (reported, never a pass), `none` beside `Review: none`, else `self`. The labels mean consistent
 with the launcher's record on this host (`boundary`), a verified `result=` capture
 (`checked`), a gate-protected wiki page (`gated`) or the drafter's word (`self`); the
 decisions log is a same-user file, so none of them is authentication (`trust: same-uid`).

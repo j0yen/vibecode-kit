@@ -7,6 +7,7 @@
 #   dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] [--json]
 #                          [--prd-dir <dir>] [--decisions <path>]
 #   dream-run-note-lint.sh --matrix <path> --states <slug=value ...> [--json]
+#   dream-run-note-lint.sh --scope-id <manifest>
 #   dream-run-note-lint.sh --selftest
 #
 # The entry is the last `## <ts>  /dream  vision-...` block (--last, the default) or
@@ -25,7 +26,7 @@
 # appends (--decisions; default $SKILL_ROUTING_DECISIONS, the launcher's own override,
 # else ~/.local/state/skill-routing/decisions.jsonl). Rows are addressed by
 # (session, ts); fields read by name: ts decision task_id skill route model effort
-# session; extra fields tolerated; an absent compared field is unequal and named; a
+# session role scope scope_id; extra fields tolerated; an absent compared field is unequal and named; a
 # line that is not JSON is skipped and counted (decisions_malformed). Trust: the log,
 # result JSONs and pages are files the same Unix user can write, so `boundary` means
 # consistent with the launcher's record on this host, never authenticated
@@ -46,6 +47,16 @@
 #   analysis-provenance-missing analysis-page-unbound task-none-ran review-self
 #   review-provenance-missing review-result-mismatch adversarial-missing
 #   adversarial-slug-missing adversarial-family-missing adversarial-case-missing
+#   review-scope-mismatch review-snapshot-stale
+#
+# Review scope (PRD-dream-run-record-review-scope): a Review: session's latest launch row
+# for the note's task binds by its `role`: absent = legacy (today's checks only), review =
+# its `scope` manifest (absolute, or relative to the PRD home) must canonicalize to its
+# `scope_id`, list every verdict slug's PRD-<slug>.md, and hold the digest of each APPROVE
+# slug's current PRD file; anything else fails. The canonical scope text is the
+# launcher's (fable-launch.sh R4): every line `<sha256>  <basename>`, bytewise sorted and
+# de-duplicated, newline-terminated, under the shared line rule; --scope-id prints its
+# sha256 (exit 0) or the review-scope-mismatch detail (exit 1) and reads nothing else.
 #
 # Env seams: SKILL_ROUTING_DECISIONS (default decisions path, as fable-launch.sh),
 #   ANALYSIS_WIKI_DIR (gated wiki root for reused pages; default ~/Notes/wiki, whose
@@ -69,7 +80,7 @@ exit 2
 # The Python below sits in a no-op heredoc so the file stays valid bash (bash -n, shellcheck).
 : <<'#__PYTHON_END__'
 #__PYTHON__
-import os, re, sys, json, subprocess, tempfile, shutil, datetime
+import os, re, sys, json, subprocess, tempfile, shutil, datetime, hashlib
 
 # State vocabulary: the DREAMCA1 persist distinctions. When A1301's run state machine
 # (explore -> draft -> validated -> reviewed -> admitted) lands, this array is replaced
@@ -87,6 +98,11 @@ COLUMNS = ["invariant", "still-broken implementation", "counterexample",
            "discriminating check", "evidence"]
 KINDS = ["Task", "Route", "Analysis", "Review", "State"]
 HEADER_RE = re.compile(r"^## (\S+)  /dream  vision-")
+# Review scope (R4): the line rule over bytes (the bytes \s class is POSIX [:space:] in
+# the C locale) and the PRD basename the repeat rule counts.
+SCOPE_LINE_RE = re.compile(rb"[0-9a-f]{64}  [^\s]+")
+PRD_BASENAME_RE = re.compile(rb"PRD-[a-z0-9-]+\.md")
+PRD_DIRS = ("build-queue", "built-prds", "parked")
 PAGE_LINES = 40
 
 
@@ -97,7 +113,106 @@ class Exit2(Exception):
 def usage(msg):
     raise Exit2(msg + " (usage: dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] "
                 "[--json] [--prd-dir <dir>] [--decisions <path>] | --matrix <path> --states "
-                "<slug=value ...> [--json] | --selftest)")
+                "<slug=value ...> [--json] | --scope-id <manifest> | --selftest)")
+
+
+class ScopeError(Exception):
+    pass
+
+
+def bshow(b):
+    """A path or basename for a detail line: bytes compared as bytes, printed this way."""
+    return b.decode("utf-8", "backslashreplace")
+
+
+def scope_canon(path):
+    """R4: (scope_id, {basename: digest}) of a sha256sum manifest, all over bytes.
+    Raises ScopeError(detail) for an unreadable manifest, the line rule or prd-repeat."""
+    shown = bshow(os.fsencode(path))
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as e:
+        raise ScopeError(f"scope {shown}: line 0: unreadable ({e.strerror})")
+    if not data:
+        raise ScopeError(f"scope {shown}: line 0: line-rule: empty manifest")
+    if not data.endswith(b"\n"):
+        raise ScopeError(f"scope {shown}: line 0: line-rule: no final LF")
+    lines = data[:-1].split(b"\n")
+    for i, ln in enumerate(lines, 1):
+        if not SCOPE_LINE_RE.fullmatch(ln):
+            raise ScopeError(f"scope {shown}: line {i}: line-rule: not '<sha256>  <path>' "
+                             "(^[0-9a-f]{64}  [^[:space:]]+$ under LC_ALL=C)")
+    canon = sorted({h + b"  " + p.rsplit(b"/", 1)[-1] + b"\n" for h, p in (ln.split(b"  ", 1) for ln in lines)})
+    digests, seen = {}, {}
+    for c in canon:
+        h, base = c[:64], c[66:-1]
+        digests.setdefault(base, h.decode("ascii"))
+        if PRD_BASENAME_RE.fullmatch(base):
+            seen[base] = seen.get(base, 0) + 1
+    rep = sorted(b for b, n in seen.items() if n > 1)
+    if rep:
+        raise ScopeError(f"scope {shown}: prd-repeat: {bshow(rep[0])} listed with two digests")
+    return hashlib.sha256(b"".join(canon)).hexdigest(), digests
+
+
+def check_scope(L, rv, row, vlines, last, home, resolve):
+    """R4 and R5 for a reviewer row with role review: the manifest canonicalizes to the
+    row's scope_id and lists every verdict slug; each APPROVE slug's current PRD file
+    hashes to the manifest's digest. Returns True when every check passed."""
+    who = f"{rv['file']}: reviewer-session {rv['session']}"
+    ok = True
+    sid = row.get("scope_id")
+    if not isinstance(sid, str) or not sid:
+        L.fail("review-scope-mismatch", f"{who}: the row's scope_id is empty or absent")
+        ok = False
+    scope = row.get("scope")
+    if not isinstance(scope, str):
+        L.fail("review-scope-mismatch", f"{who}: the row's scope is absent or not a path")
+        return False
+    full = resolve(scope)
+    try:
+        got, digests = scope_canon(full)
+    except ScopeError as e:
+        L.fail("review-scope-mismatch", f"{who}: {e}")
+        return False
+    if ok and got != sid:
+        L.fail("review-scope-mismatch", f"{who}: scope {full} canonicalizes to {got}, the row's scope_id is {sid}")
+        ok = False
+    for slug in dict.fromkeys(v[0] for v in vlines):
+        if b"PRD-" + slug.encode() + b".md" not in digests:
+            L.fail("review-scope-mismatch", f"{who}: slug {slug}: PRD-{slug}.md is not among the basenames of scope {full}")
+            ok = False
+    return check_snapshot(L, who, full, digests, last, home) and ok
+
+
+def check_snapshot(L, who, full, digests, last, home):
+    """R5: an APPROVE (the slug's last verdict in this file) binds to the manifest's digest
+    of PRD-<slug>.md; the current file is the first of build-queue/, built-prds/, parked/
+    holding it, hashed over raw bytes. FIX and REJECT are not pinned; an absent PRD file is
+    left to state-grammar / review-verdict-mismatch; an unreadable one is never a pass."""
+    ok = True
+    for slug, verdict in last.items():
+        want = digests.get(b"PRD-" + slug.encode() + b".md")
+        if verdict != "APPROVE" or want is None:
+            continue
+        cur = next((os.path.join(home, d, f"PRD-{slug}.md") for d in PRD_DIRS
+                    if os.path.isfile(os.path.join(home, d, f"PRD-{slug}.md"))), None)
+        if cur is None:
+            continue
+        try:
+            with open(cur, "rb") as fh:
+                got = hashlib.sha256(fh.read()).hexdigest()
+        except OSError as e:
+            L.fail("review-snapshot-stale", f"{who}: slug {slug}: {cur} unreadable ({e.strerror}); its APPROVE binds to nothing")
+            ok = False
+            continue
+        if got != want:
+            L.fail("review-snapshot-stale",
+                   f"{who}: slug {slug}: {cur} sha256 {got[:12]} differs from the snapshot's {want[:12]} (scope {full}); "
+                   "the APPROVE was given on other bytes")
+            ok = False
+    return ok
 
 
 def read_text(path):
@@ -270,7 +385,7 @@ def lint_section(L, shown, slug, body):
 # ---------------------------------------------------------------- log entry parse
 def parse_args(argv):
     a = {"log": None, "mode": "last", "entry": None, "json": False, "prd_dir": None,
-         "decisions": None, "matrix": None, "states": None, "selftest": False}
+         "decisions": None, "matrix": None, "states": None, "selftest": False, "scope_id": None}
     i = 0
     while i < len(argv):
         x = argv[i]
@@ -280,10 +395,11 @@ def parse_args(argv):
             a["mode"] = "last"
         elif x == "--selftest":
             a["selftest"] = True
-        elif x in ("--entry", "--prd-dir", "--decisions", "--matrix"):
+        elif x in ("--entry", "--prd-dir", "--decisions", "--matrix", "--scope-id"):
             if i + 1 >= len(argv):
                 usage(f"{x} needs a value")
-            key = {"--entry": "entry", "--prd-dir": "prd_dir", "--decisions": "decisions", "--matrix": "matrix"}[x]
+            key = {"--entry": "entry", "--prd-dir": "prd_dir", "--decisions": "decisions", "--matrix": "matrix",
+                   "--scope-id": "scope_id"}[x]
             a[key] = argv[i + 1]
             if x == "--entry":
                 a["mode"] = "entry"
@@ -574,7 +690,7 @@ def lint_log(a):
             raise Exit2(f"no decisions log at {default_dp} (and no --decisions); cannot check: {', '.join(need)}")
 
     prov = {"route": None, "wwhtbt": None, "fivewhys": None, "adversarial": "self",
-            "reviews": None, "states": "self", "persisted": "none"}
+            "reviews": None, "states": "self", "persisted": "none", "snapshot": None}
 
     # ---- route provenance (R8 a)
     if route:
@@ -605,6 +721,8 @@ def lint_log(a):
                         bad.append(f"{k}=<absent> (note {v})")
                     elif r[k] != v:
                         bad.append(f"{k}={r[k]} (note {v})")
+                if "role" in r and r["role"] != "author":     # an absent role is legacy
+                    bad.append(f"role={r['role']} (note author)")
                 if bad:
                     L.fail("route-provenance-mismatch", f"row {route['decision']}: " + "; ".join(bad))
                 else:
@@ -694,12 +812,15 @@ def lint_log(a):
     seq = {}
     if review_none and not reviews:
         prov["reviews"] = "none"
+        prov["snapshot"] = "none"
         if reviewed_slugs:
             L.fail("review-self", f"Review: none beside reviewed: state for {', '.join(reviewed_slugs)}")
     elif review_grammar_ok and reviews:
         rsess = route["session"] if route else None
         for rv in reviews:
             label = "self"
+            rrow = None              # the reviewer's latest launch row (m4[-1]) when its role is review
+            rv["snapshot"] = "self"
             if rv["session"] == "none":
                 L.fail("review-self", f"{rv['file']}: reviewer-session=none")
             elif rsess is not None and rv["session"] == rsess:
@@ -717,6 +838,17 @@ def lint_log(a):
                 if field:
                     L.fail("review-provenance-missing",
                            f"reviewer-session {rv['session']}: no launch row with skill=dream task_id={task} (first failing field: {field})")
+                else:
+                    latest = m4[-1]      # file order: the launcher's R5 reads the same row
+                    rv["role"], rv["scope_id"] = latest.get("role"), latest.get("scope_id")
+                    if "role" not in latest:
+                        rv["snapshot"] = "legacy"
+                    elif latest["role"] == "review":
+                        rrow = latest
+                    else:
+                        L.fail("review-provenance-missing",
+                               f"reviewer-session {rv['session']}: latest launch row with skill=dream task_id={task} "
+                               f"has role={latest['role']}, not review (first failing field: role)")
             full = resolve(rv["file"])
             if not os.path.isfile(full) or not os.access(full, os.R_OK):
                 L.fail("review-file-missing", f"{rv['file']} does not exist or is unreadable")
@@ -728,12 +860,21 @@ def lint_log(a):
             for slug, verdict, _ in vlines:
                 last.pop(slug, None)
                 last[slug] = verdict
+            if rrow is not None:
+                rv["snapshot"] = "verified" if check_scope(L, rv, rrow, vlines, last, home, resolve) else "self"
             for slug, verdict in last.items():
                 seq.setdefault(slug, []).append(verdict)
             if rv["result"]:
                 label = check_result(L, rv, resolve(rv["result"]), vlines)
             labels.append(label)
         prov["reviews"] = "checked" if labels and all(x == "checked" for x in labels) else "self"
+        snaps = [rv["snapshot"] for rv in reviews]
+        if all(x == "verified" for x in snaps):
+            prov["snapshot"] = "verified"
+        elif all(x in ("verified", "legacy") for x in snaps):
+            prov["snapshot"] = "legacy"     # reported, never used to pass a failing check
+        else:
+            prov["snapshot"] = "self"
         if files_ok and state_ok:
             for slug, vs in seq.items():
                 want = ["reviewed:" + v for v in vs]
@@ -774,6 +915,8 @@ def lint_log(a):
             prov[k] = "self"
     if prov["reviews"] is None:
         prov["reviews"] = "none"
+    if prov["snapshot"] is None:
+        prov["snapshot"] = "none" if prov["reviews"] == "none" else "self"
 
     def akind(v):
         if v is None:
@@ -788,7 +931,8 @@ def lint_log(a):
         "route": None if route is None else {k: route[k] for k in ("route", "model_id", "effort", "session", "decision")},
         "analysis": {"wwhtbt": akind(an.get("wwhtbt")), "fivewhys": akind(an.get("fivewhys"))},
         "adversarial": None if adv is None else {"kind": adv[0], "value": adv[1], "uncovered": adv[2]},
-        "reviews": [{"file": r["file"], "session": r["session"], "result": r["result"]} for r in reviews],
+        "reviews": [{"file": r["file"], "session": r["session"], "result": r["result"],
+                     "role": r.get("role"), "scope_id": r.get("scope_id")} for r in reviews],
         "states": states,
         "provenance": prov,
     }
@@ -866,11 +1010,27 @@ def lint_matrix_mode(a):
     return L, obj, f"OK matrix {a['matrix']} uncovered={n}"
 
 
+def scope_id_mode(path):
+    """--scope-id: the canonical scope text's sha256 (exit 0) or the
+    review-scope-mismatch detail (exit 1), both on stdout."""
+    try:
+        sid, _ = scope_canon(path)
+    except ScopeError as e:
+        print(f"FAIL review-scope-mismatch: {e}")
+        return 1
+    print(sid)
+    return 0
+
+
 def main(argv):
     try:
         a = parse_args(argv)
         if a["selftest"]:
             return selftest()
+        if a["scope_id"] is not None:
+            if any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "decisions", "matrix", "states", "json")):
+                usage("--scope-id takes one manifest path and nothing else")
+            return scope_id_mode(a["scope_id"])
         if a["matrix"] is not None or a["states"] is not None:
             if a["matrix"] is None or a["states"] is None or a["log"] is not None:
                 usage("--matrix and --states go together, without a log")
@@ -1175,7 +1335,23 @@ def selftest():
         d["provenance"]["reviews"] == "self" and d["provenance"]["route"] == "ungoverned", d["provenance"]),
         decisions=False)
 
+    # review scope: the reviewer row (S_R1) carries role review and a snapshot of PRD-foo.md
+    def scoped(fx, foo_now="# foo stub\n", scope_id=None):
+        dig = hashlib.sha256(b"# foo stub\n").hexdigest()
+        fx.files["notes/snapshots/s.sha256"] = f"{dig}  ../../built-prds/PRD-foo.md\n"
+        fx.files["built-prds/PRD-foo.md"] = foo_now
+        sid = scope_id if scope_id is not None else hashlib.sha256(f"{dig}  PRD-foo.md\n".encode()).hexdigest()
+        fx.rows[3] = dict(fx.rows[3], role="author", scope="", scope_id="")
+        fx.rows[4] = dict(fx.rows[4], role="review", scope="notes/snapshots/s.sha256", scope_id=sid)
+        return fx
+    passes("snapshot-verified", scoped(new()), lambda d: expect(
+        d["provenance"]["snapshot"] == "verified" and d["reviews"][0]["role"] == "review", (d["provenance"], d["reviews"])))
+    passes("snapshot-legacy", new(), lambda d: expect(
+        d["provenance"]["snapshot"] == "legacy" and d["reviews"][0]["role"] is None, (d["provenance"], d["reviews"])))
+
     # ---------- refusal fixtures, each exactly [id]
+    refuse("scope-id", scoped(new(), scope_id="0" * 64), "review-scope-mismatch", ["notes/snapshots/s.sha256", "0" * 64])
+    refuse("edited-after-approve", scoped(new(), foo_now="# foo stub, edited\n"), "review-snapshot-stale", ["slug foo"])
     fx = new(); fx.entry["Route"] = None
     refuse("no-route", fx, "line-missing", ["Route"])
     fx = new(); fx.entry["Route"] = f"Route: fable-xhigh session={S_D}"
