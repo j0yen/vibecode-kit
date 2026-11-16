@@ -7,6 +7,7 @@
 #   dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] [--json]
 #                          [--prd-dir <dir>] [--decisions <path>]
 #   dream-run-note-lint.sh --matrix <path> --states <slug=value ...> [--json]
+#   dream-run-note-lint.sh --scope-id <manifest>
 #   dream-run-note-lint.sh --selftest
 #
 # The entry is the last `## <ts>  /dream  vision-...` block (--last, the default) or
@@ -47,6 +48,15 @@
 #   review-provenance-missing review-result-mismatch adversarial-missing
 #   adversarial-slug-missing adversarial-family-missing adversarial-case-missing
 #
+# Review scope (PRD-dream-run-record-review-scope): a Review: session's latest launch row
+# for the note's task binds by its `role`: absent = legacy (today's checks only), review =
+# its `scope` manifest (absolute, or relative to the PRD home) must canonicalize to its
+# `scope_id`, list every verdict slug's PRD-<slug>.md, and hold the digest of each APPROVE
+# slug's current PRD file; anything else fails. The canonical scope text is the
+# launcher's (fable-launch.sh R4): every line `<sha256>  <basename>`, bytewise sorted and
+# de-duplicated, newline-terminated, under the shared line rule; --scope-id prints its
+# sha256 (exit 0) or the review-scope-mismatch detail (exit 1) and reads nothing else.
+#
 # Env seams: SKILL_ROUTING_DECISIONS (default decisions path, as fable-launch.sh),
 #   ANALYSIS_WIKI_DIR (gated wiki root for reused pages; default ~/Notes/wiki, whose
 #   decisions/ and answers/ analysis-page-gate.sh protects).
@@ -69,7 +79,7 @@ exit 2
 # The Python below sits in a no-op heredoc so the file stays valid bash (bash -n, shellcheck).
 : <<'#__PYTHON_END__'
 #__PYTHON__
-import os, re, sys, json, subprocess, tempfile, shutil, datetime
+import os, re, sys, json, subprocess, tempfile, shutil, datetime, hashlib
 
 # State vocabulary: the DREAMCA1 persist distinctions. When A1301's run state machine
 # (explore -> draft -> validated -> reviewed -> admitted) lands, this array is replaced
@@ -87,6 +97,11 @@ COLUMNS = ["invariant", "still-broken implementation", "counterexample",
            "discriminating check", "evidence"]
 KINDS = ["Task", "Route", "Analysis", "Review", "State"]
 HEADER_RE = re.compile(r"^## (\S+)  /dream  vision-")
+# Review scope (R4): the line rule over bytes (the bytes \s class is POSIX [:space:] in
+# the C locale) and the PRD basename the repeat rule counts.
+SCOPE_LINE_RE = re.compile(rb"[0-9a-f]{64}  [^\s]+")
+PRD_BASENAME_RE = re.compile(rb"PRD-[a-z0-9-]+\.md")
+PRD_DIRS = ("build-queue", "built-prds", "parked")
 PAGE_LINES = 40
 
 
@@ -97,7 +112,82 @@ class Exit2(Exception):
 def usage(msg):
     raise Exit2(msg + " (usage: dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] "
                 "[--json] [--prd-dir <dir>] [--decisions <path>] | --matrix <path> --states "
-                "<slug=value ...> [--json] | --selftest)")
+                "<slug=value ...> [--json] | --scope-id <manifest> | --selftest)")
+
+
+class ScopeError(Exception):
+    pass
+
+
+def bshow(b):
+    """A path or basename for a detail line: bytes compared as bytes, printed this way."""
+    return b.decode("utf-8", "backslashreplace")
+
+
+def scope_canon(path):
+    """R4: (scope_id, {basename: digest}) of a sha256sum manifest, all over bytes.
+    Raises ScopeError(detail) for an unreadable manifest, the line rule or prd-repeat."""
+    shown = bshow(os.fsencode(path))
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as e:
+        raise ScopeError(f"scope {shown}: line 0: unreadable ({e.strerror})")
+    if not data:
+        raise ScopeError(f"scope {shown}: line 0: line-rule: empty manifest")
+    if not data.endswith(b"\n"):
+        raise ScopeError(f"scope {shown}: line 0: line-rule: no final LF")
+    lines = data[:-1].split(b"\n")
+    for i, ln in enumerate(lines, 1):
+        if not SCOPE_LINE_RE.fullmatch(ln):
+            raise ScopeError(f"scope {shown}: line {i}: line-rule: not '<sha256>  <path>' "
+                             "(^[0-9a-f]{64}  [^[:space:]]+$ under LC_ALL=C)")
+    canon = sorted({h + b"  " + p.rsplit(b"/", 1)[-1] + b"\n" for h, p in (ln.split(b"  ", 1) for ln in lines)})
+    digests, seen = {}, {}
+    for c in canon:
+        h, base = c[:64], c[66:-1]
+        digests.setdefault(base, h.decode("ascii"))
+        if PRD_BASENAME_RE.fullmatch(base):
+            seen[base] = seen.get(base, 0) + 1
+    rep = sorted(b for b, n in seen.items() if n > 1)
+    if rep:
+        raise ScopeError(f"scope {shown}: prd-repeat: {bshow(rep[0])} listed with two digests")
+    return hashlib.sha256(b"".join(canon)).hexdigest(), digests
+
+
+def check_scope(L, rv, row, vlines, last, home, resolve):
+    """R4 and R5 for a reviewer row with role review: the manifest canonicalizes to the
+    row's scope_id and lists every verdict slug; each APPROVE slug's current PRD file
+    hashes to the manifest's digest. Returns True when every check passed."""
+    who = f"{rv['file']}: reviewer-session {rv['session']}"
+    ok = True
+    sid = row.get("scope_id")
+    if not isinstance(sid, str) or not sid:
+        L.fail("review-scope-mismatch", f"{who}: the row's scope_id is empty or absent")
+        ok = False
+    scope = row.get("scope")
+    if not isinstance(scope, str):
+        L.fail("review-scope-mismatch", f"{who}: the row's scope is absent or not a path")
+        return False
+    full = resolve(scope)
+    try:
+        got, digests = scope_canon(full)
+    except ScopeError as e:
+        L.fail("review-scope-mismatch", f"{who}: {e}")
+        return False
+    if ok and got != sid:
+        L.fail("review-scope-mismatch", f"{who}: scope {full} canonicalizes to {got}, the row's scope_id is {sid}")
+        ok = False
+    for slug in dict.fromkeys(v[0] for v in vlines):
+        if b"PRD-" + slug.encode() + b".md" not in digests:
+            L.fail("review-scope-mismatch", f"{who}: slug {slug}: PRD-{slug}.md is not among the basenames of scope {full}")
+            ok = False
+    return check_snapshot(L, who, full, digests, last, home) and ok
+
+
+def check_snapshot(L, who, full, digests, last, home):
+    """(placeholder until R5)"""
+    return True
 
 
 def read_text(path):
@@ -270,7 +360,7 @@ def lint_section(L, shown, slug, body):
 # ---------------------------------------------------------------- log entry parse
 def parse_args(argv):
     a = {"log": None, "mode": "last", "entry": None, "json": False, "prd_dir": None,
-         "decisions": None, "matrix": None, "states": None, "selftest": False}
+         "decisions": None, "matrix": None, "states": None, "selftest": False, "scope_id": None}
     i = 0
     while i < len(argv):
         x = argv[i]
@@ -280,10 +370,11 @@ def parse_args(argv):
             a["mode"] = "last"
         elif x == "--selftest":
             a["selftest"] = True
-        elif x in ("--entry", "--prd-dir", "--decisions", "--matrix"):
+        elif x in ("--entry", "--prd-dir", "--decisions", "--matrix", "--scope-id"):
             if i + 1 >= len(argv):
                 usage(f"{x} needs a value")
-            key = {"--entry": "entry", "--prd-dir": "prd_dir", "--decisions": "decisions", "--matrix": "matrix"}[x]
+            key = {"--entry": "entry", "--prd-dir": "prd_dir", "--decisions": "decisions", "--matrix": "matrix",
+                   "--scope-id": "scope_id"}[x]
             a[key] = argv[i + 1]
             if x == "--entry":
                 a["mode"] = "entry"
@@ -743,6 +834,8 @@ def lint_log(a):
             for slug, verdict, _ in vlines:
                 last.pop(slug, None)
                 last[slug] = verdict
+            if rrow is not None:
+                rv["snapshot"] = "verified" if check_scope(L, rv, rrow, vlines, last, home, resolve) else "self"
             for slug, verdict in last.items():
                 seq.setdefault(slug, []).append(verdict)
             if rv["result"]:
@@ -882,11 +975,27 @@ def lint_matrix_mode(a):
     return L, obj, f"OK matrix {a['matrix']} uncovered={n}"
 
 
+def scope_id_mode(path):
+    """--scope-id: the canonical scope text's sha256 (exit 0) or the
+    review-scope-mismatch detail (exit 1), both on stdout."""
+    try:
+        sid, _ = scope_canon(path)
+    except ScopeError as e:
+        print(f"FAIL review-scope-mismatch: {e}")
+        return 1
+    print(sid)
+    return 0
+
+
 def main(argv):
     try:
         a = parse_args(argv)
         if a["selftest"]:
             return selftest()
+        if a["scope_id"] is not None:
+            if any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "decisions", "matrix", "states", "json")):
+                usage("--scope-id takes one manifest path and nothing else")
+            return scope_id_mode(a["scope_id"])
         if a["matrix"] is not None or a["states"] is not None:
             if a["matrix"] is None or a["states"] is None or a["log"] is not None:
                 usage("--matrix and --states go together, without a log")
