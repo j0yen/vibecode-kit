@@ -25,7 +25,7 @@
 # appends (--decisions; default $SKILL_ROUTING_DECISIONS, the launcher's own override,
 # else ~/.local/state/skill-routing/decisions.jsonl). Rows are addressed by
 # (session, ts); fields read by name: ts decision task_id skill route model effort
-# session; extra fields tolerated; an absent compared field is unequal and named; a
+# session role scope scope_id; extra fields tolerated; an absent compared field is unequal and named; a
 # line that is not JSON is skipped and counted (decisions_malformed). Trust: the log,
 # result JSONs and pages are files the same Unix user can write, so `boundary` means
 # consistent with the launcher's record on this host, never authenticated
@@ -605,6 +605,8 @@ def lint_log(a):
                         bad.append(f"{k}=<absent> (note {v})")
                     elif r[k] != v:
                         bad.append(f"{k}={r[k]} (note {v})")
+                if "role" in r and r["role"] != "author":     # an absent role is legacy
+                    bad.append(f"role={r['role']} (note author)")
                 if bad:
                     L.fail("route-provenance-mismatch", f"row {route['decision']}: " + "; ".join(bad))
                 else:
@@ -700,6 +702,8 @@ def lint_log(a):
         rsess = route["session"] if route else None
         for rv in reviews:
             label = "self"
+            rrow = None              # the reviewer's latest launch row (m4[-1]) when its role is review
+            rv["snapshot"] = "self"
             if rv["session"] == "none":
                 L.fail("review-self", f"{rv['file']}: reviewer-session=none")
             elif rsess is not None and rv["session"] == rsess:
@@ -717,6 +721,17 @@ def lint_log(a):
                 if field:
                     L.fail("review-provenance-missing",
                            f"reviewer-session {rv['session']}: no launch row with skill=dream task_id={task} (first failing field: {field})")
+                else:
+                    latest = m4[-1]      # file order: the launcher's R5 reads the same row
+                    rv["role"], rv["scope_id"] = latest.get("role"), latest.get("scope_id")
+                    if "role" not in latest:
+                        rv["snapshot"] = "legacy"
+                    elif latest["role"] == "review":
+                        rrow = latest
+                    else:
+                        L.fail("review-provenance-missing",
+                               f"reviewer-session {rv['session']}: latest launch row with skill=dream task_id={task} "
+                               f"has role={latest['role']}, not review (first failing field: role)")
             full = resolve(rv["file"])
             if not os.path.isfile(full) or not os.access(full, os.R_OK):
                 L.fail("review-file-missing", f"{rv['file']} does not exist or is unreadable")
@@ -788,7 +803,8 @@ def lint_log(a):
         "route": None if route is None else {k: route[k] for k in ("route", "model_id", "effort", "session", "decision")},
         "analysis": {"wwhtbt": akind(an.get("wwhtbt")), "fivewhys": akind(an.get("fivewhys"))},
         "adversarial": None if adv is None else {"kind": adv[0], "value": adv[1], "uncovered": adv[2]},
-        "reviews": [{"file": r["file"], "session": r["session"], "result": r["result"]} for r in reviews],
+        "reviews": [{"file": r["file"], "session": r["session"], "result": r["result"],
+                     "role": r.get("role"), "scope_id": r.get("scope_id")} for r in reviews],
         "states": states,
         "provenance": prov,
     }
