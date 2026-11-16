@@ -47,6 +47,7 @@
 #   analysis-provenance-missing analysis-page-unbound task-none-ran review-self
 #   review-provenance-missing review-result-mismatch adversarial-missing
 #   adversarial-slug-missing adversarial-family-missing adversarial-case-missing
+#   review-scope-mismatch review-snapshot-stale
 #
 # Review scope (PRD-dream-run-record-review-scope): a Review: session's latest launch row
 # for the note's task binds by its `role`: absent = legacy (today's checks only), review =
@@ -1334,7 +1335,23 @@ def selftest():
         d["provenance"]["reviews"] == "self" and d["provenance"]["route"] == "ungoverned", d["provenance"]),
         decisions=False)
 
+    # review scope: the reviewer row (S_R1) carries role review and a snapshot of PRD-foo.md
+    def scoped(fx, foo_now="# foo stub\n", scope_id=None):
+        dig = hashlib.sha256(b"# foo stub\n").hexdigest()
+        fx.files["notes/snapshots/s.sha256"] = f"{dig}  ../../built-prds/PRD-foo.md\n"
+        fx.files["built-prds/PRD-foo.md"] = foo_now
+        sid = scope_id if scope_id is not None else hashlib.sha256(f"{dig}  PRD-foo.md\n".encode()).hexdigest()
+        fx.rows[3] = dict(fx.rows[3], role="author", scope="", scope_id="")
+        fx.rows[4] = dict(fx.rows[4], role="review", scope="notes/snapshots/s.sha256", scope_id=sid)
+        return fx
+    passes("snapshot-verified", scoped(new()), lambda d: expect(
+        d["provenance"]["snapshot"] == "verified" and d["reviews"][0]["role"] == "review", (d["provenance"], d["reviews"])))
+    passes("snapshot-legacy", new(), lambda d: expect(
+        d["provenance"]["snapshot"] == "legacy" and d["reviews"][0]["role"] is None, (d["provenance"], d["reviews"])))
+
     # ---------- refusal fixtures, each exactly [id]
+    refuse("scope-id", scoped(new(), scope_id="0" * 64), "review-scope-mismatch", ["notes/snapshots/s.sha256", "0" * 64])
+    refuse("edited-after-approve", scoped(new(), foo_now="# foo stub, edited\n"), "review-snapshot-stale", ["slug foo"])
     fx = new(); fx.entry["Route"] = None
     refuse("no-route", fx, "line-missing", ["Route"])
     fx = new(); fx.entry["Route"] = f"Route: fable-xhigh session={S_D}"
