@@ -186,8 +186,32 @@ def check_scope(L, rv, row, vlines, last, home, resolve):
 
 
 def check_snapshot(L, who, full, digests, last, home):
-    """(placeholder until R5)"""
-    return True
+    """R5: an APPROVE (the slug's last verdict in this file) binds to the manifest's digest
+    of PRD-<slug>.md; the current file is the first of build-queue/, built-prds/, parked/
+    holding it, hashed over raw bytes. FIX and REJECT are not pinned; an absent PRD file is
+    left to state-grammar / review-verdict-mismatch; an unreadable one is never a pass."""
+    ok = True
+    for slug, verdict in last.items():
+        want = digests.get(b"PRD-" + slug.encode() + b".md")
+        if verdict != "APPROVE" or want is None:
+            continue
+        cur = next((os.path.join(home, d, f"PRD-{slug}.md") for d in PRD_DIRS
+                    if os.path.isfile(os.path.join(home, d, f"PRD-{slug}.md"))), None)
+        if cur is None:
+            continue
+        try:
+            with open(cur, "rb") as fh:
+                got = hashlib.sha256(fh.read()).hexdigest()
+        except OSError as e:
+            L.fail("review-snapshot-stale", f"{who}: slug {slug}: {cur} unreadable ({e.strerror}); its APPROVE binds to nothing")
+            ok = False
+            continue
+        if got != want:
+            L.fail("review-snapshot-stale",
+                   f"{who}: slug {slug}: {cur} sha256 {got[:12]} differs from the snapshot's {want[:12]} (scope {full}); "
+                   "the APPROVE was given on other bytes")
+            ok = False
+    return ok
 
 
 def read_text(path):
@@ -665,7 +689,7 @@ def lint_log(a):
             raise Exit2(f"no decisions log at {default_dp} (and no --decisions); cannot check: {', '.join(need)}")
 
     prov = {"route": None, "wwhtbt": None, "fivewhys": None, "adversarial": "self",
-            "reviews": None, "states": "self", "persisted": "none"}
+            "reviews": None, "states": "self", "persisted": "none", "snapshot": None}
 
     # ---- route provenance (R8 a)
     if route:
@@ -787,6 +811,7 @@ def lint_log(a):
     seq = {}
     if review_none and not reviews:
         prov["reviews"] = "none"
+        prov["snapshot"] = "none"
         if reviewed_slugs:
             L.fail("review-self", f"Review: none beside reviewed: state for {', '.join(reviewed_slugs)}")
     elif review_grammar_ok and reviews:
@@ -842,6 +867,13 @@ def lint_log(a):
                 label = check_result(L, rv, resolve(rv["result"]), vlines)
             labels.append(label)
         prov["reviews"] = "checked" if labels and all(x == "checked" for x in labels) else "self"
+        snaps = [rv["snapshot"] for rv in reviews]
+        if all(x == "verified" for x in snaps):
+            prov["snapshot"] = "verified"
+        elif all(x in ("verified", "legacy") for x in snaps):
+            prov["snapshot"] = "legacy"     # reported, never used to pass a failing check
+        else:
+            prov["snapshot"] = "self"
         if files_ok and state_ok:
             for slug, vs in seq.items():
                 want = ["reviewed:" + v for v in vs]
@@ -882,6 +914,8 @@ def lint_log(a):
             prov[k] = "self"
     if prov["reviews"] is None:
         prov["reviews"] = "none"
+    if prov["snapshot"] is None:
+        prov["snapshot"] = "none" if prov["reviews"] == "none" else "self"
 
     def akind(v):
         if v is None:
