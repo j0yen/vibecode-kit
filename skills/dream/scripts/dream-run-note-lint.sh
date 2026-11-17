@@ -8,6 +8,7 @@
 #                          [--prd-dir <dir>] [--decisions <path>]
 #   dream-run-note-lint.sh --matrix <path> --states <slug=value ...> [--json]
 #   dream-run-note-lint.sh --scope-id <manifest>
+#   dream-run-note-lint.sh --edges <edges.jsonl> [--prds <PRD basename ...>] [--json]
 #   dream-run-note-lint.sh --selftest
 #
 # The entry is the last `## <ts>  /dream  vision-...` block (--last, the default) or
@@ -19,6 +20,7 @@
 #             adversarial=<<path> uncovered=<n>|skipped: <r>>          (one line)
 #   Review: <verdict file> reviewer-session=<id> [result=<json>]   (one per reviewer) | Review: none
 #   State: <slug>=<value> ...   (a slug repeats once per state reached, in order)
+#   Mission: <name> edges=<path> [scope=<p>[,<p>...]] [repairs=<path>]   (optional sixth kind)
 # Paths are relative to the PRD home (--prd-dir; default: the log's parent's parent)
 # or absolute.
 #
@@ -48,6 +50,18 @@
 #   review-provenance-missing review-result-mismatch adversarial-missing
 #   adversarial-slug-missing adversarial-family-missing adversarial-case-missing
 #   review-scope-mismatch review-snapshot-stale
+#   mission-grammar mission-edges-missing edge-grammar edge-unexplained edge-unknown-unowned
+#   edge-node-unlisted mission-prd-unlisted
+#
+# Mission (PRD-dream-mission-edge-map): opt-in. A Mission: line names the mission's edge map
+# (notes/missions/<name>.edges.jsonl: a header {mission, outcome, invariants, prds, external,
+# [packet], [single_component]} then one edge per line with id, the eight fields producer
+# consumer command trigger authority effect_id recovery_owner postcondition, status
+# known|external|unknown and, for unknown, an owner). A later entry of the same Task: inherits
+# the tokens it omits and must carry the line while its State: names a member of the mission
+# (live header, every scope= manifest's frozen edges copy, earlier State: slugs). Without a
+# Mission: line anywhere in the log nothing here runs; the JSON carries `mission: null` and
+# `provenance.mission: none`. --edges lints one edges file and reads nothing else.
 #
 # Review scope (PRD-dream-run-record-review-scope): a Review: session's latest launch row
 # for the note's task binds by its `role`: absent = legacy (today's checks only), review =
@@ -103,7 +117,7 @@ FAMILIES = ["Identity and provenance", "Boundary environment", "Evidence interpr
 BYPASS = "Alternative bypasses and ordering"
 COLUMNS = ["invariant", "still-broken implementation", "counterexample",
            "discriminating check", "evidence"]
-KINDS = ["Task", "Route", "Analysis", "Review", "State"]
+KINDS = ["Task", "Route", "Analysis", "Review", "State", "Mission"]   # Mission: optional (edge-map R1)
 HEADER_RE = re.compile(r"^## (\S+)  /dream  vision-")
 # Review scope (R4): the line rule over bytes (the bytes \s class is POSIX [:space:] in
 # the C locale) and the PRD basename the repeat rule counts.
@@ -120,7 +134,8 @@ class Exit2(Exception):
 def usage(msg):
     raise Exit2(msg + " (usage: dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] "
                 "[--json] [--prd-dir <dir>] [--decisions <path>] | --matrix <path> --states "
-                "<slug=value ...> [--json] | --scope-id <manifest> | --selftest)")
+                "<slug=value ...> [--json] | --scope-id <manifest> | --edges <path> [--prds <PRD basename ...>] [--json] "
+                "| --selftest)")
 
 
 class ScopeError(Exception):
@@ -367,6 +382,377 @@ def supersede(entry_lines, reviews, rows, task, governed, rsess, home, resolve):
         return {}
 
 
+# ---------------------------------------------------------------- mission (PRD-dream-mission-edge-map)
+# Opt-in: only an entry carrying a `Mission:` line, or one whose earlier same-Task entry of
+# the log carries one, takes this path; a log with no Mission: line is unchanged.
+EDGE_FIELDS = ("producer", "consumer", "command", "trigger", "authority", "effect_id",
+               "recovery_owner", "postcondition")
+EDGE_STATUS = ("known", "external", "unknown")
+REQUIRED_BY_STATUS = {"known": EDGE_FIELDS, "external": EDGE_FIELDS, "unknown": ()}
+MISSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+MISSION_KEYS = ("edges", "scope", "repairs")
+EDGE_KEYS = ("id", "status", "producer", "consumer")
+
+
+def parse_mission_line(line):
+    """R1 grammar of one `Mission: <name> edges=<p> [scope=<p>[,<p>...]] [repairs=<p>]` line:
+    (name or None, {key: value; scope a list}, [(token, why)])."""
+    toks = line[len("Mission:"):].split()
+    probs, keys, name = [], {}, None
+    if not toks:
+        return None, keys, [("Mission:", "no mission name")]
+    rest = toks
+    k0 = toks[0].split("=", 1)[0]
+    if "=" in toks[0] and k0 in MISSION_KEYS:
+        probs.append((toks[0], "no mission name before the key=value tokens"))
+    else:
+        if MISSION_NAME_RE.fullmatch(toks[0]):
+            name = toks[0]
+        else:
+            probs.append((toks[0], "name outside ^[a-z0-9][a-z0-9._-]*$"))
+        rest = toks[1:]
+    for t in rest:
+        k, eq, v = t.partition("=")
+        if not eq or k not in MISSION_KEYS:
+            probs.append((t, "unknown token (only edges=, scope= and repairs= follow the name)"))
+        elif k in keys:
+            probs.append((t, f"a second {k}= token"))
+        elif not v:
+            probs.append((t, "empty value"))
+        elif k == "scope":
+            items = v.split(",")
+            if not all(items):
+                probs.append((t, "an empty scope= item"))
+            else:
+                keys[k] = items
+        else:
+            keys[k] = v
+    return name, keys, probs
+
+
+def read_edges(path, shown, name=None):
+    """R2 and R3 over one edges file, read once (a linear pass): (header or None, [edge],
+    [(finding id, detail)]). `name` is the Mission: line's name the header must equal (None in
+    --edges mode). Extra keys are tolerated and ignored."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as e:
+        return None, [], [("mission-edges-missing", f"{shown}: absent or unreadable ({e.strerror})")]
+    text = data.decode("utf-8", "replace")
+    if not text.strip():
+        return None, [], [("mission-edges-missing", f"{shown}: empty file")]
+    lines = text.split("\n")
+    try:
+        h = json.loads(lines[0])
+    except ValueError:
+        h = None
+    if not isinstance(h, dict) or any(k in h for k in EDGE_KEYS):
+        return None, [], [("mission-edges-missing", f"{shown}: line 1 is not the header object")]
+    probs = []
+
+    def bad(n, field, why):
+        probs.append(("edge-grammar", f"{shown}: line {n}: field {field}: {why}"))
+
+    def nonempty(v):
+        return isinstance(v, str) and bool(v.strip())
+
+    m = h.get("mission")
+    if not nonempty(m):
+        bad(1, "mission", "absent or empty")
+    elif name is not None and m != name:
+        bad(1, "mission", f"'{m}' is not the Mission: line's name '{name}'")
+    if not nonempty(h.get("outcome")):
+        bad(1, "outcome", "absent or empty")
+    inv = h.get("invariants")
+    if not isinstance(inv, list) or not inv or not all(nonempty(x) for x in inv):
+        bad(1, "invariants", "not a non-empty list of non-empty strings")
+    prds = h.get("prds")
+    if not isinstance(prds, list) or not prds:
+        bad(1, "prds", "not a non-empty list of PRD-<slug>.md basenames")
+        prds = []
+    else:
+        okp = [x for x in prds if isinstance(x, str) and PRD_BASENAME_RE.fullmatch(x.encode())]
+        if len(okp) != len(prds):
+            bad(1, "prds", "a member is not a PRD-<slug>.md basename")
+        if len(set(okp)) != len(okp):
+            bad(1, "prds", "a member repeats")
+        prds = okp
+    ext = h.get("external")
+    names = []
+    if not isinstance(ext, list):
+        bad(1, "external", "absent or not a list")
+        ext = []
+    for i, x in enumerate(ext):
+        if isinstance(x, dict):
+            c = x.get("contract")
+            cs = c if isinstance(c, list) else [c]
+            if not nonempty(x.get("name")) or not cs or not all(nonempty(y) for y in cs):
+                bad(1, "external", f"entry {i + 1} is not {{name, contract: <path> | [<path>...]}}")
+                continue
+            names.append(x["name"])
+        elif nonempty(x):
+            names.append(x)
+        else:
+            bad(1, "external", f"entry {i + 1} is neither a name nor {{name, contract}}")
+    if len(set(names)) != len(names):
+        bad(1, "external", "a name repeats")
+    pk = h.get("packet")
+    if pk is not None and (not isinstance(pk, list) or not all(nonempty(y) and "/" not in y for y in pk)):
+        bad(1, "packet", "not a list of basenames")
+    sc = h.get("single_component")
+    if sc is not None:
+        if not nonempty(sc):
+            bad(1, "single_component", "not a non-empty reason string")
+        elif len(prds) != 1:
+            bad(1, "single_component", f"beside {len(prds)} prds members (admitted with one)")
+    prset, exts = set(prds), set(names)
+    edges, seen, nlines = [], set(), 0
+    for n, ln in enumerate(lines[1:], 2):
+        if not ln.strip():
+            continue
+        nlines += 1
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            e = None
+        if not isinstance(e, dict):
+            bad(n, "(not a JSON object)", "an edge line must be one JSON object")
+            continue
+        eid = e.get("id")
+        if not nonempty(eid):
+            bad(n, "id", "absent or empty")
+            continue
+        if eid in seen:
+            bad(n, "id", f"{eid} repeats an earlier edge id")
+            continue
+        seen.add(eid)
+        st = e.get("status")
+        if st not in EDGE_STATUS:
+            bad(n, "status", f"edge {eid}: {st!r} is not known, external or unknown")
+            continue
+        vals = {}
+        for f in EDGE_FIELDS:
+            v = e.get(f)
+            if v is not None and not isinstance(v, str):
+                bad(n, f, f"edge {eid}: not a string")
+                v = None
+            vals[f] = (v or "").strip()
+        edges.append({"id": eid, "status": st, "line": n, **vals})
+        for f in REQUIRED_BY_STATUS[st]:
+            if not vals[f]:
+                probs.append(("edge-unexplained", f"{shown}: edge {eid}: {f} is empty (status {st})"))
+                break
+            if f in ("producer", "consumer") and vals[f] == "UNKNOWN":
+                probs.append(("edge-unexplained", f"{shown}: edge {eid}: {f} is UNKNOWN (status {st})"))
+                break
+        if st == "external" and not any(vals[f].startswith("external:") for f in ("producer", "consumer")):
+            bad(n, "status", f"edge {eid}: status external without an external:<name> endpoint")
+        if st == "unknown" and not nonempty(e.get("owner")):
+            probs.append(("edge-unknown-unowned", f"{shown}: edge {eid}: status unknown without an owner"))
+        for f in ("producer", "consumer"):
+            v = vals[f]
+            if not v or v == "UNKNOWN" or v in prset or (v.startswith("external:") and v[9:] in exts):
+                continue
+            probs.append(("edge-node-unlisted",
+                          f"{shown}: edge {eid}: {f} {v} is neither a prds member nor a declared external:<name>"))
+    if not nlines:
+        probs.append(("mission-edges-missing", f"{shown}: no edge line after the header"))
+    hd = {"mission": m, "prds": prds, "external": ext, "external_names": names,
+          "packet": pk if isinstance(pk, list) else [], "single_component": sc if nonempty(sc) else None}
+    return hd, edges, probs
+
+
+def edge_counts(edges):
+    c = {"total": len(edges), "known": 0, "external": 0, "unknown": 0}
+    for e in edges:
+        c[e["status"]] += 1
+    return c
+
+
+def entry_task(e):
+    """The Task: id of one log entry (its last Task: line), or None."""
+    t = None
+    for ln in e["lines"]:
+        if ln.startswith("Task:"):
+            m = re.match(r"^Task:\s+(\S+)\s+Consumer:", ln)
+            t = m.group(1) if m else None
+    return t
+
+
+def entry_state_slugs(e):
+    """The slugs of one log entry's last State: line (grammar-valid tokens)."""
+    s = None
+    for ln in e["lines"]:
+        if ln.startswith("State:"):
+            s = ln
+    if s is None:
+        return []
+    out = []
+    for t in s[len("State:"):].split():
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)=(\S+)$", t)
+        if m and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
+def frozen_edges_copy(manifest_full, edges_base):
+    """The edges copy frozen beside a manifest: (copy path, {basename: digest} or None, error
+    detail or None). The manifest's line whose basename is edges_base names a copy in the
+    manifest's own directory, which must hash to the listed digest."""
+    copy = os.path.join(os.path.dirname(manifest_full), edges_base or "")
+    try:
+        _, digests = scope_canon(manifest_full)
+    except ScopeError as e:
+        return copy, None, f"manifest {manifest_full} unreadable or malformed ({e})"
+    want = digests.get((edges_base or "").encode())
+    if not edges_base or want is None:
+        return copy, digests, f"manifest {manifest_full} lists no edges basename {edges_base or '(no edges=)'}"
+    try:
+        with open(copy, "rb") as fh:
+            got = hashlib.sha256(fh.read()).hexdigest()
+    except OSError as e:
+        return copy, digests, f"frozen copy {copy} absent or unreadable ({e.strerror}; manifest {manifest_full})"
+    if got != want:
+        return copy, digests, f"frozen copy {copy} sha256 {got[:12]} differs from manifest {manifest_full}'s {want[:12]}"
+    return copy, digests, None
+
+
+def mission_record(L, entries, ei, task, states, resolve):
+    """Edge-map R1-R5 for entry ei: the Mission: line, its inheritance and continuity across
+    same-Task entries, the edges file and the State slugs. Returns None when neither this
+    entry nor an earlier same-Task entry carries the line, else a dict (`line` False when only
+    the continuity rule applied)."""
+    entry = entries[ei]
+    mls = [ln.rstrip() for ln in entry["lines"] if ln.startswith("Mission:")]
+    earlier = []
+    if task is not None:
+        prev = {}
+        for e in entries[:ei]:
+            if entry_task(e) != task:
+                continue
+            el = [ln.rstrip() for ln in e["lines"] if ln.startswith("Mission:")]
+            if not el:
+                continue
+            nm, toks, _ = parse_mission_line(el[0])
+            eff = dict(prev)
+            for k, v in toks.items():
+                eff[k] = (v, e["ts"])
+            prev = eff
+            earlier.append({"ts": e["ts"], "name": nm, "eff": eff, "slugs": entry_state_slugs(e)})
+    if not mls and not earlier:
+        return None
+    reported = set()
+
+    def miss(detail, key):
+        if key not in reported:
+            reported.add(key)
+            L.fail("mission-edges-missing", detail)
+
+    # continuity set (R1): live headers + frozen copies of every earlier scope= manifest + earlier State slugs
+    cont = set()
+    for x in earlier:
+        ep = x["eff"].get("edges")
+        if ep:
+            hd, _, pr = read_edges(resolve(ep[0]), ep[0])
+            if hd is not None:
+                cont |= set(hd["prds"])
+            elif not mls:
+                for fid, d in pr:
+                    if fid == "mission-edges-missing":
+                        miss(d, resolve(ep[0]))
+        base = os.path.basename(ep[0]) if ep else None
+        for mp in (x["eff"].get("scope") or ([], None))[0]:
+            mfull = resolve(mp)
+            copy, _, err = frozen_edges_copy(mfull, base)
+            if err:
+                miss(f"{copy}: {err} (continuity of entry {x['ts']})", copy)
+                continue
+            hd, _, _ = read_edges(copy, copy)
+            if hd is None:
+                miss(f"{copy}: the frozen edges copy has no header (continuity of entry {x['ts']})", copy)
+                continue
+            cont |= set(hd["prds"])
+        cont |= {f"PRD-{s}.md" for s in x["slugs"]}
+    last = earlier[-1] if earlier else None
+    members = [s for s in states if f"PRD-{s}.md" in cont]
+    rec = {"line": bool(mls), "name": None, "edges": None, "scope": [], "repairs": None, "inherited_from": None,
+           "header": None, "edge_list": [], "earlier": earlier, "cont": cont}
+    if not mls:
+        if members:
+            L.fail("mission-grammar", f"entry {last['ts']} carries 'Mission: {last['name']}'; this entry's State: names "
+                                      f"{', '.join(members)} (a member of that mission) and carries no Mission: line")
+        return rec
+    if len(mls) > 1:
+        L.fail("mission-grammar", f"'Mission:': {len(mls)} Mission: lines in one entry; one is allowed")
+        return rec
+    name, toks, probs = parse_mission_line(mls[0])
+    for t, why in probs:
+        L.fail("mission-grammar", f"token '{t}': {why}")
+    rec["name"] = name
+    if members and last is not None and name != last["name"]:
+        L.fail("mission-grammar", f"entry {last['ts']} carries 'Mission: {last['name']}'; this entry's State: names "
+                                  f"{', '.join(members)} under 'Mission: {name}'")
+    src = []
+    eff = dict(toks)
+    if last is not None:
+        for k in MISSION_KEYS:
+            if k not in eff and k in last["eff"]:
+                eff[k] = last["eff"][k][0]
+                src.append(last["eff"][k][1])
+        pe = last["eff"].get("edges")
+        if "edges" in toks and pe and os.path.normpath(resolve(toks["edges"])) != os.path.normpath(resolve(pe[0])):
+            L.fail("mission-grammar", f"token 'edges={toks['edges']}': entry {pe[1]} names edges={pe[0]}; "
+                                      "one mission keeps one edge map")
+    rec["inherited_from"] = max(src, key=lambda t: [x["ts"] for x in earlier].index(t)) if src else None
+    rec["edges"], rec["scope"], rec["repairs"] = eff.get("edges"), eff.get("scope") or [], eff.get("repairs")
+    if not rec["edges"]:
+        L.fail("mission-grammar", "token 'edges=': absent and none inherited from an earlier same-Task entry")
+        return rec
+    hd, edges, pr = read_edges(resolve(rec["edges"]), rec["edges"], name)
+    for fid, d in pr:
+        L.fail(fid, d)
+    rec["header"], rec["edge_list"] = hd, edges
+    if hd is not None:
+        for s in states:
+            if f"PRD-{s}.md" not in hd["prds"]:
+                L.fail("mission-prd-unlisted", f"slug {s}: PRD-{s}.md is not in the prds of {rec['edges']}")
+    return rec
+
+
+def mission_json(rec):
+    """R5 JSON block (None without a Mission: line in this entry)."""
+    if rec is None or not rec["line"]:
+        return None
+    hd, edges = rec["header"], rec["edge_list"]
+    return {"name": rec["name"], "edges_file": rec["edges"], "scope": list(rec["scope"]), "repairs": rec["repairs"],
+            "inherited_from": rec["inherited_from"], "single_component": hd["single_component"] if hd else None,
+            "prds": len(hd["prds"]) if hd else 0, "edges": edge_counts(edges),
+            "unknown_edges": [e["id"] for e in edges if e["status"] == "unknown"]}
+
+
+def edges_mode(a):
+    """R6 --edges: R2 and R3 (and R4 against --prds) over one file; reads nothing else."""
+    L = Lint()
+    path = a["edges"]
+    hd, edges, pr = read_edges(path, path, None)
+    for fid, d in pr:
+        L.fail(fid, d)
+    if hd is not None:
+        for b in a["prds"] or []:
+            if b not in hd["prds"]:
+                L.fail("mission-prd-unlisted", f"{b} is not in the prds of {path}")
+    c = edge_counts(edges)
+    block = {"name": hd["mission"] if hd else None, "edges_file": path, "scope": [], "repairs": None,
+             "inherited_from": None, "single_component": hd["single_component"] if hd else None,
+             "prds": len(hd["prds"]) if hd else 0, "edges": c,
+             "unknown_edges": [e["id"] for e in edges if e["status"] == "unknown"]}
+    obj = {"ts": None, "task": None, "consumer": None, "exit": 1 if L.findings else 0, "findings": L.ids(),
+           "decisions_malformed": 0, "trust": "same-uid", "route": None, "analysis": None, "adversarial": None,
+           "reviews": None, "states": None, "provenance": None, "mission": block}
+    return L, obj, f"OK edges {path} known={c['known']} external={c['external']} unknown={c['unknown']}"
+
+
 def read_text(path):
     with open(path, encoding="utf-8", errors="replace") as fh:
         return fh.read()
@@ -537,7 +923,8 @@ def lint_section(L, shown, slug, body):
 # ---------------------------------------------------------------- log entry parse
 def parse_args(argv):
     a = {"log": None, "mode": "last", "entry": None, "json": False, "prd_dir": None,
-         "decisions": None, "matrix": None, "states": None, "selftest": False, "scope_id": None}
+         "decisions": None, "matrix": None, "states": None, "selftest": False, "scope_id": None,
+         "edges": None, "prds": None}
     i = 0
     while i < len(argv):
         x = argv[i]
@@ -547,11 +934,11 @@ def parse_args(argv):
             a["mode"] = "last"
         elif x == "--selftest":
             a["selftest"] = True
-        elif x in ("--entry", "--prd-dir", "--decisions", "--matrix", "--scope-id"):
+        elif x in ("--entry", "--prd-dir", "--decisions", "--matrix", "--scope-id", "--edges"):
             if i + 1 >= len(argv):
                 usage(f"{x} needs a value")
             key = {"--entry": "entry", "--prd-dir": "prd_dir", "--decisions": "decisions", "--matrix": "matrix",
-                   "--scope-id": "scope_id"}[x]
+                   "--scope-id": "scope_id", "--edges": "edges"}[x]
             a[key] = argv[i + 1]
             if x == "--entry":
                 a["mode"] = "entry"
@@ -562,6 +949,12 @@ def parse_args(argv):
                 vals.extend(argv[i + 1].split())
                 i += 1
             a["states"] = vals
+        elif x == "--prds":
+            vals = []
+            while i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+                vals.extend(argv[i + 1].split())
+                i += 1
+            a["prds"] = vals
         elif x.startswith("--"):
             usage(f"unknown option {x}")
         elif a["log"] is None:
@@ -734,7 +1127,7 @@ def lint_log(a):
         if k == "Review":
             if not reviews_raw:
                 L.fail("line-missing", "Review")
-        elif k not in lines:
+        elif k not in lines and k != "Mission":     # Mission: is optional (edge-map R1)
             L.fail("line-missing", k)
 
     # Task
@@ -824,6 +1217,11 @@ def lint_log(a):
                        for d in ("build-queue", "built-prds", "parked")):
                 L.fail("state-grammar", f"slug {slug}: no PRD-{slug}.md under {home}/{{build-queue,built-prds,parked}}")
                 state_ok = False
+
+    # ---- mission record (PRD-dream-mission-edge-map): after the State parse, before provenance
+    mrec = None
+    if any(ln.startswith("Mission:") for e in entries[:ei + 1] for ln in e["lines"]):
+        mrec = mission_record(L, entries, ei, task, list(states), resolve)
 
     # ---- ungoverned host: claims only a row can check
     if not governed:
@@ -1093,7 +1491,9 @@ def lint_log(a):
                          **({"superseded": r["superseded"]} if r.get("superseded") else {})) for r in reviews],
         "states": states,
         "provenance": prov,
+        "mission": mission_json(mrec),
     }
+    prov["mission"] = "none" if obj["mission"] is None else "self"
     ok_line = f"OK {entry['ts']}" + (" persisted=shape-only" if prov["persisted"] == "shape-only" else "")
     return L, obj, ok_line
 
@@ -1186,10 +1586,17 @@ def main(argv):
         if a["selftest"]:
             return selftest()
         if a["scope_id"] is not None:
-            if any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "decisions", "matrix", "states", "json")):
+            if any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "decisions", "matrix", "states", "json",
+                                                       "edges", "prds")):
                 usage("--scope-id takes one manifest path and nothing else")
             return scope_id_mode(a["scope_id"])
-        if a["matrix"] is not None or a["states"] is not None:
+        if a["edges"] is not None or a["prds"] is not None:
+            if a["edges"] is None or any(a[k] not in (None, False) for k in
+                                         ("log", "entry", "prd_dir", "decisions", "matrix", "states", "scope_id")):
+                usage("--edges takes one edges file, --prds <PRD basename ...> and --json, without a log, "
+                      "--matrix or --scope-id")
+            L, obj, ok = edges_mode(a)
+        elif a["matrix"] is not None or a["states"] is not None:
             if a["matrix"] is None or a["states"] is None or a["log"] is not None:
                 usage("--matrix and --states go together, without a log")
             L, obj, ok = lint_matrix_mode(a)
@@ -1249,6 +1656,23 @@ def mx_file(slugs, uncovered="- conditional fallback: R3 (owner Hermes)", sectio
     pre = pre if pre is not None else "# Adversarial matrix (selftest)\n\n"
     body = sections if sections is not None else "".join(mx_section(s) for s in slugs)
     return pre + body + between + "## Uncovered\n" + uncovered + "\n"
+
+
+def mission_edges(slugs, mutate=None):
+    """A selftest edges file (edge-map R2): header over PRD-<slug>.md for slugs, one known edge
+    slugs[0] -> slugs[1], one external edge to hermes, one owned unknown edge."""
+    f8 = lambda p, c, x: {"producer": p, "consumer": c, "command": x + " command", "trigger": x + " trigger",
+                          "authority": x + " authority", "effect_id": x + " effect", "recovery_owner": x + " owner",
+                          "postcondition": x + " postcondition"}
+    pr = [f"PRD-{s}.md" for s in slugs]
+    h = {"mission": "selftest", "outcome": "selftest outcome", "invariants": ["one invariant"], "prds": pr,
+         "external": ["hermes"]}
+    es = [dict(id="E1", status="known", **f8(pr[0], pr[-1], "E1")),
+          dict(id="E2", status="external", **f8(pr[-1], "external:hermes", "E2")),
+          dict(id="E3", status="unknown", producer=pr[0], consumer="UNKNOWN", owner="selftest author")]
+    if mutate:
+        mutate(h, es)
+    return "".join(json.dumps(x) + "\n" for x in [h] + es)
 
 
 def row(ts, decision, task, skill, route, model, effort, session, **kw):
@@ -1529,7 +1953,9 @@ def selftest():
         fx.entry["Review"] = [f"Review: notes/reviews/r1.txt reviewer-session={S_R1} result=notes/reviews/r1.json",
                               f"Review: notes/reviews/r2.txt reviewer-session={S_R2} result=notes/reviews/r2.json"]
         fx.entry["State"] = "State: " + " ".join(f"{x}=reviewed:APPROVE {x}=reviewed:APPROVE" for x in slugs)
-        fx.tail = ["Mission: selftest scope=notes/snapshots/m1.sha256,notes/snapshots/m2.sha256"]
+        fx.files["notes/missions/selftest.edges.jsonl"] = mission_edges(["foo", "bar"])
+        fx.tail = ["Mission: selftest edges=notes/missions/selftest.edges.jsonl "
+                   "scope=notes/snapshots/m1.sha256,notes/snapshots/m2.sha256"]
         return fx
     passes("drsp-p1-superseded", chain(new()), lambda d: expect(
         d["provenance"]["snapshot"] == "verified" and d["reviews"][0].get("superseded") == [{"slug": "foo", "by": S_R2}]
@@ -1557,6 +1983,30 @@ def selftest():
     refuse("drsp-kb11-unlisted-x-fix-after-j", fx, "review-snapshot-stale", stale_r1)
     fx = chain(new()); fx.entry["Review"][1] = f"Review: notes/reviews/r2.txt reviewer-session={S_R2}"
     refuse("drsp-kb13-j-no-result", fx, "review-snapshot-stale", stale_r1)
+
+    # mission edge map (PRD-dream-mission-edge-map): one passing fixture, one refusal per new id
+    def edged(fx, mutate=None, state=None):
+        fx.files["notes/missions/selftest.edges.jsonl"] = mission_edges(["foo", "bar"], mutate)
+        fx.entry["Mission"] = "Mission: selftest edges=notes/missions/selftest.edges.jsonl"
+        if state:
+            fx.entry["State"] = state
+        return fx
+    passes("drei-mission", edged(new()), lambda d: expect(
+        d["mission"]["edges"] == {"total": 3, "known": 1, "external": 1, "unknown": 1}
+        and d["mission"]["unknown_edges"] == ["E3"] and d["provenance"]["mission"] == "self", d.get("mission")))
+    fx = edged(new()); fx.entry["Mission"] = "Mission: selftest"
+    refuse("drei-no-edges", fx, "mission-grammar", ["edges="])
+    fx = edged(new()); fx.entry["Mission"] = "Mission: selftest edges=notes/missions/none.edges.jsonl"
+    refuse("drei-absent", fx, "mission-edges-missing", ["none.edges.jsonl"])
+    refuse("drei-bad-status", edged(new(), lambda h, es: es[0].update(status="maybe")), "edge-grammar", ["line 2", "status"])
+    refuse("drei-empty-trigger", edged(new(), lambda h, es: es[0].update(trigger="")), "edge-unexplained", ["edge E1: trigger"])
+    refuse("drei-no-owner", edged(new(), lambda h, es: es[2].pop("owner")), "edge-unknown-unowned", ["edge E3"])
+    refuse("drei-unlisted-consumer", edged(new(), lambda h, es: es[0].update(consumer="PRD-qux.md")),
+           "edge-node-unlisted", ["edge E1", "PRD-qux.md"])
+    fx = edged(new(), state="State: foo=reviewed:APPROVE qux=linted")
+    fx.files["built-prds/PRD-qux.md"] = "# qux stub\n"
+    fx.files[M_REL] = mx_file(["foo", "qux"])
+    refuse("drei-state-outside", fx, "mission-prd-unlisted", ["slug qux"])
 
     # ---------- refusal fixtures, each exactly [id]
     refuse("scope-id", scoped(new(), scope_id="0" * 64), "review-scope-mismatch", ["notes/snapshots/s.sha256", "0" * 64])

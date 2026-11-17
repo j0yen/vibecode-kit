@@ -28,6 +28,7 @@ assert n["provenance"].get("snapshot")=="legacy", ("snapshot", n["provenance"])
 assert n["findings"]==o["findings"] and n["exit"]==o["exit"], (o["findings"], n["findings"])
 for k,v in o["provenance"].items(): assert n["provenance"][k]==v, (k, o["provenance"], n["provenance"])
 assert all(r.get("role") is None and r.get("scope_id") is None for r in n["reviews"]), n["reviews"]
+assert n.pop("mission") is None and n["provenance"].pop("mission") == "none", n   # edge-map R5: added keys, no Mission: line
 del n["provenance"]["snapshot"]
 for r in n["reviews"]:
     del r["role"]; del r["scope_id"]

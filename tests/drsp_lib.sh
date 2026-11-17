@@ -37,10 +37,30 @@ setup() {
   chmod +x "$BASE_LINT"
   W="$T/w"; reset
 }
-# reset: a fresh copy of the P1 fixture
+# reset: a fresh copy of the P1 fixture. Edge-map R1 (PRD-dream-mission-edge-map) refuses a
+# Mission: line without edges= (mission-grammar), so the copy's line gains
+# `edges=notes/missions/drsp-fixture.edges.jsonl`, an edge map over PRD-a/b/c written here
+# (the checked-in fixture stays byte-unchanged; the base lint ignores the token).
+EDGES_REL=notes/missions/drsp-fixture.edges.jsonl
 reset() {
   rm -rf "$W"; mkdir -p "$W"; cp -r "$FIX/." "$W/"
   LOG="$W/home/notes/dream-log.md"; DEC="$W/decisions.jsonl"; H="$W/home"
+  python3 - "$H" "$EDGES_REL" <<'PY2' || fail "edge map for the drsp copy"
+import sys, os, json
+H, rel = sys.argv[1:]
+f8 = lambda p, c, x: {"producer": p, "consumer": c, "command": x + " command", "trigger": x + " trigger",
+                      "authority": x + " authority", "effect_id": x + " effect", "recovery_owner": x + " owner",
+                      "postcondition": x + " postcondition"}
+h = {"mission": "drsp-fixture", "outcome": "drsp outcome", "invariants": ["drsp invariant"],
+     "prds": ["PRD-a.md", "PRD-b.md", "PRD-c.md"], "external": []}
+es = [dict(id="E1", status="known", **f8("PRD-a.md", "PRD-b.md", "E1")), dict(id="E2", status="known", **f8("PRD-b.md", "PRD-c.md", "E2"))]
+os.makedirs(os.path.join(H, os.path.dirname(rel)), exist_ok=True)
+open(os.path.join(H, rel), "w").write("".join(json.dumps(x) + "\n" for x in [h] + es))
+log = os.path.join(H, "notes", "dream-log.md")
+L = open(log, encoding="utf-8").read().split("\n")
+L = [l + " edges=" + rel if l.startswith("Mission:") else l for l in L]
+open(log, "w", encoding="utf-8").write("\n".join(L))
+PY2
 }
 # want <case>: run this case (DRSP_CASES unset, or the case is listed)
 want() { [ -z "${DRSP_CASES:-}" ] && return 0; case " $DRSP_CASES " in *" $1 "*) return 0;; esac; return 1; }
@@ -67,7 +87,7 @@ def setline(prefix, new, n=0):
 def state(*toks):
     setline("State:", "State: " + " ".join(toks))
 def mission(scope):
-    setline("Mission:", "Mission: drsp-fixture scope=" + scope)
+    setline("Mission:", "Mission: drsp-fixture scope=" + scope + " edges=notes/missions/drsp-fixture.edges.jsonl")
 def result(rel, session, text):
     wr(rel, json.dumps({"type": "result", "is_error": False, "session_id": session, "result": text}) + "\n")
 def review(name, session, lines, res=True):
@@ -196,12 +216,31 @@ run1() {
   "$1" "$LOG" --last --prd-dir "$H" --decisions "$DEC" --json >"$T/r/$2.json.out" 2>"$T/r/$2.json.err"; echo $? >"$T/r/$2.json.rc"
 }
 # pair <case>: base and head on the current fixture; sets OUT (head text stdout+stderr),
-# JS (head --json stdout), RC (head rc), SAME (1 when every base/head byte matches)
+# JS (head --json stdout), RC (head rc), SAME (1 when every base/head byte matches, the head
+# JSON read without the `mission` and `provenance.mission` keys edge-map R5 adds to every
+# object, and without `FAIL mission-grammar` lines when $GRAMMAR is 1: a case whose own
+# Mission: line breaks edge-map R1's grammar)
 pair() {
   run1 "$BASE_LINT" "$1.base"; run1 "$LINT" "$1.head"
+  python3 - "$T/r/$1.head" "${GRAMMAR:-0}" <<'PY2' || fail "$1: normalizing the head output"
+import sys, json
+p, g = sys.argv[1], sys.argv[2] == "1"
+for k in ("txt.out", "txt.err", "json.err"):
+    L = open(f"{p}.{k}").read().split("\n")
+    open(f"{p}.{k}.n", "w").write("\n".join(l for l in L if not (g and l.startswith("FAIL mission-grammar: "))))
+t = open(f"{p}.json.out").read()
+if t.strip():
+    d = json.loads(t); d.pop("mission", None); d["provenance"].pop("mission", None)
+    if g:
+        d["findings"] = [x for x in d["findings"] if x != "mission-grammar"]
+    t = json.dumps(d, separators=(",", ":")) + "\n"
+open(f"{p}.json.out.n", "w").write(t)
+for k in ("txt.rc", "json.rc"):
+    open(f"{p}.{k}.n", "w").write(open(f"{p}.{k}").read())
+PY2
   SAME=1
   for k in txt.out txt.err txt.rc json.out json.err json.rc; do
-    cmp -s "$T/r/$1.base.$k" "$T/r/$1.head.$k" || SAME=0
+    cmp -s "$T/r/$1.base.$k" "$T/r/$1.head.$k.n" || SAME=0
   done
   OUT=$(cat "$T/r/$1.head.txt.out" "$T/r/$1.head.txt.err"); JS=$(cat "$T/r/$1.head.json.out"); RC=$(cat "$T/r/$1.head.txt.rc")
   case "$OUT$(cat "$T/r/$1.head.json.err" "$T/r/$1.base.txt.err" "$T/r/$1.base.json.err")" in
@@ -222,6 +261,11 @@ kb() {
   for id in "$@"; do
     printf '%s\n' "$OUT" | grep -q "^FAIL $id: " || fail "$c: no $id finding: $OUT"
   done
+  if [ "${GRAMMAR:-0}" = 1 ]; then
+    printf '%s\n' "$OUT" | grep -q "^FAIL mission-grammar: " || fail "$c: no mission-grammar for its broken Mission: line: $OUT"
+  else
+    printf '%s\n' "$OUT" | grep -q "^FAIL mission-grammar: " && fail "$c: mission-grammar on a valid Mission: line: $OUT"
+  fi
   case "$JS" in *'"superseded"'*) fail "$c: a superseded key on a refused note: $JS";; esac
   echo "ok $c: base==head bytes, rc=1, review-snapshot-stale K/a${*:+, $*}"
 }

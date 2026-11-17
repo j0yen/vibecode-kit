@@ -10,8 +10,11 @@ set -uo pipefail
 setup
 for c in KB5-no-mission KB5-no-scope KB5-two-mission KB5-empty-item KB7 KB8 KB10-unreadable KB10-malformed; do
   want "$c" || continue
+  # edge-map R1: no edges= (KB5-no-scope), a second Mission: line, an empty scope= item are mission-grammar
+  case "$c" in KB5-no-scope|KB5-two-mission|KB5-empty-item) GRAMMAR=1;; *) GRAMMAR=0;; esac
   mut "$c"; kb "$c"
 done
+GRAMMAR=0
 if want KB10-unreadable || want KB10-malformed; then
   for c in KB10-unreadable KB10-malformed; do
     [ -f "$T/r/$c.head.json.out" ] || continue
