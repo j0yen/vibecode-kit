@@ -3,8 +3,9 @@
 # naming an absent, empty, unreadable or header-only file, a file whose first line is not a
 # header, or (two-entry note) entry 1's frozen edges copy altered or removed is exit 1
 # mission-edges-missing naming the path, never exit 0 or a traceback; a non-JSON line, a
-# repeated id, a status outside the three, a header mission unlike the line's name, or an
-# empty outcome, invariants or prds is edge-grammar naming the line and the field.
+# repeated id, a status outside the three, a header mission unlike the line's name, an
+# empty outcome, invariants or prds, or single_component beside more than one prds member (R2:
+# admitted only with one; review L9) is edge-grammar naming the line and the field.
 set -uo pipefail
 # shellcheck source=tests/drei_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drei_lib.sh"
@@ -48,4 +49,6 @@ reset_ei; header "h['mission'] = 'another-mission'"; gram header-mission 1 missi
 reset_ei; header "h['outcome'] = ''"; gram empty-outcome 1 outcome exact
 reset_ei; header "h['invariants'] = []"; gram empty-invariants 1 invariants exact
 reset_ei; header "h['prds'] = []"; gram empty-prds 1 prds
-pass "mission-edges-missing x7 from /, edge-grammar x7"
+reset_ei; header "h['single_component'] = 'one component, two prds'"; gram single-component-two-prds 1 single_component exact
+has_fail edge-grammar "beside 2 prds members"
+pass "mission-edges-missing x7 from /, edge-grammar x8"
