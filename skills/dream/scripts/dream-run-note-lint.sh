@@ -52,6 +52,9 @@
 #   review-scope-mismatch review-snapshot-stale
 #   mission-grammar mission-edges-missing edge-grammar edge-unexplained edge-unknown-unowned
 #   edge-node-unlisted mission-prd-unlisted
+#   mission-scope-mismatch mission-scope-incomplete mission-review-missing
+#   mission-verdict-missing mission-finding-incomplete mission-snapshot-stale
+#   mission-approval-blocked
 #
 # Mission (PRD-dream-mission-edge-map): opt-in. A Mission: line names the mission's edge map
 # (notes/missions/<name>.edges.jsonl: a header {mission, outcome, invariants, prds, external,
@@ -72,12 +75,17 @@
 # de-duplicated, newline-terminated, under the shared line rule; --scope-id prints its
 # sha256 (exit 0) or the review-scope-mismatch detail (exit 1) and reads nothing else.
 #
-# Superseded pins (gate fix, A1723 prerequisite): on an entry with one `Mission:` line
-# carrying one `scope=<manifest>[,<manifest>...]` token, a listed (chain) review's stale
-# APPROVE pin on a slug is not checked, and is named in its `reviews[].superseded`, only when
-# the latest-launched bound review of the task is a later listed review of another session
-# that APPROVEs the slug's current bytes, is result-bound and carries one
-# `mission=APPROVE <session>` line. Otherwise the pin is checked as before; never a new finding.
+# Mission chain review (PRD-dream-mission-chain-review): only on a Mission: line carrying
+# scope=<manifest>[,<manifest>...] (freeze order). Each manifest must canonicalize, hold its
+# own frozen edges copy, matrix and every member its frozen header names (R1); each needs a
+# bound review row whose session has a Review: line, in manifest then launch order (R2); a
+# chain review's file and result= capture carry one `mission=<VERDICT> <own session>` line and
+# a `findings=<sha256|none>` line binding <file>.findings.jsonl (R3, R4). Only the latest chain
+# review naming a slug pins it; earlier APPROVEs are named in reviews[].superseded (R5); under
+# mission=APPROVE every packet file must still match its manifest digest. A member reaching
+# `eligible` while it is dependent (unknown edge, a finding of the last chain review or its
+# one-hop consumers, a non-APPROVE or absent per-PRD verdict, no mission scope) is
+# mission-approval-blocked (R6).
 #
 # Env seams: SKILL_ROUTING_DECISIONS (default decisions path, as fable-launch.sh),
 #   ANALYSIS_WIKI_DIR (gated wiki root for reused pages; default ~/Notes/wiki, whose
@@ -235,151 +243,6 @@ def check_snapshot(L, who, full, digests, last, home):
                    "the APPROVE was given on other bytes")
             ok = False
     return ok
-
-
-def mission_scope(lines):
-    """Gate fix G1: the items of the entry's one `Mission:` line's one `scope=<p1>[,<p2>...]`
-    token, or None (rule inactive): zero or several Mission: lines, no or several scope=
-    tokens, an empty item. Nothing else on the line is read."""
-    ms = [ln for ln in lines if ln.startswith("Mission:")]
-    if len(ms) != 1:
-        return None
-    toks = [t for t in ms[0].split() if t.startswith("scope=")]
-    if len(toks) != 1:
-        return None
-    items = toks[0][len("scope="):].split(",")
-    return items if all(items) else None
-
-
-def supersede(entry_lines, reviews, rows, task, governed, rsess, home, resolve):
-    """Gate fix G1-G6 (A1723 prerequisite): {Review line index K: {slug: J session}} for each
-    chain review K whose stale APPROVE pin on a slug the latest-launched chain review J
-    re-approved on the slug's current bytes. Pure reads, finding-free (borrowed checks run
-    on a scratch Lint), never raises: an exception makes its condition false. {} when the
-    rule is inactive. The bound-review test repeats the reviews loop's own (rrow)."""
-    try:
-        items = mission_scope(entry_lines)
-        if items is None or not governed or task is None:
-            return {}
-        try:
-            ids = [scope_canon(resolve(p))[0] for p in items]           # G2
-        except (ScopeError, OSError):
-            return {}
-
-        def launch(r):
-            return r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("task_id") == task
-
-        def ts(r):
-            t = r.get("ts")
-            return parse_iso(t) if isinstance(t, str) else None
-
-        def chain(row):                                                   # G3
-            return any(row.get("scope_id") == x for x in ids)
-
-        def pins(row):
-            """{basename: digest} of the row's manifest when it canonicalizes to the row's scope_id."""
-            scope, sid = row.get("scope"), row.get("scope_id")
-            if not isinstance(scope, str) or not isinstance(sid, str):
-                return None
-            got, digests = scope_canon(resolve(scope))
-            return digests if got == sid else None
-
-        def current(slug):
-            cur = next((os.path.join(home, d, f"PRD-{slug}.md") for d in PRD_DIRS
-                        if os.path.isfile(os.path.join(home, d, f"PRD-{slug}.md"))), None)
-            if cur is None:
-                return None
-            with open(cur, "rb") as fh:
-                return hashlib.sha256(fh.read()).hexdigest()
-
-        bound, files = {}, {}       # index -> (rv, row); index -> (verdict path, vlines, last)
-        for i, rv in enumerate(reviews):
-            if rv["session"] == "none" or (rsess is not None and rv["session"] == rsess):
-                continue
-            m4 = [r for r in rows if r.get("session") == rv["session"] and launch(r)]
-            if not m4:
-                continue
-            role_review = m4[-1].get("role") == "review"
-            if not role_review:
-                continue
-            bound[i] = (rv, m4[-1])
-            try:
-                full = resolve(rv["file"])
-                if os.path.isfile(full) and os.access(full, os.R_OK):
-                    vlines = [v for v in (verdict_of(x) for x in read_text(full).split("\n")) if v]
-                    last = {}
-                    for slug, verdict, _ in vlines:
-                        last.pop(slug, None)
-                        last[slug] = verdict
-                    files[i] = (full, vlines, last)
-            except Exception:
-                pass
-        jof = {}                    # G5: slug -> greatest bound index whose readable file names it
-        for i in sorted(files):
-            for slug in files[i][2]:
-                jof[slug] = i
-
-        def by(k, s):
-            """G6 for K = Review line k and slug s: J's session, or None (the pin stays)."""
-            krv, krow = bound[k]
-            prd = b"PRD-" + s.encode() + b".md"
-            if not (chain(krow) and files[k][2].get(s) == "APPROVE"):                # G6.1
-                return None
-            cur = current(s)
-            kpins = pins(krow)
-            if not (kpins is not None and cur is not None and kpins.get(prd) not in (None, cur)):  # G6.2
-                return None
-            j = jof.get(s)
-            if j is None:                                                          # G6.3 J(s) exists
-                return None
-            jrv, jrow = bound[j]
-            if not chain(jrow):                                                    # G6.3 J(s) listed
-                return None
-            if not j > k:                                                          # G6.3 index
-                return None
-            if jrv["session"] == krv["session"]:                                   # G6.3 session
-                return None
-            if not files[j][2].get(s) == "APPROVE":                                # G6.4
-                return None
-            kt, jt = ts(krow), ts(jrow)
-            if not (kt is not None and jt is not None and jt > kt):               # G6.5
-                return None
-            if not (jt is not None and all(ts(r) is not None and ts(r) < jt for r in rows if launch(r)
-                                           and r.get("role") != "author" and r.get("session") != jrv["session"])):  # G6.6
-                return None
-            if any(launch(r) and r.get("role") == "author" and r.get("session") == jrv["session"] for r in rows):  # G6.7
-                return None
-            jpins = pins(jrow)
-            if not (jpins is not None and cur is not None and jpins.get(prd) == cur):  # G6.8
-                return None
-            scratch = Lint()
-            if not (jrv["result"] and check_result(scratch, jrv, resolve(jrv["result"]), files[j][1]) == "checked"
-                    and not scratch.findings):                                     # G6.9
-                return None
-            want = f"mission=APPROVE {jrv['session']}"
-            fm = [t for t in (norm_line(x) for x in read_text(files[j][0]).split("\n")) if t.startswith("mission=")]
-            if not (len(fm) == 1 and fm[0] == want):                               # G6.10 file
-                return None
-            res = str(json.loads(read_text(resolve(jrv["result"])))["result"])
-            rm = [t for t in (" ".join(norm_line(x).split()) for x in res.split("\n")) if t.startswith("mission=")]
-            if not (len(rm) == 1 and rm[0] == want):                               # G6.10 result
-                return None
-            return jrv["session"]
-
-        out = {}
-        for k in bound:
-            if k not in files:
-                continue
-            for s in files[k][2]:
-                try:
-                    j = by(k, s)
-                except Exception:
-                    j = None
-                if j is not None:
-                    out.setdefault(k, {})[s] = j
-        return out
-    except Exception:
-        return {}
 
 
 # ---------------------------------------------------------------- mission (PRD-dream-mission-edge-map)
@@ -650,8 +513,9 @@ def mission_record(L, entries, ei, task, states, resolve):
             L.fail("mission-edges-missing", detail)
 
     # continuity set (R1): live headers + frozen copies of every earlier scope= manifest + earlier State slugs
-    cont = set()
+    cont, by_name = set(), {}
     for x in earlier:
+        before = set(cont)
         ep = x["eff"].get("edges")
         if ep:
             hd, _, pr = read_edges(resolve(ep[0]), ep[0])
@@ -674,6 +538,10 @@ def mission_record(L, entries, ei, task, states, resolve):
                 continue
             cont |= set(hd["prds"])
         cont |= {f"PRD-{s}.md" for s in x["slugs"]}
+        by_name.setdefault(x["name"], set()).update(cont - before, {f"PRD-{s}.md" for s in x["slugs"]})
+        if ep:
+            hd0, _, _ = read_edges(resolve(ep[0]), ep[0])
+            by_name[x["name"]].update(hd0["prds"] if hd0 else [])
     last = earlier[-1] if earlier else None
     members = [s for s in states if f"PRD-{s}.md" in cont]
     rec = {"line": bool(mls), "name": None, "edges": None, "scope": [], "repairs": None, "inherited_from": None,
@@ -704,6 +572,12 @@ def mission_record(L, entries, ei, task, states, resolve):
         if "edges" in toks and pe and os.path.normpath(resolve(toks["edges"])) != os.path.normpath(resolve(pe[0])):
             L.fail("mission-grammar", f"token 'edges={toks['edges']}': entry {pe[1]} names edges={pe[0]}; "
                                       "one mission keeps one edge map")
+        ps = last["eff"].get("scope")
+        if "scope" in toks and ps and [os.path.normpath(resolve(x)) for x in toks["scope"][:len(ps[0])]] != \
+                [os.path.normpath(resolve(x)) for x in ps[0]]:
+            L.fail("mission-grammar", f"token 'scope={','.join(toks['scope'])}': does not begin with the scope= list "
+                                      f"entry {last['ts']} carries or inherits ({','.join(ps[0])}); a later entry "
+                                      "extends the list, never shortens or reorders it")
     rec["inherited_from"] = max(src, key=lambda t: [x["ts"] for x in earlier].index(t)) if src else None
     rec["edges"], rec["scope"], rec["repairs"] = eff.get("edges"), eff.get("scope") or [], eff.get("repairs")
     if not rec["edges"]:
@@ -713,6 +587,9 @@ def mission_record(L, entries, ei, task, states, resolve):
     for fid, d in pr:
         L.fail(fid, d)
     rec["header"], rec["edge_list"] = hd, edges
+    if hd is not None and hd["single_component"] and len(by_name.get(name, set())) > 1:
+        L.fail("edge-grammar", f"{rec['edges']}: line 1: field single_component: an earlier entry of this Task "
+                               f"carries Mission: {name} with {len(by_name[name])} prds members")
     if hd is not None:
         for s in states:
             if f"PRD-{s}.md" not in hd["prds"]:
@@ -751,6 +628,423 @@ def edges_mode(a):
            "decisions_malformed": 0, "trust": "same-uid", "route": None, "analysis": None, "adversarial": None,
            "reviews": None, "states": None, "provenance": None, "mission": block}
     return L, obj, f"OK edges {path} known={c['known']} external={c['external']} unknown={c['unknown']}"
+
+
+# ---------------------------------------------------------------- mission (PRD-dream-mission-chain-review)
+FINDING_CLASSES = ("provenance", "missing-producer-runner", "authority-bypass", "unreachable-transition",
+                   "semantic-incompatibility", "false-green-acceptance")
+MISSION_LINE_RE = re.compile(r"^mission=(APPROVE|FIX|REJECT)\s+(\S+)\s*$")
+FINDINGS_LINE_RE = re.compile(r"^findings=(none|[0-9a-f]{64})\s*$")
+# R3: a chain review launched before this time whose capture carries no findings= line is
+# reported sidecar_bound false, not refused; a findings= line present is compared whatever
+# the launch time. Set by the installing commit (A1723), the way KINDS is versioned.
+SIDECAR_BINDING_SINCE = "2026-11-16T20:00:00-08:00"
+MISSION_IDS = ("mission-grammar", "mission-edges-missing", "edge-grammar", "edge-unexplained",
+               "edge-unknown-unowned", "edge-node-unlisted", "mission-prd-unlisted",
+               "mission-scope-mismatch", "mission-scope-incomplete", "mission-review-missing",
+               "mission-verdict-missing", "mission-finding-incomplete", "mission-snapshot-stale",
+               "mission-approval-blocked")
+
+
+def launch_ts(row):
+    t = row.get("ts")
+    return parse_iso(t) if isinstance(t, str) else None
+
+
+def file_sha(path):
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def first_holder(home, dirs, base):
+    return next((os.path.join(home, d, base) for d in dirs if os.path.isfile(os.path.join(home, d, base))), None)
+
+
+def bind_reviews(reviews, rows, task, governed, rsess, resolve):
+    """The base loop's bound reviews (rrow = m4[-1] with role review), computed once before it,
+    with each readable verdict file's verdict lines and last verdict per slug. Pure reads."""
+    out = []
+    if not governed or task is None:
+        return out
+    for i, rv in enumerate(reviews):
+        if rv["session"] == "none" or (rsess is not None and rv["session"] == rsess):
+            continue
+        m4 = [r for r in rows if r.get("session") == rv["session"] and r.get("decision") == "launch"
+              and r.get("skill") == "dream" and r.get("task_id") == task]
+        if not m4 or m4[-1].get("role") != "review":
+            continue
+        full = resolve(rv["file"])
+        vlines, last, text = [], {}, None
+        if os.path.isfile(full) and os.access(full, os.R_OK):
+            text = read_text(full)
+            vlines = [v for v in (verdict_of(x) for x in text.split("\n")) if v]
+            for slug, verdict, _ in vlines:
+                last.pop(slug, None)
+                last[slug] = verdict
+        out.append({"i": i, "rv": rv, "row": m4[-1], "full": full, "text": text, "vlines": vlines, "last": last})
+    return out
+
+
+def mission_scopes(L, mrec, resolve):
+    """R1 canonicalization of every listed manifest: [{path, full, id, digests}] (id None when
+    unreadable or malformed, reported mission-scope-mismatch)."""
+    mans = []
+    for p in mrec["scope"]:
+        full = resolve(p)
+        try:
+            sid, digests = scope_canon(full)
+        except ScopeError as e:
+            L.fail("mission-scope-mismatch", f"manifest {p}: {e}")
+            sid, digests = None, {}
+        mans.append({"path": p, "full": full, "id": sid,
+                     "names": {k.decode("utf-8", "backslashreplace"): v for k, v in digests.items()},
+                     "frozen": None, "frozen_edges": []})
+    return mans
+
+
+def chain_of(bound, mans):
+    """R2: the bound reviews whose row scope_id equals a listed mission scope id, in Review:
+    line order, each with the first listed index it matched."""
+    ids = [m["id"] for m in mans]
+    out = []
+    for b in bound:
+        sid = b["row"].get("scope_id")
+        if isinstance(sid, str) and sid in ids:
+            out.append(dict(b, idx=ids.index(sid)))
+    return out
+
+
+def superseded_pins(chain, home, resolve):
+    """R5 (A01): on a note whose Mission: line carries scope=, PR #9's per-review pin applies to
+    a slug only in the latest chain review (Review: line order) whose file names it. Returns
+    ({Review line index: set of slugs not pinned}, {Review line index: {slug: superseding
+    session}} for the APPROVE pins that would have been stale)."""
+    skip, report = {}, {}
+    for p, k in enumerate(chain):
+        for s, v in k["last"].items():
+            later = [j for j in chain[p + 1:] if s in j["last"]]
+            if not later:
+                continue
+            skip.setdefault(k["i"], set()).add(s)
+            if v != "APPROVE":
+                continue
+            scope = k["row"].get("scope")
+            try:
+                _, dg = scope_canon(resolve(scope)) if isinstance(scope, str) else (None, {})
+            except ScopeError:
+                dg = {}
+            want = dg.get(b"PRD-" + s.encode() + b".md")
+            cur = first_holder(home, PRD_DIRS, f"PRD-{s}.md")
+            got = file_sha(cur) if cur else None
+            if want is not None and got is not None and got != want:
+                report.setdefault(k["i"], {})[s] = later[-1]["rv"]["session"]
+    return skip, report
+
+
+def header_contracts(hd):
+    """(name, contract path) pairs of an edges header's external entries."""
+    out = []
+    for x in hd["external"]:
+        if isinstance(x, dict):
+            c = x.get("contract")
+            for y in (c if isinstance(c, list) else [c]):
+                if isinstance(y, str) and y.strip():
+                    out.append((x.get("name"), y))
+    return out
+
+
+def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, reviews, home, resolve):
+    """PRD-dream-mission-chain-review R1-R4, R5 (mission pin), R6 and the R8 JSON fields for
+    an entry whose Mission: line carries (or inherits) scope=. Returns the mission JSON fields
+    and the dependent map {PRD basename: [reasons]}."""
+    hd = mrec["header"]
+    eb = os.path.basename(mrec["edges"]) if mrec["edges"] else None
+    mxb = os.path.basename(adv[1]) if adv and adv[0] == "matrix" else None
+    last = len(mans) - 1
+    seen = set()
+
+    def once(fid, detail):
+        if detail not in seen:
+            seen.add(detail)
+            L.fail(fid, detail)
+
+    # R1 per manifest: its frozen edges copy, completeness against that header (the last also
+    # against the live header) and contract basenames
+    for k, m in enumerate(mans):
+        if m["id"] is None:
+            continue
+        copy, _, err = frozen_edges_copy(m["full"], eb)
+        if err:
+            once("mission-scope-mismatch", f"manifest {m['path']}: {err}")
+        else:
+            fh, fe, _ = read_edges(copy, copy)
+            if fh is None:
+                once("mission-scope-mismatch", f"manifest {m['path']}: frozen edges copy {copy} has no header")
+            m["frozen"], m["frozen_edges"] = fh, fe
+        heads = ([("frozen", m["frozen"])] if m["frozen"] else []) + ([("live", hd)] if k == last and hd else [])
+        for label, h in heads:
+            cons = header_contracts(h)
+            byb = {}
+            for nm, cp in cons:
+                byb.setdefault(os.path.basename(cp), []).append(cp)
+            for b, cps in byb.items():
+                if len(set(cps)) > 1:
+                    once("mission-scope-mismatch", f"manifest {m['path']}: {label} edges header: contract paths "
+                                                   f"{' and '.join(sorted(set(cps)))} share the basename {b}")
+                if b in h["prds"] or b in h["packet"]:
+                    once("mission-scope-mismatch", f"manifest {m['path']}: {label} edges header: contract path "
+                                                   f"{cps[0]} and the member {b} share the basename {b}")
+            need = [(b, "prds member") for b in h["prds"]] + [(b, "packet member") for b in h["packet"]]
+            need += ([(mxb, "matrix")] if mxb else []) + ([(eb, "edges file")] if eb else [])
+            need += [(os.path.basename(cp), f"external {nm} contract copy") for nm, cp in cons]
+            for b, kind in need:
+                if b not in m["names"]:
+                    once("mission-scope-incomplete", f"manifest {m['path']}: lists no {b} ({kind} of the {label} edges header)")
+    ids = [m["id"] for m in mans]
+    # R2: binding, line order against manifest index, launch order within one index
+    if not chain and governed and task is not None:
+        vals = sorted({str(r.get("scope_id")) for r in rows if r.get("decision") == "launch" and r.get("skill") == "dream"
+                       and r.get("task_id") == task and r.get("role") == "review"})
+        L.fail("mission-review-missing", f"no Review: line binds to a listed mission scope id (listed "
+                                         f"{', '.join(str(x) for x in ids)}; reviewer rows' scope_id {', '.join(vals) or 'none'})")
+    order_ok = True
+    for p in range(1, len(chain)):
+        a, b = chain[p - 1], chain[p]
+        if b["idx"] < a["idx"]:
+            order_ok = False
+            L.fail("mission-review-missing", f"{b['rv']['file']}: bound to manifest {b['idx'] + 1} ({mans[b['idx']]['path']}) "
+                                             f"but listed after {a['rv']['file']}, bound to manifest {a['idx'] + 1}")
+        elif b["idx"] == a["idx"]:
+            ta, tb = launch_ts(a["row"]), launch_ts(b["row"])
+            if ta is None or tb is None or tb < ta:
+                order_ok = False
+                L.fail("mission-review-missing", f"{a['rv']['file']} (launched {a['row'].get('ts')}) is listed before "
+                                                 f"{b['rv']['file']} (launched {b['row'].get('ts')}) on manifest {a['idx'] + 1}; "
+                                                 "chain reviews of one manifest are listed in launch order")
+    # R3 verdict lines and the sidecar binding; R4 the findings sidecar
+    since = parse_iso(SIDECAR_BINDING_SINCE)
+    ids_seen = {}
+    for c in chain:
+        f, res = c["rv"]["file"], c["rv"]["result"]
+        c["verdict"], c["findings"], c["advisory"], c["sidecar_bound"] = None, [], [], False
+        fl = [norm_line(x) for x in (c["text"] or "").split("\n")]
+        ml = [" ".join(t.split()) for t in fl if t.startswith("mission=")]
+        mm = MISSION_LINE_RE.fullmatch(ml[0]) if len(ml) == 1 else None
+        fv = mm.group(1) if mm and mm.group(2) == c["rv"]["session"] else None
+        if fv is None:
+            L.fail("mission-verdict-missing", f"{f}: {len(ml)} mission= line(s); exactly one 'mission=<APPROVE|FIX|REJECT> "
+                                              f"{c['rv']['session']}' is required")
+        cap = None
+        if not res:
+            L.fail("mission-verdict-missing", f"{f}: no result= capture on its Review: line")
+        else:
+            try:
+                d = json.loads(read_text(resolve(res)))
+                cap = str(d["result"]) if isinstance(d, dict) and "result" in d else None
+            except (OSError, ValueError):
+                cap = None
+            if cap is None:
+                L.fail("mission-verdict-missing", f"{f}: result {res} unreadable or holds no result text")
+        rl = [" ".join(norm_line(x).split()) for x in cap.split("\n")] if cap is not None else []
+        if mm and mm.group(2) == c["rv"]["session"] and cap is not None:
+            rm = [t for t in rl if t.startswith("mission=")]
+            if rm != [ml[0]]:
+                L.fail("mission-verdict-missing", f"{f}: result {res} carries {rm or 'no mission= line'}, the file '{ml[0]}'")
+            else:
+                c["verdict"] = mm.group(1)
+        sc = f + ".findings.jsonl"
+        scfull = resolve(c["rv"]["file"]) + ".findings.jsonl"
+        try:
+            with open(scfull, "rb") as fh:
+                sbytes = fh.read()
+        except OSError:
+            sbytes = None
+        fx = [t for t in rl if t.startswith("findings=")]
+        read = sbytes
+        if not fx:
+            lt = launch_ts(c["row"])
+            if not (lt is not None and since is not None and lt < since):
+                L.fail("mission-finding-incomplete", f"{f}: result {res or '(no result=)'}: no findings= line "
+                                                     f"(launched {c['row'].get('ts')}, not before {SIDECAR_BINDING_SINCE})")
+        elif len(fx) > 1 or not FINDINGS_LINE_RE.fullmatch(fx[0]):
+            L.fail("mission-finding-incomplete", f"{f}: result {res}: {len(fx)} findings= line(s); exactly one "
+                                                 "'findings=<none|sha256>' is required")
+        else:
+            want = fx[0][len("findings="):].strip()
+            got = "none" if sbytes is None else hashlib.sha256(sbytes).hexdigest()
+            if want == got:
+                c["sidecar_bound"] = True
+            else:
+                read = None          # a sidecar that differs from a carried digest is read by nothing
+                L.fail("mission-finding-incomplete", f"{f}: result {res}: findings={want} but the sidecar {sc} is "
+                                                     f"{'absent' if sbytes is None else 'sha256 ' + got}")
+        rows_sc = []
+        if read is not None:
+            for n, ln in enumerate(read.decode("utf-8", "replace").split("\n"), 1):
+                if ln.strip():
+                    try:
+                        rows_sc.append((n, json.loads(ln)))
+                    except ValueError:
+                        rows_sc.append((n, None))
+        if fv in ("FIX", "REJECT") and not rows_sc and (read is not None or sbytes is None):
+            L.fail("mission-finding-incomplete", f"{sc}: absent, unreadable or empty under mission={fv}")
+        fh = mans[c["idx"]]["frozen"] or hd
+        prset = set(fh["prds"]) if fh else set()
+        exts = set(fh["external_names"]) if fh else set()
+        mine = set()
+        for n, r in rows_sc:
+            def bad(field, why, n=n):
+                L.fail("mission-finding-incomplete", f"{sc}: row {n}: field {field}: {why}")
+            if not isinstance(r, dict):
+                bad("(not a JSON object)", "each sidecar row is one JSON object")
+                continue
+            ok = True
+            adv_row = "accepts" in r
+            rid = r.get("id")
+            if not isinstance(rid, str) or not rid.strip():
+                bad("id", "absent or empty")
+                ok = False
+            elif rid in mine:
+                bad("id", f"{rid} repeats in this sidecar")
+                ok = False
+            else:
+                mine.add(rid)
+                if rid in ids_seen:
+                    L.fail("mission-finding-incomplete", f"finding id {rid} in {ids_seen[rid]} and {sc}: an id names its "
+                                                         "issuing review; a re-raised finding takes a new id")
+                    ok = False
+            cls = r.get("class")
+            if cls not in FINDING_CLASSES:
+                bad("class", f"{cls!r} is not one of {', '.join(FINDING_CLASSES)}")
+                ok = False
+            elif adv_row and cls != "provenance":
+                bad("class", "an advisory accepts row is class provenance")
+                ok = False
+            for k in ("counterexample", "correction", "control"):
+                if not (isinstance(r.get(k), str) and r[k].strip()):
+                    bad(k, "absent or empty")
+                    ok = False
+            pr, co = r.get("prds"), r.get("consumers")
+            if not isinstance(pr, list) or (not adv_row and not pr) or not all(x in prset for x in pr):
+                bad("prds", "not a non-empty list of mission prds members" if not adv_row else "not a list of mission prds members")
+                ok = False
+            if (not isinstance(co, list) or not all(x in prset or (isinstance(x, str) and x.startswith("external:")
+                                                                    and x[9:] in exts) for x in co)
+                    or (not co and not adv_row and cls != "provenance")):
+                bad("consumers", "not a list of prds members or declared external:<name> (empty only for class provenance)")
+                ok = False
+            if adv_row:
+                ac = r.get("accepts")
+                if not isinstance(ac, list) or not ac or not all(isinstance(x, str) and x.strip() for x in ac):
+                    bad("accepts", "not a non-empty list of finding ids")
+                    ok = False
+            if isinstance(rid, str) and rid.strip() and rid not in ids_seen:
+                ids_seen[rid] = sc
+            if ok:
+                (c["advisory"] if adv_row else c["findings"]).append(r)
+    # the mission verdict: the last chain review, in line (launch) order, of the last listed manifest
+    vr = None
+    if order_ok and chain and chain[-1]["idx"] == last:
+        vr = chain[-1]
+    verdict = vr["verdict"] if vr else None
+    # R5: the whole packet pinned on mission=APPROVE
+    if verdict == "APPROVE":
+        names = mans[vr["idx"]]["names"]
+        files = []
+        for b in (hd["prds"] if hd else []):
+            files.append((b, first_holder(home, PRD_DIRS, b), True))
+        for tok in ("edges", "repairs"):
+            if mrec[tok]:
+                files.append((os.path.basename(mrec[tok]), resolve(mrec[tok]), True))
+        if mxb:
+            files.append((mxb, resolve(adv[1]), True))
+        for b in (hd["packet"] if hd else []):
+            hold_ = first_holder(home, ("visions", os.path.join("notes", "missions"), os.path.join("notes", "reviews")), b)
+            if hold_:
+                files.append((b, hold_, False))
+        for b, path, _ in files:
+            want = names.get(b)
+            got = file_sha(path) if path else None
+            if got is None:
+                L.fail("mission-snapshot-stale", f"{b}: absent or unreadable (manifest {mans[vr['idx']]['path']} "
+                                                 f"digest {want or 'none'})")
+            elif want is None:
+                L.fail("mission-snapshot-stale", f"{b}: current {got}; manifest {mans[vr['idx']]['path']} lists no digest")
+            elif got != want:
+                L.fail("mission-snapshot-stale", f"{b}: current {got} differs from manifest {mans[vr['idx']]['path']}'s {want}")
+    # R8: unlisted review sessions (a report), the latest-launched of the last manifest (R6)
+    named = {rv["session"] for rv in reviews}
+    rrows = [r for r in rows or [] if r.get("decision") == "launch" and r.get("skill") == "dream"
+             and r.get("task_id") == task and r.get("role") == "review"] if governed else []
+    unlisted = [{"session": r.get("session"), "scope_index": ids.index(r.get("scope_id")),
+                 "launch_ts": r.get("ts")} for r in rrows
+                if r.get("scope_id") in ids and r.get("scope_id") is not None and r.get("session") not in named]
+    lrows = [r for r in rrows if ids and ids[-1] is not None and r.get("scope_id") == ids[-1]]
+    latest = None
+    if lrows:
+        unparsed = [r for r in lrows if launch_ts(r) is None]
+        latest = unparsed[-1] if unparsed else max(lrows, key=launch_ts)
+    # R6: the dependent set
+    prds = hd["prds"] if hd else []
+    deps = {}
+
+    def hold(b, reason):
+        if b in prds and reason not in deps.setdefault(b, []):
+            deps[b].append(reason)
+    blanket = None
+    if not chain:
+        blanket = "no bound chain review"
+    elif vr is None:
+        blanket = "no chain review of the last manifest"
+    elif latest is not None and latest.get("session") not in named:
+        blanket = f"unlisted later review {latest.get('session')}"
+    if blanket:
+        for b in prds:
+            hold(b, blanket)
+    for e in mrec["edge_list"]:
+        if e["status"] == "unknown":
+            hold(e["producer"], f"unknown edge {e['id']}")
+            hold(e["consumer"], f"unknown edge {e['id']}")
+    if chain:
+        lc = chain[-1]
+        for r in lc["findings"]:
+            nm = [x for x in r["prds"] + r["consumers"] if x in prds]
+            for b in nm:
+                hold(b, f"finding {r['id']}")
+            for e in mans[lc["idx"]]["frozen_edges"]:
+                if e["status"] in ("known", "external"):
+                    if e["producer"] in nm:
+                        hold(e["consumer"], f"finding {r['id']}, edge {e['id']}")
+                    if e["consumer"] in nm:
+                        hold(e["producer"], f"finding {r['id']}, edge {e['id']}")
+    for b in prds:
+        slug = b[len("PRD-"):-len(".md")]
+        v = next((c["last"][slug] for c in reversed(chain) if slug in c["last"]), None)
+        if v is None:
+            hold(b, "no per-PRD verdict")
+        elif v in ("FIX", "REJECT"):
+            hold(b, f"per-PRD verdict {v}")
+    fields = {"scope_ids": ids, "scope_id": ids[-1] if ids else None,
+              "chain_reviews": [{"session": c["rv"]["session"], "verdict": c["verdict"] if order_ok else None,
+                                 "file": c["rv"]["file"], "scope_id": ids[c["idx"]], "scope_index": c["idx"],
+                                 "launch_ts": c["row"].get("ts"), "sidecar_bound": c["sidecar_bound"]} for c in chain],
+              "verdict": verdict, "findings": len(vr["findings"]) if vr else 0,
+              "unlisted_review_sessions": unlisted}
+    return fields, deps, vr
+
+
+def approval(L, mrec, deps, verdict, states):
+    """R6 refusals: mission=APPROVE beside an unknown edge; a dependent slug reaching eligible."""
+    unk = [e["id"] for e in mrec["edge_list"] if e["status"] == "unknown"]
+    if verdict == "APPROVE" and unk:
+        L.fail("mission-approval-blocked", f"mission=APPROVE beside unknown edge(s) {', '.join(unk)} of {mrec['edges']}")
+    for s, vals in states.items():
+        b = f"PRD-{s}.md"
+        if "eligible" in vals and b in deps:
+            L.fail("mission-approval-blocked", f"slug {s}=eligible: dependent ({'; '.join(deps[b])})")
 
 
 def read_text(path):
@@ -1355,6 +1649,10 @@ def lint_log(a):
                     L.fail("analysis-grammar",
                            f"matrix {adv[1]} is not later than the previous entry {prev_ts} (an earlier run's matrix)")
 
+    # ---- mission chain review (PRD-dream-mission-chain-review): active when the Mission: line carries scope=
+    chain_on = bool(mrec and mrec["line"] and mrec["scope"])
+    mans, chain, skip, report = [], [], {}, {}
+
     # ---- reviews (R8 d, R9) and verdict binding
     reviewed_slugs = [s for s, v in states.items() if any(x.startswith("reviewed:") for x in v)]
     labels = []
@@ -1367,7 +1665,10 @@ def lint_log(a):
             L.fail("review-self", f"Review: none beside reviewed: state for {', '.join(reviewed_slugs)}")
     elif review_grammar_ok and reviews:
         rsess = route["session"] if route else None
-        sup = supersede(entry["lines"], reviews, rows, task, governed, rsess, home, resolve)
+        if chain_on:                # R1 manifests, R2 chain reviews, R5 superseded pins (replaces the gate fix)
+            mans = mission_scopes(L, mrec, resolve)
+            chain = chain_of(bind_reviews(reviews, rows, task, governed, rsess, resolve), mans)
+            skip, report = superseded_pins(chain, home, resolve)
         for i, rv in enumerate(reviews):
             label = "self"
             rrow = None              # the reviewer's latest launch row (m4[-1]) when its role is review
@@ -1412,9 +1713,9 @@ def lint_log(a):
                 last.pop(slug, None)
                 last[slug] = verdict
             if rrow is not None:
-                gone = sup.get(i, {})       # superseded pins skip check_snapshot only (G4, G7)
-                if gone:
-                    rv["superseded"] = [{"slug": s, "by": gone[s]} for s in last if s in gone]
+                gone = skip.get(i, set())   # R5: a slug a later chain review names is not pinned here
+                if report.get(i):
+                    rv["superseded"] = [{"slug": s, "by": report[i][s]} for s in last if s in report[i]]
                 pinned = {s: v for s, v in last.items() if s not in gone}
                 rv["snapshot"] = "verified" if check_scope(L, rv, rrow, vlines, pinned, home, resolve) else "self"
             for slug, verdict in last.items():
@@ -1465,6 +1766,25 @@ def lint_log(a):
         else:
             prov["persisted"] = "shape-only"
 
+    # ---- mission chain review R1-R6 and the hold (PRD-dream-mission-chain-review)
+    mfields, deps, vr = None, {}, None
+    if mrec and mrec["line"] and (chain_on or mrec["header"] is not None):
+        if chain_on:
+            if not mans:            # the reviews loop did not run (Review: none or a grammar refusal)
+                mans = mission_scopes(L, mrec, resolve)
+            mfields, deps, vr = chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, reviews, home, resolve)
+        else:                       # R9: Mission: without scope= is a pre-freeze record
+            for b in mrec["header"]["prds"]:
+                deps[b] = ["no mission scope"]
+            for e in mrec["edge_list"]:
+                if e["status"] == "unknown":
+                    for b in (e["producer"], e["consumer"]):
+                        if b in deps and f"unknown edge {e['id']}" not in deps[b]:
+                            deps[b].append(f"unknown edge {e['id']}")
+            mfields = {"scope_ids": [], "scope_id": None, "chain_reviews": [], "verdict": None, "findings": 0,
+                       "unlisted_review_sessions": []}
+        approval(L, mrec, deps, mfields["verdict"], states)
+
     for k in ("route", "wwhtbt", "fivewhys"):
         if prov[k] is None:
             prov[k] = "self"
@@ -1494,6 +1814,14 @@ def lint_log(a):
         "mission": mission_json(mrec),
     }
     prov["mission"] = "none" if obj["mission"] is None else "self"
+    if obj["mission"] is not None and mfields is not None:
+        prds = mrec["header"]["prds"] if mrec["header"] else []
+        obj["mission"].update(mfields)
+        obj["mission"]["dependent_slugs"] = [{"slug": b[len("PRD-"):-len(".md")], "reason": "; ".join(deps[b])}
+                                             for b in prds if b in deps]
+        # R8: verified when a chain review binds, the mission verdict is APPROVE and no mission finding fired
+        if vr is not None and mfields["verdict"] == "APPROVE" and not any(f in MISSION_IDS for f, _ in L.findings):
+            prov["mission"] = "verified"
     ok_line = f"OK {entry['ts']}" + (" persisted=shape-only" if prov["persisted"] == "shape-only" else "")
     return L, obj, ok_line
 
@@ -1658,9 +1986,9 @@ def mx_file(slugs, uncovered="- conditional fallback: R3 (owner Hermes)", sectio
     return pre + body + between + "## Uncovered\n" + uncovered + "\n"
 
 
-def mission_edges(slugs, mutate=None):
+def mission_edges(slugs, mutate=None, known_only=False):
     """A selftest edges file (edge-map R2): header over PRD-<slug>.md for slugs, one known edge
-    slugs[0] -> slugs[1], one external edge to hermes, one owned unknown edge."""
+    slugs[0] -> slugs[1], one external edge to hermes and (unless known_only) one owned unknown edge."""
     f8 = lambda p, c, x: {"producer": p, "consumer": c, "command": x + " command", "trigger": x + " trigger",
                           "authority": x + " authority", "effect_id": x + " effect", "recovery_owner": x + " owner",
                           "postcondition": x + " postcondition"}
@@ -1670,6 +1998,8 @@ def mission_edges(slugs, mutate=None):
     es = [dict(id="E1", status="known", **f8(pr[0], pr[-1], "E1")),
           dict(id="E2", status="external", **f8(pr[-1], "external:hermes", "E2")),
           dict(id="E3", status="unknown", producer=pr[0], consumer="UNKNOWN", owner="selftest author")]
+    if known_only:
+        es = es[:2]
     if mutate:
         mutate(h, es)
     return "".join(json.dumps(x) + "\n" for x in [h] + es)
@@ -1932,57 +2262,124 @@ def selftest():
     passes("snapshot-legacy", new(), lambda d: expect(
         d["provenance"]["snapshot"] == "legacy" and d["reviews"][0]["role"] is None, (d["provenance"], d["reviews"])))
 
-    # superseded chain-review pins (gate fix G1-G7): S_R1 on m1 APPROVEs foo, foo is edited,
-    # S_R2 on m2 (launched later, result=, mission=APPROVE) re-APPROVEs foo on the new bytes
-    def chain(fx, slugs=("foo",)):
-        old, new, bar = b"# foo stub\n", b"# foo stub, edited\n", b"# bar stub\n"
-        h = lambda b: hashlib.sha256(b).hexdigest()
-        sid = lambda t: h("".join(sorted(set(t.splitlines(True)))).encode())
-        m1 = f"{h(old)}  PRD-foo.md\n{h(bar)}  PRD-bar.md\n"
-        m2 = f"{h(new)}  PRD-foo.md\n{h(bar)}  PRD-bar.md\n"
-        fx.files.update({"notes/snapshots/m1.sha256": m1, "notes/snapshots/m2.sha256": m2,
-                         "built-prds/PRD-foo.md": new.decode(), M_REL: mx_file(["foo", "bar"])})
+    # superseded chain-review pins (PRD-dream-mission-chain-review R5, which replaces the gate
+    # fix's G5-G6): S_R1 on m1 APPROVEs foo, foo is edited (declared by an amended repairs row),
+    # S_R2 on m2 (launched later, result=, mission=APPROVE) re-APPROVEs foo on the new bytes.
+    # m1 and m2 freeze the PRDs, the matrix and the edges file (one frozen copy serves both).
+    h = lambda b: hashlib.sha256(b).hexdigest()
+    sid = lambda t: h("".join(sorted(set(t.splitlines(True)))).encode())
+    MXB = os.path.basename(M_REL)
+
+    def frozen(fx, foo, extra=""):
+        edges = fx.files["notes/missions/selftest.edges.jsonl"]
+        fx.files["notes/snapshots/selftest.edges.jsonl"] = edges
+        fx.files["notes/snapshots/" + MXB] = fx.files[M_REL]
+        return (f"{h(foo)}  PRD-foo.md\n{h(b'# bar stub' + chr(10).encode())}  PRD-bar.md\n"
+                f"{h(fx.files[M_REL].encode())}  {MXB}\n{h(edges.encode())}  selftest.edges.jsonl\n" + extra)
+
+    def chain(fx, slugs=("foo",), v2=None):
+        old, new = b"# foo stub\n", b"# foo stub, edited\n"
+        fx.files.update({"built-prds/PRD-foo.md": new.decode(), M_REL: mx_file(["foo", "bar"]),
+                         "notes/missions/selftest.edges.jsonl": mission_edges(["foo", "bar"], known_only=True)})
+        rep = json.dumps({"finding": None, "class": None, "author_session": S_D, "before": "notes/snapshots/m1.sha256",
+                          "after": "notes/snapshots/m2.sha256", "changed": ["PRD-foo.md"], "sweep": ["E1"],
+                          "disposition": "amended", "reason": "foo re-worded after the m1 review"}) + "\n"
+        fx.files["notes/missions/selftest.repairs.jsonl"] = rep
+        m1 = frozen(fx, old)
+        m2 = frozen(fx, new, f"{h(rep.encode())}  selftest.repairs.jsonl\n")
+        fx.files.update({"notes/snapshots/m1.sha256": m1, "notes/snapshots/m2.sha256": m2})
         fx.rows[3] = dict(fx.rows[3], role="author", scope="", scope_id="")
         fx.rows[4] = dict(fx.rows[4], role="review", scope="notes/snapshots/m1.sha256", scope_id=sid(m1))
         fx.rows[5] = dict(fx.rows[5], role="review", scope="notes/snapshots/m2.sha256", scope_id=sid(m2))
-        v1 = "".join(f"{x} APPROVE fable\n" for x in slugs)
-        v2 = v1 + f"mission=APPROVE {S_R2}\n"
+        v = "".join(f"{x} APPROVE fable\n" for x in slugs)
+        v1, v2 = v + f"mission=APPROVE {S_R1}\n", (v2 or v) + f"mission=APPROVE {S_R2}\n"
         fx.files["notes/reviews/r1.txt"], fx.files["notes/reviews/r2.txt"] = v1, v2
         result_json(fx, "notes/reviews/r1.json", S_R1, "Done.\n" + v1)
         result_json(fx, "notes/reviews/r2.json", S_R2, "Done.\n" + v2)
         fx.entry["Review"] = [f"Review: notes/reviews/r1.txt reviewer-session={S_R1} result=notes/reviews/r1.json",
                               f"Review: notes/reviews/r2.txt reviewer-session={S_R2} result=notes/reviews/r2.json"]
         fx.entry["State"] = "State: " + " ".join(f"{x}=reviewed:APPROVE {x}=reviewed:APPROVE" for x in slugs)
-        fx.files["notes/missions/selftest.edges.jsonl"] = mission_edges(["foo", "bar"])
         fx.tail = ["Mission: selftest edges=notes/missions/selftest.edges.jsonl "
-                   "scope=notes/snapshots/m1.sha256,notes/snapshots/m2.sha256"]
+                   "scope=notes/snapshots/m1.sha256,notes/snapshots/m2.sha256 repairs=notes/missions/selftest.repairs.jsonl"]
         return fx
     passes("drsp-p1-superseded", chain(new()), lambda d: expect(
         d["provenance"]["snapshot"] == "verified" and d["reviews"][0].get("superseded") == [{"slug": "foo", "by": S_R2}]
-        and "superseded" not in d["reviews"][1], (d["provenance"], d["reviews"])))
+        and "superseded" not in d["reviews"][1] and d["provenance"]["mission"] == "verified", (d["provenance"], d["reviews"])))
     passes("drsp-p4-b-not-superseded", chain(new(), ("foo", "bar")), lambda d: expect(
         d["reviews"][0].get("superseded") == [{"slug": "foo", "by": S_R2}], d["reviews"]))
     stale_r1 = ["notes/reviews/r1.txt", S_R1, "slug foo"]
-    fx = chain(new()); fx.files["notes/reviews/r2.txt"] = f"foo FIX fable\nmission=APPROVE {S_R2}\n"
-    result_json(fx, "notes/reviews/r2.json", S_R2, f"foo FIX fable\nmission=APPROVE {S_R2}")
-    fx.entry["State"] = "State: foo=reviewed:APPROVE foo=reviewed:FIX"
-    refuse("drsp-kb1-j-fix", fx, "review-snapshot-stale", stale_r1)
+    # R5 + R6: a later FIX supersedes the earlier APPROVE ("superseded by that later verdict") and holds the slug
+    fx = chain(new(), v2="foo FIX fable\n"); fx.entry["State"] = "State: foo=reviewed:APPROVE foo=reviewed:FIX"
+    passes("drsp-kb1-j-fix-held", fx, lambda d: expect(
+        d["reviews"][0].get("superseded") == [{"slug": "foo", "by": S_R2}] and d["mission"]["dependent_slugs"] == [{"slug": "foo", "reason": "per-PRD verdict FIX"}, {"slug": "bar", "reason": "no per-PRD verdict"}],
+        d.get("mission")))
+    fx = chain(new(), v2="foo FIX fable\n"); fx.entry["State"] = "State: foo=reviewed:APPROVE foo=reviewed:FIX foo=eligible"
+    refuse("drsp-kb1-j-fix-eligible", fx, "mission-approval-blocked", ["slug foo", "per-PRD verdict FIX"])
+    # R2 orders launch ts only within one manifest; across manifests the index decides (R5 by line order)
     fx = chain(new()); fx.rows[5] = dict(fx.rows[5], ts="2026-11-15T01:20:00-08:00")
-    refuse("drsp-kb4-j-launched-before-k", fx, "review-snapshot-stale", stale_r1)
+    passes("drsp-kb4-launch-across-manifests", fx, lambda d: expect(
+        d["reviews"][0].get("superseded") == [{"slug": "foo", "by": S_R2}], d["reviews"]))
     fx = chain(new()); fx.tail = []
     refuse("drsp-kb5-no-mission", fx, "review-snapshot-stale", stale_r1)
     fx = chain(new()); fx.rows[5] = {k: v for k, v in fx.rows[5].items() if k != "role"}
     refuse("drsp-kb6-j-legacy", fx, "review-snapshot-stale", stale_r1)
+    # a review bound to an unlisted manifest is no chain review (R2): it neither keeps nor sets a hold
     fx = chain(new()); s_x = "bbbbbbbb-0000-4000-8000-000000000006"
     fx.files["notes/snapshots/m3.sha256"] = fx.files["notes/snapshots/m2.sha256"] + "0" * 64 + "  notes.md\n"
     fx.rows.append(dict(fx.rows[5], ts="2026-11-15T01:50:00-08:00", session=s_x, scope="notes/snapshots/m3.sha256",
-                        scope_id=hashlib.sha256("".join(sorted(fx.files["notes/snapshots/m3.sha256"].splitlines(True))).encode()).hexdigest()))
+                        scope_id=sid(fx.files["notes/snapshots/m3.sha256"])))
     fx.files["notes/reviews/r3.txt"] = "foo FIX fable\n"
     fx.entry["Review"].append(f"Review: notes/reviews/r3.txt reviewer-session={s_x}")
     fx.entry["State"] = "State: foo=reviewed:APPROVE foo=reviewed:APPROVE foo=reviewed:FIX"
-    refuse("drsp-kb11-unlisted-x-fix-after-j", fx, "review-snapshot-stale", stale_r1)
+    passes("drsp-kb11-unlisted-manifest-not-chain", fx, lambda d: expect(
+        len(d["mission"]["chain_reviews"]) == 2 and d["mission"]["dependent_slugs"] == [{"slug": "bar", "reason": "no per-PRD verdict"}], d.get("mission")))
     fx = chain(new()); fx.entry["Review"][1] = f"Review: notes/reviews/r2.txt reviewer-session={S_R2}"
-    refuse("drsp-kb13-j-no-result", fx, "review-snapshot-stale", stale_r1)
+    refuse("drsp-kb13-j-no-result", fx, "mission-verdict-missing", ["notes/reviews/r2.txt", "no result="])
+
+    # bound mission (PRD-dream-mission-chain-review): one passing fixture, one refusal per new id
+    def bound(fx, verdict="APPROVE", foo_line="foo APPROVE fable", mission_line=True, scope=None, extra_manifests=None):
+        fx.files.update({M_REL: mx_file(["foo", "bar"]),
+                         "notes/missions/selftest.edges.jsonl": mission_edges(["foo", "bar"], known_only=True)})
+        m = frozen(fx, b"# foo stub\n")
+        fx.files["notes/snapshots/m.sha256"] = m
+        for rel, txt in (extra_manifests or {}).items():
+            fx.files[rel] = txt
+        fx.rows[3] = dict(fx.rows[3], role="author", scope="", scope_id="")
+        fx.rows[4] = dict(fx.rows[4], role="review", scope="notes/snapshots/m.sha256", scope_id=sid(m))
+        v = f"{foo_line}\nbar APPROVE fable\n" + (f"mission={verdict} {S_R1}\n" if mission_line else "")
+        fx.files["notes/reviews/r1.txt"] = v
+        result_json(fx, "notes/reviews/r1.json", S_R1, "Done.\n" + v)
+        fx.entry["Review"] = [f"Review: notes/reviews/r1.txt reviewer-session={S_R1} result=notes/reviews/r1.json"]
+        fx.entry["State"] = f"State: foo=reviewed:{foo_line.split()[1]} bar=reviewed:APPROVE"
+        fx.files[M_REL] = mx_file(["foo", "bar"])
+        fx.entry["Mission"] = ("Mission: selftest edges=notes/missions/selftest.edges.jsonl scope="
+                               + (scope or "notes/snapshots/m.sha256"))
+        return fx
+    passes("drmr-bound-mission", bound(new()), lambda d: expect(
+        d["provenance"]["mission"] == "verified" and d["mission"]["verdict"] == "APPROVE"
+        and len(d["mission"]["chain_reviews"]) == 1 and d["mission"]["dependent_slugs"] == [], d.get("mission")))
+    fx = bound(new(), scope="notes/snapshots/m.sha256,notes/snapshots/bad.sha256",
+               extra_manifests={"notes/snapshots/bad.sha256": "not a manifest\n"})
+    refuse("drmr-malformed-manifest", fx, "mission-scope-mismatch", ["notes/snapshots/bad.sha256", "line-rule"])
+    fx = new(); fx = bound(fx, scope="notes/snapshots/m0.sha256,notes/snapshots/m.sha256")
+    fx.files["notes/snapshots/m0.sha256"] = "".join(l + "\n" for l in fx.files["notes/snapshots/m.sha256"].splitlines()
+                                                    if not l.endswith(MXB))
+    refuse("drmr-manifest-without-matrix", fx, "mission-scope-incomplete", ["notes/snapshots/m0.sha256", MXB])
+    fx = bound(new()); other = frozen(fx, b"# foo stub\n", "0" * 64 + "  extra.md\n")
+    fx.files["notes/snapshots/other.sha256"] = other
+    fx.rows[4] = dict(fx.rows[4], scope="notes/snapshots/other.sha256", scope_id=sid(other))
+    refuse("drmr-review-on-unlisted-manifest", fx, "mission-review-missing", [sid(other)])
+    refuse("drmr-no-mission-line", bound(new(), mission_line=False), "mission-verdict-missing", ["notes/reviews/r1.txt"])
+    refuse("drmr-fix-without-sidecar", bound(new(), verdict="FIX", foo_line="foo FIX fable"),
+           "mission-finding-incomplete", ["r1.txt.findings.jsonl", "mission=FIX"])
+    fx = bound(new()); fx.build()
+    with open(os.path.join(fx.home, "notes/missions/selftest.edges.jsonl"), "a", encoding="utf-8") as fh:
+        fh.write("\n")
+    fx.files = {}
+    refuse("drmr-edges-moved-after-approve", fx, "mission-snapshot-stale", ["selftest.edges.jsonl"])
+    fx = bound(new()); fx.entry["Mission"] = "Mission: selftest edges=notes/missions/selftest.edges.jsonl"
+    fx.entry["State"] = "State: foo=reviewed:APPROVE bar=reviewed:APPROVE foo=eligible"
+    refuse("drmr-noscope-eligible", fx, "mission-approval-blocked", ["slug foo", "no mission scope"])
 
     # mission edge map (PRD-dream-mission-edge-map): one passing fixture, one refusal per new id
     def edged(fx, mutate=None, state=None):
