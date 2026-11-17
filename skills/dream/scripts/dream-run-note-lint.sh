@@ -55,6 +55,9 @@
 #   mission-scope-mismatch mission-scope-incomplete mission-review-missing
 #   mission-verdict-missing mission-finding-incomplete mission-snapshot-stale
 #   mission-approval-blocked
+#   repair-grammar mission-repairs-missing repair-duplicate repair-missing repair-class-mismatch
+#   sweep-missing repair-author-mismatch repair-hash-mismatch repair-scope-mismatch
+#   affected-consumer-unreviewed repair-declined-unaccepted
 #
 # Mission (PRD-dream-mission-edge-map): opt-in. A Mission: line names the mission's edge map
 # (notes/missions/<name>.edges.jsonl: a header {mission, outcome, invariants, prds, external,
@@ -86,6 +89,18 @@
 # `eligible` while it is dependent (unknown edge, a finding of the last chain review or its
 # one-hop consumers, a non-APPROVE or absent per-PRD verdict, no mission scope) is
 # mission-approval-blocked (R6).
+#
+# Failure-class sweep (PRD-dream-failure-class-sweep): with repairs=<path> on the Mission: line,
+# a chain-review finding followed by a later chain review, or a digest moving between two
+# listed manifests. Each repairs row {finding, class, author_session, before, after, changed,
+# sweep, disposition} is checked for grammar and duplicates (R1), every finding with a following
+# review has a row and a decline a later reviewer's advisory accepts row (R2), its class and its
+# sweep over the edges incident to the finding at the before copy (R3), its author lineage (R4),
+# before/after as consecutive listed manifests whose digests moved as declared, and every moved
+# digest declared (R5), each consumer of a changed producer at its after digest in a later
+# review's manifest (R6); changed members and their consumers are held until the mission's final
+# APPROVE, an unaccepted decline's until acceptance (R7). JSON: mission.repairs (R8), whose
+# `file` keeps the repairs= path the edge-map JSON carried; null when nothing here applies.
 #
 # Env seams: SKILL_ROUTING_DECISIONS (default decisions path, as fable-launch.sh),
 #   ANALYSIS_WIKI_DIR (gated wiki root for reused pages; default ~/Notes/wiki, whose
@@ -1047,6 +1062,355 @@ def approval(L, mrec, deps, verdict, states):
             L.fail("mission-approval-blocked", f"slug {s}=eligible: dependent ({'; '.join(deps[b])})")
 
 
+SWEEP_IDS = ("repair-grammar", "mission-repairs-missing", "repair-duplicate", "repair-missing",
+             "repair-class-mismatch", "sweep-missing", "repair-author-mismatch", "repair-hash-mismatch",
+             "repair-scope-mismatch", "affected-consumer-unreviewed", "repair-declined-unaccepted")
+REPAIR_FIELDS = ("finding", "class", "author_session", "before", "after", "changed", "sweep", "disposition")
+DISPOSITIONS = ("repaired", "declined", "amended")
+
+
+def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei, route, vr, deps, home, resolve):
+    """PRD-dream-failure-class-sweep R1-R8 for an entry whose Mission: line carries scope=.
+    Returns the mission.repairs JSON object, or None when nothing here applies (no repairs=,
+    no chain-review finding followed by a later chain review, no digest moving between two
+    listed manifests: the JSON then equals the previous PRD's). Adds R7's holds to deps."""
+    tok = mrec["repairs"]
+    rbase = os.path.basename(tok) if tok else None
+    hd = mrec["header"]
+    ids = [m["id"] for m in mans]
+    need = [(p, f) for p, c in enumerate(chain) if p + 1 < len(chain) for f in c["findings"]]
+
+    def moved():
+        for k in range(len(mans) - 1):
+            a, b = mans[k], mans[k + 1]
+            if a["id"] is not None and b["id"] is not None:
+                if any(n in b["names"] and b["names"][n] != dg for n, dg in a["names"].items() if n != rbase):
+                    return True
+        return False
+    if not tok and not need and not moved():
+        return None
+    out = {"file": tok, "rows": 0, "repaired": 0, "declined": [], "amended": [], "pending_after": False,
+           "changed": [], "swept_edges": 0, "edges_added": [], "edges_removed": []}
+    if not tok and need:                 # R2 (r4 F27): the check never waits for the token
+        for p, f in need:
+            L.fail("repair-missing", f"finding {f['id']} of {chain[p]['rv']['file']}: no repairs= token on the "
+                                     "Mission: line (carried or inherited)")
+        return out
+    issuer = {f["id"]: p for p, c in enumerate(chain) for f in c["findings"]}
+    fobj = {f["id"]: f for c in chain for f in c["findings"]}
+    prds = set(hd["prds"]) if hd else set()
+
+    def man_index(p):
+        if not isinstance(p, str) or not p.strip():
+            return None
+        n = os.path.normpath(resolve(p))
+        return next((k for k, m in enumerate(mans) if os.path.normpath(m["full"]) == n), None)
+
+    # R1: the file and its rows
+    recs = []
+    if tok:
+        try:
+            with open(resolve(tok), "rb") as fh:
+                text = fh.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = None
+        if text is None or not text.strip():
+            L.fail("mission-repairs-missing", f"{tok}: absent, unreadable or empty (repairs= on the Mission: line)")
+            text = ""
+        for n, ln in enumerate(text.split("\n"), 1):
+            if not ln.strip():
+                continue
+            try:
+                r = json.loads(ln)
+            except ValueError:
+                r = None
+            if not isinstance(r, dict):
+                L.fail("repair-grammar", f"{tok}: row {n}: not a JSON object")
+                continue
+            ok = True
+
+            def bad(field, why, n=n):
+                L.fail("repair-grammar", f"{tok}: row {n}: field {field}: {why}")
+            for k in REPAIR_FIELDS:
+                if k not in r:
+                    bad(k, "missing")
+                    ok = False
+            disp = r.get("disposition")
+            if "disposition" in r and disp not in DISPOSITIONS:
+                bad("disposition", f"{disp!r} is not one of {', '.join(DISPOSITIONS)}")
+                ok = False
+            fid, cls = r.get("finding"), r.get("class")
+            for k in ("author_session", "before", "after"):
+                if k in r and not (isinstance(r[k], str) and r[k].strip()):
+                    bad(k, "not a non-empty string")
+                    ok = False
+            for k in ("changed", "sweep"):
+                if k in r and not (isinstance(r[k], list) and all(isinstance(x, str) and x.strip() for x in r[k])):
+                    bad(k, "not a list of names")
+                    ok = False
+            reason = r.get("reason")
+            if disp in ("declined", "amended") and not (isinstance(reason, str) and reason.strip()):
+                bad("reason", f"a {disp} row needs a non-empty reason")
+                ok = False
+            if disp == "amended":
+                if fid is not None or cls is not None:
+                    bad("finding", "an amended row answers no finding: finding and class are null")
+                    ok = False
+                if isinstance(r.get("changed"), list) and not r["changed"]:
+                    bad("changed", "an amended row names what moved")
+                    ok = False
+            elif "finding" in r:
+                # on an ungoverned host no chain review binds (chain-review R2): an id is undecidable there
+                if not (isinstance(fid, str) and fid.strip()) or (governed and fid not in fobj):
+                    bad("finding", f"{fid!r} is no finding id of this note's chain-review sidecars")
+                    ok = False
+                if "class" in r and cls not in FINDING_CLASSES:
+                    bad("class", f"{cls!r} is not one of {', '.join(FINDING_CLASSES)}")
+                    ok = False
+                ch = r.get("changed")
+                if ok and fid in fobj and disp == "repaired" and cls != "provenance" and isinstance(ch, list):
+                    f = fobj[fid]
+                    allowed = {x for x in f["prds"] + f["consumers"] if x in prds}
+                    names = {x[len("external:"):] for x in f["consumers"] if x.startswith("external:")}
+                    allowed |= {os.path.basename(cp) for nm, cp in (header_contracts(hd) if hd else []) if nm in names}
+                    if not ch:
+                        L.fail("repair-grammar", f"{tok}: row {n}: finding {fid}: changed is empty on a repaired {cls} "
+                                                 "row (a repair that changes no bytes is declined with a reason)")
+                        ok = False
+                    elif not set(ch) & allowed:
+                        L.fail("repair-grammar", f"{tok}: row {n}: finding {fid}: changed names none of "
+                                                 f"{', '.join(sorted(allowed))} (the PRDs and contract the finding names)")
+                        ok = False
+            recs.append({"n": n, "r": r, "ok": ok, "fid": fid if isinstance(fid, str) else None, "disp": disp,
+                         "bi": man_index(r.get("before")), "ai": man_index(r.get("after")),
+                         "changed": [x for x in r.get("changed") or [] if isinstance(x, str)] if isinstance(r.get("changed"), list) else [],
+                         "sweep": [x for x in r.get("sweep") or [] if isinstance(x, str)] if isinstance(r.get("sweep"), list) else []})
+    out["rows"] = len(recs)
+    out["repaired"] = sum(1 for x in recs if x["disp"] == "repaired")
+    # duplicates (R1): one row per finding, or one declined followed by one repaired
+    byf = {}
+    for x in recs:
+        if x["fid"] is not None and x["disp"] in ("repaired", "declined"):
+            byf.setdefault(x["fid"], []).append(x)
+    for fid, xs in byf.items():
+        seq = [x["disp"] for x in xs]
+        if seq not in (["repaired"], ["declined"], ["declined", "repaired"]):
+            L.fail("repair-duplicate", f"finding {fid}: rows {', '.join(str(x['n']) for x in xs)} ({', '.join(seq)}); "
+                                       "one row, or one declined row followed by one repaired row")
+    ams = [x for x in recs if x["disp"] == "amended"]
+    for i, x in enumerate(ams):
+        for y in ams[i + 1:]:
+            if (x["r"].get("before"), x["r"].get("after")) == (y["r"].get("before"), y["r"].get("after")):
+                for b in sorted(set(x["changed"]) & set(y["changed"])):
+                    L.fail("repair-duplicate", f"amended rows {x['n']} and {y['n']} of ({x['r'].get('before')}, "
+                                               f"{x['r'].get('after')}) both name {b}")
+    sup = {fid for fid, xs in byf.items() if [x["disp"] for x in xs] == ["declined", "repaired"]}
+    # R1: the repairs file is listed in every manifest later than any row's before
+    bis = [x["bi"] for x in recs if x["bi"] is not None]
+    if tok and bis:
+        for k in range(min(bis) + 1, len(mans)):
+            if mans[k]["id"] is not None and rbase not in mans[k]["names"]:
+                L.fail("mission-scope-incomplete", f"manifest {mans[k]['path']}: lists no {rbase} (the repairs file; "
+                                                   f"a row's before is {mans[min(bis)]['path']})")
+    # R2: rows required, declines accepted
+    named = {x["fid"] for x in recs if x["fid"] is not None}     # a malformed row still names its finding
+    for p, f in need:
+        if f["id"] not in named:
+            L.fail("repair-missing", f"finding {f['id']} of {chain[p]['rv']['file']}: no row in {tok} "
+                                     f"(its following review {chain[p + 1]['rv']['file']} exists)")
+    accepted = {}
+    for fid, xs in byf.items():
+        if xs[0]["disp"] != "declined" or fid in sup or fid not in issuer:
+            continue
+        by = next((c["rv"]["session"] for c in chain[issuer[fid] + 1:] for a in c["advisory"]
+                   if fid in a.get("accepts", [])), None)
+        accepted[fid] = by
+        if by is None:
+            L.fail("repair-declined-unaccepted", f"finding {fid}: declined in {tok} row {xs[0]['n']}; no later chain "
+                                                 f"review's sidecar holds an advisory row accepting it (last chain "
+                                                 f"review {chain[-1]['rv']['file'] if chain else 'none'})")
+    out["declined"] = [{"finding": fid, "reason": xs[0]["r"].get("reason"), "accepted_by": accepted.get(fid),
+                        "superseded": fid in sup} for fid, xs in byf.items() if xs[0]["disp"] == "declined"]
+    out["amended"] = [{"reason": x["r"].get("reason"), "changed": x["changed"], "before": x["r"].get("before"),
+                       "after": x["r"].get("after")} for x in ams]
+    # R4: the author lineage
+    if governed:
+        admitted = {r.get("session") for r in rows or [] if r.get("decision") == "launch" and r.get("skill") == "dream"
+                    and r.get("task_id") == task and r.get("role", "author") == "author"}
+    else:
+        admitted = {route["session"]} if route else set()
+        for e in entries[:ei]:
+            if task is not None and entry_task(e) == task:
+                for ln in e["lines"]:
+                    mm = re.match(r"^Route:.*\bsession=(\S+)", ln)
+                    if ln.startswith("Route:") and mm:
+                        admitted.add(mm.group(1))
+    canon = {}
+
+    def canon_of(x, field):
+        p = x["r"].get(field)
+        if p not in canon:
+            try:
+                canon[p] = scope_canon(resolve(p))
+            except ScopeError as e:
+                canon[p] = e
+        c = canon[p]
+        if isinstance(c, ScopeError):
+            L.fail("repair-hash-mismatch", f"row {x['n']}: {field} {p}: {c}")
+            return None
+        return c[0], {k.decode("utf-8", "backslashreplace"): v for k, v in c[1].items()}
+    added, removed, swept, aff_of = set(), set(), set(), {}
+    for x in recs:
+        r, n, fid = x["r"], x["n"], x["fid"]
+        swept |= set(x["sweep"])
+        a_s = r.get("author_session")      # each check reads only its own fields (refusals stay independent)
+        if isinstance(a_s, str) and a_s.strip() and a_s not in admitted:
+            L.fail("repair-author-mismatch", f"row {n}: author_session {a_s} is not an author of Task {task} "
+                                             f"(admitted: {', '.join(sorted(s for s in admitted if s)) or 'none'})")
+        bi, ai = x["bi"], x["ai"]
+        bcopy = mans[bi]["frozen_edges"] if bi is not None else []
+        bhead = (mans[bi]["frozen"] if bi is not None else None) or hd
+        bprds = set(bhead["prds"]) if bhead else prds
+        # R3: class and sweep (affected graph at the before digest)
+        if x["disp"] == "amended":
+            aff, cls = set(x["changed"]) & bprds, None
+        elif fid in fobj and x["disp"] in ("repaired", "declined"):
+            f = fobj[fid]
+            aff, cls = set(f["prds"] + f["consumers"]), r.get("class")
+            if cls != f["class"]:
+                L.fail("repair-class-mismatch", f"finding {fid}: row {n} class {cls}, the finding's {f['class']}")
+        else:
+            aff, cls = None, None
+        if aff is not None and cls != "provenance" and bi is not None:
+            want = [e["id"] for e in bcopy if e["producer"] in aff or e["consumer"] in aff]
+            miss = [e for e in want if e not in x["sweep"]]
+            if miss:
+                L.fail("sweep-missing", f"{'finding ' + fid if fid else 'amended row'} (row {n}): sweep lacks "
+                                        f"{', '.join(miss)} (incident to {', '.join(sorted(aff))})")
+        if bi is not None and ai is not None:
+            ea = {e["id"] for e in mans[ai]["frozen_edges"]}
+            eb_ = {e["id"] for e in bcopy}
+            added |= ea - eb_
+            removed |= eb_ - ea
+        # R5: before/after binding, the following review, the changed digests
+        if not all(isinstance(r.get(k), str) and r[k].strip() for k in ("before", "after")) or x["disp"] not in DISPOSITIONS:
+            continue
+        if x["disp"] == "amended":
+            anchor = None
+            fol = next((c for c in chain if ai is not None and c["idx"] >= ai), None)
+        elif fid in issuer:
+            anchor = issuer[fid]
+            fol = chain[anchor + 1] if anchor + 1 < len(chain) else None
+        else:                               # no issuing review (ungoverned host, or an unknown id: R1)
+            anchor, fol = None, None
+        cb, ca = canon_of(x, "before"), canon_of(x, "after")
+        if bi is None:
+            L.fail("repair-scope-mismatch", f"row {n}: before {r['before']} is not a listed scope= manifest")
+        elif anchor is not None and cb is not None:
+            iss = chain[anchor]
+            okids = ([ids[c["idx"]] for c in chain[anchor + 1:]] if x["disp"] == "repaired" and fid in sup
+                     else [ids[iss["idx"]]])
+            if cb[0] not in okids:
+                L.fail("repair-scope-mismatch", f"row {n} (finding {fid}): before {r['before']} canonicalizes to {cb[0]}; "
+                                                f"the issuing review {iss['rv']['file']} is bound to {ids[iss['idx']]}")
+        same_ok = x["disp"] == "declined" and ai is not None and ai == bi and fol is not None and fol["idx"] == ai
+        if bi is not None and (ai is None or not (ai == bi + 1 or same_ok)):
+            L.fail("repair-scope-mismatch", f"row {n}: after {r['after']} is not the listed scope= manifest following "
+                                            f"before {r['before']}")
+        elif fol is None:
+            out["pending_after"] = True
+        elif ai is not None and fol["idx"] < ai:
+            L.fail("repair-scope-mismatch", f"row {n}: its following review {fol['rv']['file']} is bound to "
+                                            f"{ids[fol['idx']]}, earlier than after {r['after']} ({ids[ai]})")
+        if cb is not None and ca is not None and not (same_ok and not x["changed"]):
+            for b in x["changed"]:
+                if b not in cb[1]:
+                    L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from before {r['before']}")
+                elif b not in ca[1]:
+                    L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from after {r['after']}")
+                elif cb[1][b] == ca[1][b]:
+                    L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, digests equal in {r['before']} "
+                                                   f"and {r['after']}")
+        # R6: affected consumers in a later review's manifest (once the following review exists)
+        cons = [(b, e["consumer"], e["id"]) for b in x["changed"] for e in bcopy
+                if e["producer"] == b and e["consumer"] in bprds]
+        aff_of[n] = {c for _, c, _ in cons}
+        if fol is not None and ai is not None and fol["idx"] >= ai:
+            t = fol["idx"] if fol["idx"] > ai else ai
+            later = [b for b in bound if (b["i"] > chain[anchor]["i"] if anchor is not None else b["i"] >= fol["i"])]
+            for b, c, eid in cons:
+                want = mans[t]["names"].get(c)
+                if want is None:            # absent from that manifest: the consumer's current bytes
+                    cur = first_holder(home, PRD_DIRS, c)
+                    want = file_sha(cur) if cur else None
+                hit = False
+                for rv in later:
+                    sid = rv["row"].get("scope_id")
+                    if want is None:
+                        break
+                    if isinstance(sid, str) and sid in ids:     # a chain review: its listed manifest (R2)
+                        dg = mans[ids.index(sid)]["names"]
+                    else:
+                        sc = rv["row"].get("scope")
+                        try:
+                            dg = {k.decode("utf-8", "backslashreplace"): v for k, v in scope_canon(resolve(sc))[1].items()} \
+                                if isinstance(sc, str) else {}
+                        except ScopeError:
+                            dg = {}
+                    if dg.get(c) == want:
+                        hit = True
+                        break
+                if not hit:
+                    L.fail("affected-consumer-unreviewed", f"row {n}: changed {b} produces {c} over edge {eid}: no "
+                                                           f"Review: row later than the finding's review lists {c} at "
+                                                           f"{want or 'its after digest'}")
+    # R5: the complement over every consecutive pair of listed manifests
+    for k in range(len(mans) - 1):
+        a, b = mans[k], mans[k + 1]
+        if a["id"] is None or b["id"] is None:
+            continue
+        decl = set()
+        for x in recs:
+            if x["bi"] == k and x["ai"] == k + 1:
+                decl |= set(x["changed"])
+        for nm in sorted(set(a["names"]) & set(b["names"])):
+            if nm != rbase and a["names"][nm] != b["names"][nm] and nm not in decl:
+                L.fail("repair-hash-mismatch", f"{nm}: changed but undeclared between {a['path']} and {b['path']}")
+    # R7: holds, released by the mission's final APPROVE (repaired, amended) or by acceptance (declined)
+    pos = {id(c): p for p, c in enumerate(chain)}
+
+    def hold(b, reason):
+        if b in prds and reason not in deps.setdefault(b, []):
+            deps[b].append(reason)
+    for x in recs:
+        if x["disp"] in ("repaired", "amended"):
+            if x["disp"] == "repaired" and x["fid"] in fobj:
+                rel = vr is not None and vr["verdict"] == "APPROVE" and pos[id(vr)] > issuer[x["fid"]]
+                why = f"repair {x['fid']} (row {x['n']})"
+            else:
+                rel = vr is not None and vr["verdict"] == "APPROVE" and x["ai"] is not None and vr["idx"] >= x["ai"]
+                why = f"amended row {x['n']}"
+            if not rel:
+                for b in set(x["changed"]) | aff_of.get(x["n"], set()):
+                    hold(b, why)
+        elif x["disp"] == "declined" and x["fid"] in fobj and x["fid"] not in sup and accepted.get(x["fid"]) is None:
+            f = fobj[x["fid"]]
+            base = {y for y in f["prds"] + f["consumers"] if y in prds}
+            nm = set(base)
+            for e in mans[chain[issuer[x["fid"]]]["idx"]]["frozen_edges"]:
+                if e["status"] in ("known", "external"):
+                    if e["producer"] in base:
+                        nm.add(e["consumer"])
+                    if e["consumer"] in base:
+                        nm.add(e["producer"])
+            for b in nm:
+                hold(b, f"declined {x['fid']} (row {x['n']})")
+    out["changed"] = sorted({b for x in recs for b in x["changed"]})
+    out["swept_edges"] = len(swept)
+    out["edges_added"], out["edges_removed"] = sorted(added), sorted(removed)
+    return out
+
+
 def read_text(path):
     with open(path, encoding="utf-8", errors="replace") as fh:
         return fh.read()
@@ -1651,7 +2015,7 @@ def lint_log(a):
 
     # ---- mission chain review (PRD-dream-mission-chain-review): active when the Mission: line carries scope=
     chain_on = bool(mrec and mrec["line"] and mrec["scope"])
-    mans, chain, skip, report = [], [], {}, {}
+    mans, chain, skip, report, bound = [], [], {}, {}, []
 
     # ---- reviews (R8 d, R9) and verdict binding
     reviewed_slugs = [s for s, v in states.items() if any(x.startswith("reviewed:") for x in v)]
@@ -1667,7 +2031,8 @@ def lint_log(a):
         rsess = route["session"] if route else None
         if chain_on:                # R1 manifests, R2 chain reviews, R5 superseded pins (replaces the gate fix)
             mans = mission_scopes(L, mrec, resolve)
-            chain = chain_of(bind_reviews(reviews, rows, task, governed, rsess, resolve), mans)
+            bound = bind_reviews(reviews, rows, task, governed, rsess, resolve)
+            chain = chain_of(bound, mans)
             skip, report = superseded_pins(chain, home, resolve)
         for i, rv in enumerate(reviews):
             label = "self"
@@ -1773,6 +2138,11 @@ def lint_log(a):
             if not mans:            # the reviews loop did not run (Review: none or a grammar refusal)
                 mans = mission_scopes(L, mrec, resolve)
             mfields, deps, vr = chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, reviews, home, resolve)
+            # PRD-dream-failure-class-sweep R1-R8: repairs between chain reviews, their holds
+            repairs = repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei, route, vr, deps,
+                                   home, resolve)
+            if repairs is not None:
+                mfields["repairs"] = repairs
         else:                       # R9: Mission: without scope= is a pre-freeze record
             for b in mrec["header"]["prds"]:
                 deps[b] = ["no mission scope"]
@@ -1820,7 +2190,7 @@ def lint_log(a):
         obj["mission"]["dependent_slugs"] = [{"slug": b[len("PRD-"):-len(".md")], "reason": "; ".join(deps[b])}
                                              for b in prds if b in deps]
         # R8: verified when a chain review binds, the mission verdict is APPROVE and no mission finding fired
-        if vr is not None and mfields["verdict"] == "APPROVE" and not any(f in MISSION_IDS for f, _ in L.findings):
+        if vr is not None and mfields["verdict"] == "APPROVE" and not any(f in MISSION_IDS + SWEEP_IDS for f, _ in L.findings):
             prov["mission"] = "verified"
     ok_line = f"OK {entry['ts']}" + (" persisted=shape-only" if prov["persisted"] == "shape-only" else "")
     return L, obj, ok_line
@@ -2380,6 +2750,85 @@ def selftest():
     fx = bound(new()); fx.entry["Mission"] = "Mission: selftest edges=notes/missions/selftest.edges.jsonl"
     fx.entry["State"] = "State: foo=reviewed:APPROVE bar=reviewed:APPROVE foo=eligible"
     refuse("drmr-noscope-eligible", fx, "mission-approval-blocked", ["slug foo", "no mission scope"])
+
+    # failure-class sweep (PRD-dream-failure-class-sweep): r1 on m1 FIX with finding F1 (foo,
+    # consumer bar), the repairs rows, r2 on m2 APPROVE on foo's repaired bytes; one passing
+    # repaired mission, one refusal per new id
+    REP, N2 = "notes/missions/selftest.repairs.jsonl", "notes/snapshots/n2/m2.sha256"
+    F1 = {"id": "F1", "class": "missing-producer-runner", "severity": "MEDIUM", "prds": ["PRD-foo.md"],
+          "consumers": ["PRD-bar.md"], "counterexample": "foo writes nothing bar reads", "correction": "foo writes it",
+          "control": "a bar run reads foo's record"}
+    ROW = {"finding": "F1", "class": "missing-producer-runner", "author_session": S_D, "before": "notes/snapshots/m1.sha256",
+           "after": "notes/snapshots/m2.sha256", "changed": ["PRD-foo.md"], "sweep": ["E1", "E2"], "disposition": "repaired"}
+
+    def repaired(fx, rows=(ROW,), token=True, r2_side=None, narrow=False):
+        old, newb = b"# foo stub\n", b"# foo stub, edited\n"
+        e1 = mission_edges(["foo", "bar"], known_only=True)
+        fx.files.update({"built-prds/PRD-foo.md": newb.decode(), M_REL: mx_file(["foo", "bar"]),
+                         "notes/missions/selftest.edges.jsonl": e1})
+        m1 = frozen(fx, old)
+        rep = "".join(json.dumps(r) + "\n" for r in rows)
+        if token:
+            fx.files[REP] = rep
+        replines = f"{h(rep.encode())}  selftest.repairs.jsonl\n" if token else ""
+        m2rel = "notes/snapshots/m2.sha256"
+        if narrow:                  # m2 (its own directory) drops bar from its packet and header, as does the live header
+            e2 = mission_edges(["foo", "bar"], known_only=True, mutate=lambda hh, es: (
+                hh.update(prds=["PRD-foo.md"]), es.__setitem__(slice(None), [dict(es[1], producer="PRD-foo.md")])))
+            m2rel = N2
+            fx.files.update({"notes/missions/selftest.edges.jsonl": e2, "notes/snapshots/n2/selftest.edges.jsonl": e2})
+            m2 = (f"{h(newb)}  PRD-foo.md\n{h(fx.files[M_REL].encode())}  {MXB}\n{h(e2.encode())}  selftest.edges.jsonl\n"
+                  + replines)
+        else:
+            m2 = frozen(fx, newb, replines)
+        fx.files.update({"notes/snapshots/m1.sha256": m1, m2rel: m2,
+                         "notes/reviews/r1.txt.findings.jsonl": json.dumps(F1) + "\n"})
+        if r2_side is not None:
+            fx.files["notes/reviews/r2.txt.findings.jsonl"] = "".join(json.dumps(r) + "\n" for r in r2_side)
+        fx.rows[3] = dict(fx.rows[3], role="author", scope="", scope_id="")
+        fx.rows[4] = dict(fx.rows[4], role="review", scope="notes/snapshots/m1.sha256", scope_id=sid(m1))
+        fx.rows[5] = dict(fx.rows[5], role="review", scope=m2rel, scope_id=sid(m2))
+        bar1, bar2 = ("", "") if narrow else ("bar APPROVE fable\n", "bar APPROVE fable\n")
+        v1, v2 = f"foo FIX fable\n{bar1}mission=FIX {S_R1}\n", f"foo APPROVE fable\n{bar2}mission=APPROVE {S_R2}\n"
+        fx.files["notes/reviews/r1.txt"], fx.files["notes/reviews/r2.txt"] = v1, v2
+        result_json(fx, "notes/reviews/r1.json", S_R1, "Done.\n" + v1)
+        result_json(fx, "notes/reviews/r2.json", S_R2, "Done.\n" + v2)
+        fx.entry["Review"] = [f"Review: notes/reviews/r1.txt reviewer-session={S_R1} result=notes/reviews/r1.json",
+                              f"Review: notes/reviews/r2.txt reviewer-session={S_R2} result=notes/reviews/r2.json"]
+        fx.entry["State"] = "State: foo=reviewed:FIX foo=reviewed:APPROVE" + ("" if narrow else
+                                                                             " bar=reviewed:APPROVE bar=reviewed:APPROVE")
+        fx.entry["Mission"] = ("Mission: selftest edges=notes/missions/selftest.edges.jsonl "
+                               f"scope=notes/snapshots/m1.sha256,{m2rel}" + (f" repairs={REP}" if token else ""))
+        return fx
+    passes("drfc-repaired-mission", repaired(new()), lambda d: expect(
+        d["provenance"]["mission"] == "verified" and d["mission"]["repairs"]["rows"] == 1
+        and d["mission"]["repairs"]["pending_after"] is False and d["mission"]["chain_reviews"][0]["verdict"] == "FIX",
+        d.get("mission")))
+    refuse("drfc-bad-disposition", repaired(new(), rows=(dict(ROW, disposition="fixed"),)), "repair-grammar",
+           ["row 1", "disposition"])
+    fx = bound(new())
+    fx.files[REP] = ""
+    fx.files["notes/snapshots/m.sha256"] += f"{h(b'')}  selftest.repairs.jsonl\n"
+    fx.rows[4] = dict(fx.rows[4], scope_id=sid(fx.files["notes/snapshots/m.sha256"]))
+    fx.entry["Mission"] += f" repairs={REP}"
+    refuse("drfc-empty-repairs-file", fx, "mission-repairs-missing", [REP])
+    refuse("drfc-second-row", repaired(new(), rows=(ROW, ROW)), "repair-duplicate", ["F1"])
+    refuse("drfc-no-token", repaired(new(), token=False), "repair-missing", ["F1", "no repairs= token"])
+    refuse("drfc-class-differs", repaired(new(), rows=(dict(ROW, **{"class": "authority-bypass"}),)), "repair-class-mismatch", ["F1"])
+    refuse("drfc-sweep-short", repaired(new(), rows=(dict(ROW, sweep=["E1"]),)), "sweep-missing", ["F1", "E2"])
+    refuse("drfc-reviewer-as-author", repaired(new(), rows=(dict(ROW, author_session=S_R1),)), "repair-author-mismatch", [S_R1])
+    refuse("drfc-bar-claimed", repaired(new(), rows=(dict(ROW, changed=["PRD-foo.md", "PRD-bar.md"]),)), "repair-hash-mismatch",
+           ["PRD-bar.md", "claimed changed"])
+    ACC = {"id": "F2", "class": "provenance", "accepts": ["F1"], "prds": [], "consumers": [], "counterexample": "x",
+           "correction": "none", "control": "y"}
+    AMD = dict(ROW, finding=None, **{"class": None}, sweep=["E1"], disposition="amended", reason="foo re-worded")
+    refuse("drfc-decline-not-same-manifest", repaired(new(), rows=(
+        dict(ROW, disposition="declined", reason="no change needed", changed=[], after="notes/snapshots/m1.sha256"), AMD),
+        r2_side=[ACC]), "repair-scope-mismatch", ["row 1", "after notes/snapshots/m1.sha256"])
+    refuse("drfc-bar-dropped-unreviewed", repaired(new(), rows=(dict(ROW, changed=["PRD-foo.md", "selftest.edges.jsonl"], after=N2),),
+                                                   narrow=True), "affected-consumer-unreviewed", ["PRD-foo.md", "PRD-bar.md", "E1"])
+    refuse("drfc-decline-unaccepted", repaired(new(), rows=(dict(ROW, disposition="declined", reason="no change needed"),)),
+           "repair-declined-unaccepted", ["F1"])
 
     # mission edge map (PRD-dream-mission-edge-map): one passing fixture, one refusal per new id
     def edged(fx, mutate=None, state=None):
