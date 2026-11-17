@@ -877,11 +877,15 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
                 c["verdict"] = mm.group(1)
         sc = f + ".findings.jsonl"
         scfull = resolve(c["rv"]["file"]) + ".findings.jsonl"
+        unreadable = None       # only a missing sidecar is absent (findings=none); any other read error is not
         try:
             with open(scfull, "rb") as fh:
                 sbytes = fh.read()
-        except OSError:
+        except FileNotFoundError:
             sbytes = None
+        except OSError as e:
+            sbytes, unreadable = None, e.strerror or type(e).__name__
+            L.fail("mission-finding-incomplete", f"{sc}: unreadable ({unreadable}); only a missing sidecar counts as absent")
         fx = [t for t in rl if t.startswith("findings=")]
         read = sbytes
         if not fx:
@@ -892,7 +896,7 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
         elif len(fx) > 1 or not FINDINGS_LINE_RE.fullmatch(fx[0]):
             L.fail("mission-finding-incomplete", f"{f}: result {res}: {len(fx)} findings= line(s); exactly one "
                                                  "'findings=<none|sha256>' is required")
-        else:
+        elif unreadable is None:    # an unreadable sidecar binds to no findings= line (refused above)
             want = fx[0][len("findings="):].strip()
             got = "none" if sbytes is None else hashlib.sha256(sbytes).hexdigest()
             if want == got:
