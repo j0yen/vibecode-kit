@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # AC4 (R3, R4) — the FIX fixture lints clean with its finding counted (the advisory accepts
-# row, empty prds, uncounted); its sidecar absent, empty, lacking a field or a known class
-# (the capture's findings= line re-signed so the rows are read), or differing from the
+# row, empty prds, uncounted); its sidecar absent, empty, lacking a field or a known class,
+# or holding an advisory accepts row of a class other than provenance (R4, review L10) (the
+# capture's findings= line re-signed so the rows are read), or differing from the
 # capture's findings= line (an accepts row appended, a finding deleted), also before
 # SIDECAR_BINDING_SINCE when the line is present, is mission-finding-incomplete naming the
 # file, row, field or result path; before SIDECAR_BINDING_SINCE without the line it is
@@ -26,6 +27,8 @@ use fix; side "$MR_CHAIN" "del R[0]['control']"; resign "$MR_CHAIN"; run_mr; fin
 has_fail mission-finding-incomplete "$SC" "row 1" "control"
 use fix; side "$MR_CHAIN" "R[0]['class'] = 'bogus-class'"; resign "$MR_CHAIN"; run_mr; findings_eq '["mission-finding-incomplete"]'
 has_fail mission-finding-incomplete "$SC" "row 1" "class"
+use fix; side "$MR_CHAIN" "R[1]['class'] = 'authority-bypass'"; resign "$MR_CHAIN"; run_mr; findings_eq '["mission-finding-incomplete"]'
+has_fail mission-finding-incomplete "$SC" "row 2" "field class" "an advisory accepts row is class provenance"
 use fix; side "$MR_CHAIN" "R[0]['consumers'] = []"; resign "$MR_CHAIN"; run_mr; has_fail mission-finding-incomplete "row 1" "consumers"
 for v in sidecar-accepts sidecar-deleted preinstall-line; do
   use "$v"; run_mr; findings_eq '["mission-finding-incomplete"]'
@@ -47,4 +50,4 @@ use base; setline Review "Review: $MR_CHAIN/verdict.txt reviewer-session=$S_M1";
 # R4: finding ids unique across the note's chain-review sidecars (r8 F46; r9 F50)
 use reused-id; run_mr; has_fail mission-finding-incomplete "F1" "$SC" "notes/reviews/chain-r2/verdict.txt.findings.jsonl"
 use reused-id; side notes/reviews/chain-r2 "R[0]['id'] = 'F7'"; resign notes/reviews/chain-r2; run_mr; no_id mission-finding-incomplete
-pass "FIX clean; sidecar absent/empty/field/class/consumers; digest x3; pre-install unbound; post-install no findings= line; mission= x5; re-used id"
+pass "FIX clean; sidecar absent/empty/field/class/consumers/advisory class; digest x3; pre-install unbound; post-install no findings= line; mission= x5; re-used id"
