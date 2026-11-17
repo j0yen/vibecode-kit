@@ -102,3 +102,15 @@ doubts a rule can see what it cost when it was missing. Append-only.
   consumers are re-reviewed at their new digests; only the changed PRDs and their consumers
   are held until the mission's final APPROVE, and a decline stands only when a later reviewer
   accepts it (PRD dream-failure-class-sweep).
+- **The repairs file in every later manifest, said where the author reads (2026-11-17, A1723,
+  parent A1296).** PRD dream-failure-class-sweep R1 made the repairs file a packet member from its
+  first row on, and the lint enforced it (`mission-scope-incomplete` naming the repairs basename
+  and the manifest), but neither the freeze paragraph nor the repair paragraph of Phase 3 said
+  so. Native run2r (author 2b5b1db1) re-linted run 1's record and found no move the skill
+  allows that clears the finding: the manifests frozen after the first row omit the file and a
+  review binds to each manifest's bytes. Both paragraphs now carry one sentence, word for word:
+  "Once any repairs row exists, the repairs file is a packet member: list its basename in every
+  `scope=` manifest later than the earliest `before` any row names, including that row's own
+  `after`, so write the row (it names `after` by path) before freezing `after`." The freeze
+  list names the `repairs=` file with that condition, and a drift test lints fixture notes that
+  follow and break the sentence (PRD dream-repairs-file-in-packet).
