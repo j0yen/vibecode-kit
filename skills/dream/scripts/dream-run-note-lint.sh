@@ -845,6 +845,7 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
     for c in chain:
         f, res = c["rv"]["file"], c["rv"]["result"]
         c["verdict"], c["findings"], c["advisory"], c["sidecar_bound"] = None, [], [], False
+        c["named"] = []         # every non-advisory row naming an id, well-formed or not (the sweep's R1)
         fl = [norm_line(x) for x in (c["text"] or "").split("\n")]
         ml = [" ".join(t.split()) for t in fl if t.startswith("mission=")]
         mm = MISSION_LINE_RE.fullmatch(ml[0]) if len(ml) == 1 else None
@@ -958,6 +959,8 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
                     ok = False
             if isinstance(rid, str) and rid.strip() and rid not in ids_seen:
                 ids_seen[rid] = sc
+                if not adv_row:
+                    c["named"].append(r)
             if ok:
                 (c["advisory"] if adv_row else c["findings"]).append(r)
     # the mission verdict: the last chain review, in line (launch) order, of the last listed manifest
@@ -1069,6 +1072,16 @@ REPAIR_FIELDS = ("finding", "class", "author_session", "before", "after", "chang
 DISPOSITIONS = ("repaired", "declined", "amended")
 
 
+def names_of(f, *keys):
+    """The string members of a sidecar row's prds and consumers lists (or of the named keys);
+    a malformed row (chain-review R4 refuses it on its own) contributes what it names."""
+    out = []
+    for k in keys or ("prds", "consumers"):
+        v = f.get(k)
+        out += [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
+    return out
+
+
 def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei, route, vr, deps, home, resolve):
     """PRD-dream-failure-class-sweep R1-R8 for an entry whose Mission: line carries scope=.
     Returns the mission.repairs JSON object, or None when nothing here applies (no repairs=,
@@ -1078,7 +1091,9 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
     rbase = os.path.basename(tok) if tok else None
     hd = mrec["header"]
     ids = [m["id"] for m in mans]
-    need = [(p, f) for p, c in enumerate(chain) if p + 1 < len(chain) for f in c["findings"]]
+    # R1/R2: a finding is a non-advisory sidecar row naming an id, its issuing review the first
+    # sidecar holding the id (chain-review R4 refuses a re-use, and a malformed row on its own)
+    need = [(p, f) for p, c in enumerate(chain) if p + 1 < len(chain) for f in c["named"]]
 
     def moved():
         for k in range(len(mans) - 1):
@@ -1096,8 +1111,8 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             L.fail("repair-missing", f"finding {f['id']} of {chain[p]['rv']['file']}: no repairs= token on the "
                                      "Mission: line (carried or inherited)")
         return out
-    issuer = {f["id"]: p for p, c in enumerate(chain) for f in c["findings"]}
-    fobj = {f["id"]: f for c in chain for f in c["findings"]}
+    issuer = {f["id"]: p for p, c in enumerate(chain) for f in c["named"]}
+    fobj = {f["id"]: f for c in chain for f in c["named"]}
     prds = set(hd["prds"]) if hd else set()
 
     def man_index(p):
@@ -1170,8 +1185,8 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                 ch = r.get("changed")
                 if ok and fid in fobj and disp == "repaired" and cls != "provenance" and isinstance(ch, list):
                     f = fobj[fid]
-                    allowed = {x for x in f["prds"] + f["consumers"] if x in prds}
-                    names = {x[len("external:"):] for x in f["consumers"] if x.startswith("external:")}
+                    allowed = {x for x in names_of(f) if x in prds}
+                    names = {x[len("external:"):] for x in names_of(f, "consumers") if x.startswith("external:")}
                     allowed |= {os.path.basename(cp) for nm, cp in (header_contracts(hd) if hd else []) if nm in names}
                     if not ch:
                         L.fail("repair-grammar", f"{tok}: row {n}: finding {fid}: changed is empty on a repaired {cls} "
@@ -1276,9 +1291,9 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             aff, cls = set(x["changed"]) & bprds, None
         elif fid in fobj and x["disp"] in ("repaired", "declined"):
             f = fobj[fid]
-            aff, cls = set(f["prds"] + f["consumers"]), r.get("class")
-            if cls != f["class"]:
-                L.fail("repair-class-mismatch", f"finding {fid}: row {n} class {cls}, the finding's {f['class']}")
+            aff, cls = set(names_of(f)), r.get("class")
+            if cls != f.get("class"):
+                L.fail("repair-class-mismatch", f"finding {fid}: row {n} class {cls}, the finding's {f.get('class')}")
         else:
             aff, cls = None, None
         if aff is not None and cls != "provenance" and bi is not None:
@@ -1395,7 +1410,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                     hold(b, why)
         elif x["disp"] == "declined" and x["fid"] in fobj and x["fid"] not in sup and accepted.get(x["fid"]) is None:
             f = fobj[x["fid"]]
-            base = {y for y in f["prds"] + f["consumers"] if y in prds}
+            base = {y for y in names_of(f) if y in prds}
             nm = set(base)
             for e in mans[chain[issuer[x["fid"]]]["idx"]]["frozen_edges"]:
                 if e["status"] in ("known", "external"):

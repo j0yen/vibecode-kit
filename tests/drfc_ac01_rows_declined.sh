@@ -8,7 +8,7 @@
 # repair-missing for F1, repair-declined-unaccepted with a declined row, exit 0 once accepted.
 # Matrix controls: a row for an unknown id beside the real finding unrepaired is repair-grammar
 # and repair-missing (R1); `provenance` written for a missing-producer-runner finding is
-# repair-class-mismatch (R3).
+# repair-class-mismatch (R3). A malformed sidecar row (chain-review R4) still names its id for R1.
 set -uo pipefail
 # shellcheck source=tests/drfc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drfc_lib.sh"
@@ -37,4 +37,8 @@ use reversed-accepted; run_fc; [ "$RC" = 0 ] || fail "reversed, accepted: rc=$RC
 rep 'm["declined"][0]["accepted_by"] == "'"$S_F2"'"' "reversed accepted_by r2"
 use base; redit "R[0]['finding'] = 'F99'"; run_fc; has_fail repair-grammar "F99"; has_fail repair-missing "F1"
 use base; redit "R[0]['class'] = 'provenance'"; run_fc; has_fail repair-class-mismatch "F1"
-pass "base rows 2; declined accepted x2; unaccepted, re-used id; reversed x3; unknown id; class"
+# a malformed sidecar row still names its id (R1: "an id present in some chain review's findings
+# sidecar"): chain-review R4 refuses the row on its own, the repairs row for it is no repair-grammar
+use base; side "$R1D" "R[0]['consumers'] = []"; resign "$R1D"; run_fc; findings_eq '["mission-finding-incomplete"]'
+has_fail mission-finding-incomplete "row 1" "consumers"
+pass "base rows 2; declined accepted x2; unaccepted, re-used id; reversed x3; unknown id; class; malformed row's id"
