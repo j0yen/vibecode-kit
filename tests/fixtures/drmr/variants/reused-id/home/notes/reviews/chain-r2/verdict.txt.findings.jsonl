@@ -1,0 +1,1 @@
+{"id": "F1", "class": "authority-bypass", "severity": "MEDIUM", "prds": ["PRD-b.md"], "consumers": ["PRD-c.md"], "counterexample": "F1 counterexample", "correction": "F1 minimal correction", "control": "F1 discriminating control"}

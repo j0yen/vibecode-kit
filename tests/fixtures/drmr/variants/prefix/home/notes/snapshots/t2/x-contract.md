@@ -1,0 +1,1 @@
+# external x contract (fixture)

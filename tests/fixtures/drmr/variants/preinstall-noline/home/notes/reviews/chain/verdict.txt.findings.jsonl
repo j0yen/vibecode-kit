@@ -1,0 +1,3 @@
+{"id": "F1", "class": "missing-producer-runner", "severity": "MEDIUM", "prds": ["PRD-a.md"], "consumers": ["external:x"], "counterexample": "F1 counterexample", "correction": "F1 minimal correction", "control": "F1 discriminating control"}
+{"id": "F2", "class": "provenance", "accepts": ["F0"], "prds": [], "consumers": [], "counterexample": "F2 accepts the decline", "correction": "none", "control": "F2 control"}
+{"id": "F9", "class": "provenance", "accepts": ["F1"], "prds": [], "consumers": [], "counterexample": "F9 accepts the decline", "correction": "none", "control": "F9 control"}

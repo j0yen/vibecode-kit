@@ -1,0 +1,1 @@
+{"id": "F3", "class": "unreachable-transition", "severity": "MEDIUM", "prds": ["PRD-a.md"], "consumers": ["external:x"], "counterexample": "F3 counterexample", "correction": "F3 minimal correction", "control": "F3 discriminating control"}
