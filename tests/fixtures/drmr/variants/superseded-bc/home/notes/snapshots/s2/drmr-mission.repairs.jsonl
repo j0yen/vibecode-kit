@@ -1,0 +1,1 @@
+{"finding": null, "class": null, "author_session": "dddddddd-0000-4000-8000-000000000001", "before": "notes/snapshots/s1/snapshot.sha256", "after": "notes/snapshots/s2/snapshot.sha256", "changed": ["PRD-a.md"], "sweep": ["E1"], "disposition": "amended", "reason": "PRD a re-worded after the s1 review; re-reviewed on s2"}

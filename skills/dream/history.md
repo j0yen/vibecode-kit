@@ -67,3 +67,38 @@ doubts a rule can see what it cost when it was missing. Append-only.
   bytes, is result-bound and says `mission=APPROVE`. A later FIX, a later stale pin or an
   unlisted later review keeps the pin. The rule is a strict subset of PRD
   dream-mission-chain-review R5 and is replaced when that PRD lands.
+- **Mission edge map before decomposition (2026-11-16, A1723, parent A1296).** The 23
+  wm-loop PRDs of the closed-loop mission each passed their own lint and two full review
+  rounds of at most four PRDs per reviewer before round 3 named `R3B3-01` (CONSUMED has no
+  writer; acceptance and the attempt-2 review are unreachable) and `R3B3-02` (the
+  steady-state census has no runner; the ingest trigger is circular). Both are arrows
+  between PRDs with no producer or no runner, and no record asked who writes `CONSUMED`:
+  `Depends-on` orders builds without saying what crosses the boundary. A mission run now
+  writes `notes/missions/<name>.edges.jsonl` before decomposition, every edge with its eight
+  fields or an owned `unknown` status, and the run note's `Mission:` line makes the lint
+  refuse an unexplained arrow (PRD dream-mission-edge-map).
+- **Whole-chain review of a mission (2026-11-16, A1723, parent A1296).** Round-3 reviewers
+  of the closed-loop mission found `R3B5-05 HIGH — CONSUMED has no writer; the repair
+  attributes it to PRD 9 R1, whose bytes do not write it.` after a round-2 repair had
+  claimed the fix, because every reviewer saw at most four PRDs and no record named a
+  mission scope or a mission verdict. The first whole-mission packet (54 PRDs,
+  `snapshot.sha256`, one reviewer with `role` review) was frozen at 08:00 PST on 2026-11-16
+  by an orchestrator's hand, not by the skill. Phase 3 now freezes the mission packet as a
+  manifest listed in the `Mission:` line's `scope=`, launches one whole-chain reviewer on
+  it, and records its per-PRD verdicts, one `mission=` line and a findings sidecar with six
+  failure classes; the lint refuses an incomplete scope, a missing or unbound chain review, a
+  missing or unbound verdict or sidecar, a packet changed under `mission=APPROVE`, and a
+  dependent PRD reaching `eligible`. Only the latest chain review naming a slug pins it,
+  which replaces the gate fix's supersession rule above (PRD dream-mission-chain-review).
+- **Failure-class sweep and repair rows (2026-11-16, A1723, parent A1296).** The closed-loop
+  mission's wm-loop PRDs were repaired over three rounds, and each round's repair was
+  re-checked only by the next full batch: `R3B5-05 HIGH — CONSUMED has no writer; the repair
+  attributes it to PRD 9 R1, whose bytes do not write it.` was found in round 3 after round 2
+  had claimed the fix, because nothing tied a repair to the bytes it moved, the edges it
+  swept or the consumers it touched. A finding of a chain review followed by a later one now
+  needs a row in the `Mission:` line's `repairs=` file (repaired, declined or amended) whose
+  class, sweep over the incident edges, author lineage and `before`/`after` digests the lint
+  checks; every digest that moves between two listed manifests is declared; affected
+  consumers are re-reviewed at their new digests; only the changed PRDs and their consumers
+  are held until the mission's final APPROVE, and a decline stands only when a later reviewer
+  accepts it (PRD dream-failure-class-sweep).

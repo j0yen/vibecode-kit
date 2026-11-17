@@ -1,0 +1,1 @@
+{"id": "F1", "class": "missing-producer-runner", "severity": "MEDIUM", "prds": ["PRD-a.md"], "consumers": ["PRD-b.md"], "counterexample": "F1 counterexample", "correction": "F1 minimal correction", "control": "F1 discriminating control"}

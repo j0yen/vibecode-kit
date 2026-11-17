@@ -1,0 +1,1 @@
+# external y contract (fixture)

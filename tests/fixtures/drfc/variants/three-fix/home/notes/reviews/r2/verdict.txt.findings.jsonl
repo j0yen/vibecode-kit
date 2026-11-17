@@ -1,0 +1,1 @@
+{"id": "F4", "class": "semantic-incompatibility", "severity": "MEDIUM", "prds": ["PRD-d.md"], "consumers": ["PRD-c.md"], "counterexample": "F4 counterexample", "correction": "F4 minimal correction", "control": "F4 discriminating control"}

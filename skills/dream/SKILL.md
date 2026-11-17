@@ -158,6 +158,22 @@ launcher's row then carries `role` review, `scope` and `scope_id`; a request wit
 snapshot launches as an author, which the lint refuses on a `Review:` line. Keep the
 manifest until the run note is linted.
 
+**Mission trace and edge map (before decomposition).** When a run drafts a mission (several
+PRDs over one shared chain), write `notes/missions/<name>.edges.jsonl` under the PRD home
+before splitting it into PRDs. Line 1 is the header: `mission` (the name), `outcome`,
+`invariants` (the load-bearing ones), `prds` (every mission PRD basename), `external` (names,
+or `{name, contract}` with the path or paths of that external's contract file), optional
+`packet` (other packet basenames, such as the vision) and, for a one-PRD mission,
+`single_component` with its reason. Every later line is one edge: `id`, the eight fields
+`producer`, `consumer`, `command`, `trigger`, `authority`, `effect_id`, `recovery_owner` and
+`postcondition`, and a `status` of `known`, `external` (one endpoint is `external:<name>`) or
+`unknown` (with an `owner`). An endpoint is a `prds` member, `external:<name>` or `UNKNOWN`.
+An unexplained arrow is not completion: a known edge with an empty field or an `UNKNOWN`
+endpoint is refused, and an edge whose producer or runner nobody can name yet is written
+`unknown` with an owner, never left out. Check the file with
+`scripts/dream-run-note-lint.sh --edges <path> --prds <PRD basenames>` before decomposing;
+the run note opts in with its `Mission:` line (Phase 4).
+
 ## Loop-ready fleets (`/dream loop <name>` or a profile `Loop:` line)
 
 The vision carries a Loop contract: loop name, metric (validated by hand on 3–5 known
@@ -251,6 +267,34 @@ On a host without `.config/skill-routing/policy.json` and `fable-launch.sh` (red
 and ryzen7 on 2026-11-14), `/dream` runs on the invoking session's own model and effort;
 no pin stands in for the absent route, and the Phase 4 run note writes `Route: ungoverned`.
 
+**Whole-chain review (before the first independent review):** on a mission run, once the
+edge map is written, freeze the packet: one `sha256sum` manifest under
+`notes/snapshots/` listing every mission PRD, the vision and other `packet` members the
+edges header names, the adversarial matrix, the edges file and a copy of each external
+`contract` file (copied beside the PRDs, so the reviewer reads the bytes the edge cites).
+Launch one reviewer through the launcher with `review.snapshot` = that manifest and a
+pre-drawn `--session-id`, record its `result.json` as `result=` on its `Review:` line, and
+list the chain reviews of one manifest in launch order. The prompt forbids edits to the
+packet, asks the reviewer to verify the manifest with `sha256sum -c` and to construct an
+implementation that satisfies every local AC while failing the mission; per finding it
+asks for a counterexample, the affected consumers, the minimal correction, a
+discriminating control and one failure class of `provenance`, `missing-producer-runner`,
+`authority-bypass`, `unreachable-transition`, `semantic-incompatibility`,
+`false-green-acceptance`, written as one row of `<verdict file>.findings.jsonl`, numbered
+from the note's next free id and never re-using an id from an earlier sidecar. The final
+message ends with one `findings=<sha256 of the sidecar, or none>` line, the per-PRD verdict
+lines and one `mission=<APPROVE|FIX|REJECT> <session>` line verbatim, and the `result=`
+capture carries those same lines. The run note's `Mission:` line gains `scope=` (the
+manifests, in freeze order). A mission split over several run entries keeps one `Mission:`
+name and one multi-PRD edge map, and a repair appends the re-frozen manifest to `scope=`
+rather than replacing it. Until the `Mission:` line carries `scope=` and a chain review of
+the last listed manifest binds, and while that manifest's latest-launched review is on no
+`Review:` line, every mission PRD is held back from `eligible`. A finding of the last chain
+review, whatever its `mission=` line says, holds the PRDs it names and their one-hop edge
+neighbours in either direction; an unknown edge holds both its endpoints; a PRD whose verdict
+in the latest chain review naming it is FIX or REJECT, or that no chain review names, is held
+itself; the other PRDs go ahead.
+
 **Adversarial pass (before review):** for each PRD in the batch, write a table with the
 columns `invariant` (the requirement or AC id), `still-broken implementation` (a
 plausible one that passes the ACs as written), `counterexample`, `discriminating check`
@@ -282,13 +326,37 @@ touches more than one repo or surface, is reviewed alone and persists in a batch
 one. Write each verdict as `<slug> APPROVE|FIX|REJECT <reviewer>`, one line per PRD, to a
 review file. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
 slug's current PRD file with the digest in its reviewer's `review.snapshot` manifest, so a
-later edit to that PRD needs a new review (FIX and REJECT are not pinned). A note may carry
-one `Mission:` line with a `scope=` token, a comma list of reviewer `review.snapshot`
-manifests (a gate-fix convention, no other `Mission:` semantics); on such a note an earlier
-listed review's stale APPROVE on a slug is superseded (not pinned) only when the
-latest-launched bound review of the task is a listed review that names the slug, APPROVEs
-its current bytes, carries `result=` and a single `mission=APPROVE`; a later FIX keeps the
-earlier pin.
+later edit to that PRD needs a new review (FIX and REJECT are not pinned). On a note whose
+`Mission:` line carries `scope=`, only the latest chain review (in `Review:` line order)
+whose file names a slug pins that slug; an earlier chain review's APPROVE on it is
+superseded by that later verdict, and under `mission=APPROVE` the whole packet is pinned to
+that review's manifest.
+
+**After the first systemic finding or material repair:** classify each finding by the six
+names (`provenance`, `missing-producer-runner`, `authority-bypass`, `unreachable-transition`,
+`semantic-incompatibility`, `false-green-acceptance`). A `provenance` failure repairs
+provenance only: the record, not the design: `changed` names only the packet files it moved
+(it may be empty), and `sweep` is optional. A systemic
+class triggers a failure-class sweep across every edge incident to the affected PRDs and
+consumers (the finding's `prds` and `consumers`, read from the edges copy frozen in the
+`before` manifest), recorded as one row of the `repairs=` file without waiting for a full
+batch: `{finding, class, author_session, before, after, changed, sweep, disposition}`, where
+`disposition` is `repaired`, `declined` (with a `reason`) or `amended` (an author change
+between two reviews that answers no finding: `finding` and `class` null, a `reason`, and
+`changed` naming what moved). Feedback goes to the same author: `author_session` is a session
+of this run's author lineage (an author launch row under the `Task:`). Compare each changed
+contract and every affected consumer against the actual `before` and `after` hashes: `before`
+and `after` are consecutive `scope=` manifests, every basename that moved between two listed
+manifests is in some row's `changed`, and every consumer of a changed producer appears at its
+`after` digest in a later review's manifest. Reuse unchanged accepted evidence: a bounded
+re-review covers changed ∪ affected, and an unaffected PRD keeps its earlier APPROVE. There is
+no blanket hold: only the rows' `changed` members and their affected consumers wait, until the
+mission's final APPROVE. A later chain reviewer, under any verdict, names each `declined`
+finding it accepts in an advisory sidecar row of class `provenance` with an `accepts` list,
+which the lint reads and which needs no repair row: an accepted decline is a reviewer's row
+and never an author's label, an unaccepted one keeps holding its dependents, and an author who
+later agrees writes one `repaired` row after the decline. A round's hold ends with the
+mission's final APPROVE.
 
 ## Amend (`/dream amend <slug>`)
 
@@ -330,9 +398,10 @@ Route: <route> <model_id> <effort> session=<id> decision=<decisions.jsonl ts>
 Analysis: wwhtbt=<ran <path> | reused <path> | skipped: <reason>> 5whys=<page <path> | inline | skipped: <reason>> adversarial=<<path> uncovered=<n> | skipped: <reason>>
 Review: <verdict file path> reviewer-session=<id> [result=<json path>]
 State: <slug>=<value> [<slug>=<value> ...]
+Mission: <name> edges=<path> [scope=<manifest>[,<manifest>...]] [repairs=<path>]
 Open questions: <items>
 ```
-The five record lines, each on one line:
+The six record lines, each on one line (`Mission:` only on a mission run):
 - `Route:` names the launcher's decisions row (its `ts`) and the drafting session. On a
   host with no decisions log write `Route: ungoverned session=<id> host=<hostname>`. On a
   host that has one, only a launcher-started run passes: a typed `/dream` there writes
@@ -343,13 +412,31 @@ The five record lines, each on one line:
   `pending-scan`, `eligible`, `ineligible`. A slug repeats once per state it reached, in
   order (`foo=reviewed:FIX foo=persisted:<sha>` is a push after a FIX verdict). Its
   `reviewed:` tokens are exactly the verdicts the `Review:` files give it, in line order.
+- `Mission:` names the mission and its edge map (`edges=`). A mission keeps one `Mission:`
+  name and one edge map across its entries: a later entry of the same `Task:` inherits the
+  `edges=`, `scope=` and `repairs=` tokens it omits, never names another edge map, and carries
+  the line whenever its `State:` names a member of the mission (the live header's `prds`, the
+  edges copy frozen beside every `scope=` manifest, and earlier entries' `State:` slugs). A
+  run without the line lints as before.
 - Paths are relative to the PRD home or absolute.
 
 After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md --last
---json` on it. Fix a finding you can fix and rerun the lint before the reply. A finding
+--json` on it. A note with a `Mission:` line is also checked for `mission-grammar`,
+`mission-edges-missing`, `edge-grammar`, `edge-unexplained`, `edge-unknown-unowned`,
+`edge-node-unlisted` and `mission-prd-unlisted`, and one whose line carries `scope=` for
+`mission-scope-mismatch`, `mission-scope-incomplete`, `mission-review-missing`,
+`mission-verdict-missing`, `mission-finding-incomplete`, `mission-snapshot-stale` and
+`mission-approval-blocked` (the last also without `scope=`, for a member reaching
+`eligible`), and for its repairs (`repairs=`, or a finding followed by a later chain review,
+or a digest moving between two listed manifests) for `repair-grammar`,
+`mission-repairs-missing`, `repair-duplicate`, `repair-missing`, `repair-class-mismatch`,
+`sweep-missing`, `repair-author-mismatch`, `repair-hash-mismatch`, `repair-scope-mismatch`,
+`affected-consumer-unreviewed` and `repair-declined-unaccepted`. Fix a finding you can fix and rerun the lint before the reply. A finding
 you cannot fix (`route-ungoverned-on-governed-host`; `analysis-page-unbound` for a page
 another worker wrote) stays in the note and is quoted in the reply with the lint's JSON.
-The reply quotes the `State:` line and the provenance labels, `snapshot` among them:
+The reply quotes the `State:` line and the provenance labels, `snapshot` and `mission` among them
+(`mission`: `verified` for a bound `mission=APPROVE` with no mission finding, `self` for a
+FIX, REJECT or refused chain, `none` without a `Mission:` line):
 `verified` when every `Review:` row is a reviewer launched with a snapshot whose bytes its
 APPROVEs still match, `legacy` for reviewer rows written before the launcher recorded a
 role (reported, never a pass), `none` beside `Review: none`, else `self`; `verified` counts a

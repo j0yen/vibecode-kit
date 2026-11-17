@@ -1,0 +1,1 @@
+{"id": "F7", "class": "provenance", "accepts": ["F1"], "prds": [], "consumers": [], "counterexample": "F7 accepts the decline", "correction": "none", "control": "F7 control"}
