@@ -54,3 +54,16 @@ doubts a rule can see what it cost when it was missing. Append-only.
   in the task file, `policy.json`, the approvals report or ledger rows A1300 and
   A1301), and none is invented here. The Joe 2026-10-24 quote now lives in this entry rather than in
   SKILL.md (PRD dream-route-pin-removal).
+- **Superseded chain-review pins (2026-11-16, gate fix, A1723 prerequisite).** The
+  A1719 snapshot pin held every listed review's APPROVE to the current bytes forever, so a
+  truthful multi-round FIX loop that re-approved an edited PRD could never lint clean: the
+  A1723 run note (`notes/dream-log.md`, entry `2026-11-16T22:23:45Z`, mission
+  dream-early-integration) kept four stale pins (r3 edge-map, r5 chain-review and
+  failure-class-sweep, r8 chain-review), each re-approved on the current bytes by the
+  later-launched r9, and its only lint-clean rewrites dropped `Review:` lines, which
+  falsifies the record. The gate fix lets a note's `Mission: ... scope=` list name the chain
+  reviews; an earlier listed review's stale APPROVE is superseded only when the
+  latest-launched bound review of the task is a listed review that re-approves the current
+  bytes, is result-bound and says `mission=APPROVE`. A later FIX, a later stale pin or an
+  unlisted later review keeps the pin. The rule is a strict subset of PRD
+  dream-mission-chain-review R5 and is replaced when that PRD lands.

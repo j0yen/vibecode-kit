@@ -282,7 +282,13 @@ touches more than one repo or surface, is reviewed alone and persists in a batch
 one. Write each verdict as `<slug> APPROVE|FIX|REJECT <reviewer>`, one line per PRD, to a
 review file. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
 slug's current PRD file with the digest in its reviewer's `review.snapshot` manifest, so a
-later edit to that PRD needs a new review (FIX and REJECT are not pinned).
+later edit to that PRD needs a new review (FIX and REJECT are not pinned). A note may carry
+one `Mission:` line with a `scope=` token, a comma list of reviewer `review.snapshot`
+manifests (a gate-fix convention, no other `Mission:` semantics); on such a note an earlier
+listed review's stale APPROVE on a slug is superseded (not pinned) only when the
+latest-launched bound review of the task is a listed review that names the slug, APPROVEs
+its current bytes, carries `result=` and a single `mission=APPROVE`; a later FIX keeps the
+earlier pin.
 
 ## Amend (`/dream amend <slug>`)
 
@@ -346,7 +352,8 @@ another worker wrote) stays in the note and is quoted in the reply with the lint
 The reply quotes the `State:` line and the provenance labels, `snapshot` among them:
 `verified` when every `Review:` row is a reviewer launched with a snapshot whose bytes its
 APPROVEs still match, `legacy` for reviewer rows written before the launcher recorded a
-role (reported, never a pass), `none` beside `Review: none`, else `self`. The labels mean consistent
+role (reported, never a pass), `none` beside `Review: none`, else `self`; `verified` counts a
+superseded APPROVE as matched, and the JSON names it under `superseded`. The labels mean consistent
 with the launcher's record on this host (`boundary`), a verified `result=` capture
 (`checked`), a gate-protected wiki page (`gated`) or the drafter's word (`self`); the
 decisions log is a same-user file, so none of them is authentication (`trust: same-uid`).
