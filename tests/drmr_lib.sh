@@ -3,8 +3,9 @@
 # Shared helpers for the drmr_* tests (PRD-dream-mission-chain-review). Reuses the drrec
 # helpers (lint, lint_ungov, setline, addline, decedit, jget, fail, pass). `use <variant>`
 # copies tests/fixtures/drmr (the passing bound mission) into a temporary directory with a
-# private HOME and overlays tests/fixtures/drmr/variants/<variant>/ (its decisions.jsonl and
-# the home files that differ), so each case is one named variant plus one mutation.
+# private HOME and overlays tests/fixtures/drmr/variants/<variant>/ (its decisions.jsonl and,
+# when the variant has a home/, the home files that differ; a failed copy fails the test), so
+# each case is one named variant plus one mutation.
 # DRREC_LINT runs the tests against another copy.
 # shellcheck source=tests/drrec_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drrec_lib.sh"
@@ -37,7 +38,10 @@ use() {
   rm -rf "${W:?}"; mkdir -p "$W"; cp -r "$MRFIX/home" "$W/home"; cp "$MRFIX/decisions.jsonl" "$DEC"
   if [ "$1" != base ]; then
     [ -d "$MRFIX/variants/$1" ] || fail "no variant $1"
-    cp -r "$MRFIX/variants/$1/home/." "$W/home/"; cp "$MRFIX/variants/$1/decisions.jsonl" "$DEC"
+    if [ -d "$MRFIX/variants/$1/home" ]; then   # later-unlisted overlays its decisions.jsonl only
+      cp -r "$MRFIX/variants/$1/home/." "$W/home/" || fail "variant $1: home overlay copy failed"
+    fi
+    cp "$MRFIX/variants/$1/decisions.jsonl" "$DEC" || fail "variant $1: decisions.jsonl copy failed"
   fi
 }
 # run_mr: lint --json; sets RC, JS, ERR; a traceback fails the test

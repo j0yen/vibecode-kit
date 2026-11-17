@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Known-bad on activation and listing (gate fix G1, G2, G3, G6.3), as amended by
 # PRD-dream-mission-chain-review.
-# Unchanged (base == head byte for byte, exit 1, review-snapshot-stale K/a): KB5 activation
-#   off (no Mission: line; Mission: without scope=; two Mission: lines; an empty scope= item:
-#   R9, PR #9's pin is unchanged without a scope).
+# Unchanged (base == head byte for byte, the head read without edge-map R5's mission keys and,
+#   for KB5-no-scope, KB5-two-mission and KB5-empty-item, minus edge-map R1's mission-grammar
+#   line for the case's own Mission: line (pair's GRAMMAR=1); exit 1, review-snapshot-stale
+#   K/a): KB5 activation off (no Mission: line; Mission: without scope=; two Mission: lines;
+#   an empty scope= item: R9, PR #9's pin is unchanged without a scope).
 # KB8 K's manifest not in scope=: K's pin is kept (R5: "A review that is not a chain review ...
 #   keeps PR #9's pin unchanged"), and, changed by PRD-dream-failure-class-sweep R5 ("before and
 #   after are consecutive manifests of the Mission: line's scope= list"), the copy's amended row
