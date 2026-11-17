@@ -28,7 +28,7 @@ setup_ei() {
   cp -r "$T/home" "$T/home.orig"; cp "$DEC" "$T/dec.orig"
 }
 # reset_ei: restore the copied fixture
-reset_ei() { rm -rf "$H"; cp -r "$T/home.orig" "$H"; cp "$T/dec.orig" "$DEC"; }
+reset_ei() { rm -rf "${H:?}"; cp -r "$T/home.orig" "$H"; cp "$T/dec.orig" "$DEC"; }
 # two_entry: use the two-entry note (entry 1 with Mission: and scope=, entry 2 same Task:
 # without the line, a=eligible) as the log
 two_entry() { cp "$H/notes/dream-log-two.md" "$LOG"; }

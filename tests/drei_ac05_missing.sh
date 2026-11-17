@@ -29,7 +29,7 @@ PY
 miss first-line-not-header "$EI_EDGES"
 reset_ei; two_entry; printf 'x' >> "$H/notes/snapshots/drei-m1/drei-mission.edges.jsonl"
 miss frozen-copy-altered notes/snapshots/drei-m1/drei-mission.edges.jsonl
-reset_ei; two_entry; rm "$H/notes/snapshots/drei-m1/drei-mission.edges.jsonl"
+reset_ei; two_entry; rm "${H:?}/notes/snapshots/drei-m1/drei-mission.edges.jsonl"
 miss frozen-copy-removed notes/snapshots/drei-m1/drei-mission.edges.jsonl
 # edge-grammar, by line and field
 gram() { # <case> <line> <field> [exact]
