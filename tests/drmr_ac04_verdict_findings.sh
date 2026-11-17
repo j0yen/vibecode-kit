@@ -5,7 +5,10 @@
 # capture's findings= line (an accepts row appended, a finding deleted), also before
 # SIDECAR_BINDING_SINCE when the line is present, is mission-finding-incomplete naming the
 # file, row, field or result path; before SIDECAR_BINDING_SINCE without the line it is
-# sidecar_bound false and no finding; 0 or 2 mission= lines, another session's, a differing
+# sidecar_bound false and no finding, and launched after it without the line (the FIX fixture,
+# its findings= line removed) it is mission-finding-incomplete naming the file, the result path
+# and "no findings= line" (review M3: the time only excuses a pre-install absence); 0 or 2
+# mission= lines, another session's, a differing
 # result= line or no result= is mission-verdict-missing with provenance.mission self. R4's
 # cross-sidecar uniqueness (the re-used-id variant; r9 F50 notes AC4's text omits it) is
 # asserted too: a re-used id names the id and both files; a new id fires nothing of R4.
@@ -31,6 +34,9 @@ done
 use preinstall-noline; run_mr
 [ "$RC" = 0 ] || fail "pre-install, no line: rc=$RC $ERR"; findings_eq '[]'
 jtrue 'd["mission"]["chain_reviews"][0]["sidecar_bound"] is False' "pre-install unbound"
+use fix; capture "$MR_CHAIN/result.json" "L[:] = [l for l in L if not l.startswith('findings=')]"; run_mr
+[ "$RC" = 1 ] || fail "post-install capture without a findings= line: rc=$RC $ERR"; findings_eq '["mission-finding-incomplete"]'
+has_fail mission-finding-incomplete "$MR_CHAIN/verdict.txt" "$MR_CHAIN/result.json" "no findings= line"
 # the mission= line
 mv_() { run_mr; has_fail mission-verdict-missing "$MR_CHAIN/verdict.txt" "$@"; jtrue 'd["provenance"]["mission"] == "self"' "self beside mission-verdict-missing"; }
 use base; vedit "$MR_CHAIN/verdict.txt" "L[:] = [l for l in L if not l.startswith('mission=')]"; mv_
@@ -41,4 +47,4 @@ use base; setline Review "Review: $MR_CHAIN/verdict.txt reviewer-session=$S_M1";
 # R4: finding ids unique across the note's chain-review sidecars (r8 F46; r9 F50)
 use reused-id; run_mr; has_fail mission-finding-incomplete "F1" "$SC" "notes/reviews/chain-r2/verdict.txt.findings.jsonl"
 use reused-id; side notes/reviews/chain-r2 "R[0]['id'] = 'F7'"; resign notes/reviews/chain-r2; run_mr; no_id mission-finding-incomplete
-pass "FIX clean; sidecar absent/empty/field/class/consumers; digest x3; pre-install unbound; mission= x5; re-used id"
+pass "FIX clean; sidecar absent/empty/field/class/consumers; digest x3; pre-install unbound; post-install no findings= line; mission= x5; re-used id"
