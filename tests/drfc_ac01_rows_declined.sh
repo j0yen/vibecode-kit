@@ -2,8 +2,10 @@
 # AC1 (R1, R2, R3, R8) — the drfc fixture (every non-advisory finding with a row) exits 0 with
 # repairs.rows 2; the declined variant lists {finding, reason, accepted_by, superseded} and
 # exits 0 when the second review's advisory row accepts row 1 (accepted_by that reviewer; a
-# same-manifest third review's row when it moves there); with nothing accepting, or a
-# non-advisory row re-using the id (r6 F39), repair-declined-unaccepted names F1, a eligible is
+# same-manifest third review's row when it moves there); with nothing accepting, a
+# non-advisory row re-using the id (r6 F39), or an advisory row in the issuing review's own
+# sidecar (R2: acceptance comes from a chain review later in line order; review L11),
+# repair-declined-unaccepted names F1, a eligible is
 # refused naming F1 and accepted_by is null; the unaccepted decline holds the finding's prds and
 # consumers and their one-hop edge neighbours in either direction (R7, over the issuing review's
 # frozen edges copy): with F1 on a and b, c (consumer of E2 b -> c) is held and d is not; with F1
@@ -52,6 +54,10 @@ has_fail mission-approval-blocked "slug b=eligible" "declined F1 (row 1)"
 if printf '%s\n' "$ERR" | grep -q '^FAIL mission-approval-blocked: slug a='; then fail "a (two hops from F1) held: $ERR"; fi
 held b c d
 use reused-id; run_fc; has_id mission-finding-incomplete; unacc "re-used id"
+use declined; rm -f -- "${H:?}/$R2D/verdict.txt.findings.jsonl"; capture "$R2D/result.json" "L[:] = [('findings=none' if l.startswith('findings=') else l) for l in L]"
+side "$R1D" "R.append({'id': 'F8', 'class': 'provenance', 'accepts': ['F1'], 'prds': [], 'consumers': [], 'counterexample': 'F8 accepts the decline', 'correction': 'none', 'control': 'F8 control'})"; resign "$R1D"
+run_fc; findings_eq '["repair-declined-unaccepted", "mission-approval-blocked"]'; unacc "the issuing review's own row"
+has_fail repair-declined-unaccepted "F1" "no later chain review's sidecar holds an advisory row accepting it"
 use reversed; run_fc; findings_eq '["repair-missing"]'; has_fail repair-missing "F1" "no repairs= token"
 use reversed-declined; run_fc; findings_eq '["repair-declined-unaccepted", "mission-approval-blocked"]'; unacc "reversed, declined"
 use reversed-accepted; run_fc; [ "$RC" = 0 ] || fail "reversed, accepted: rc=$RC $ERR"
@@ -62,4 +68,4 @@ use base; redit "R[0]['class'] = 'provenance'"; run_fc; has_fail repair-class-mi
 # sidecar"): chain-review R4 refuses the row on its own, the repairs row for it is no repair-grammar
 use base; side "$R1D" "R[0]['consumers'] = []"; resign "$R1D"; run_fc; findings_eq '["mission-finding-incomplete"]'
 has_fail mission-finding-incomplete "row 1" "consumers"
-pass "base rows 2; declined accepted x2; unaccepted (its one-hop hold both ways), re-used id; reversed x3; unknown id; class; malformed row's id"
+pass "base rows 2; declined accepted x2; unaccepted (its one-hop hold both ways), re-used id, the issuing review's own row; reversed x3; unknown id; class; malformed row's id"
