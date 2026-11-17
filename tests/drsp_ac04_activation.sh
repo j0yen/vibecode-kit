@@ -5,6 +5,7 @@
 # scope_id is another listed id, not its manifest's (review-scope-mismatch); KB10 one
 # listed item unreadable, one malformed (rule inactive, no new finding id).
 set -uo pipefail
+# shellcheck source=tests/drsp_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drsp_lib.sh"
 setup
 for c in KB5-no-mission KB5-no-scope KB5-two-mission KB5-empty-item KB7 KB8 KB10-unreadable KB10-malformed; do
@@ -18,4 +19,4 @@ if want KB10-unreadable || want KB10-malformed; then
   done
 fi
 if want KB9; then mut KB9; kb KB9 review-scope-mismatch; fi
-pass
+pass "KB5 KB7 KB8 KB9 KB10"

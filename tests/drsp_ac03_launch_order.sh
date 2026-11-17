@@ -5,10 +5,11 @@
 # (role review; role omitted); KB21 a listed review Y earlier than J in line order,
 # launched after J, FIX on a. Each: base == head bytes, exit 1, stale K/a.
 set -uo pipefail
+# shellcheck source=tests/drsp_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drsp_lib.sh"
 setup
 for c in KB4 KB11 KB12-review KB12-no-role KB21; do
   want "$c" || continue
   mut "$c"; kb "$c"
 done
-pass
+pass "KB4 KB11 KB12 KB21"

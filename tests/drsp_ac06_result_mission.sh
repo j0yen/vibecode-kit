@@ -5,6 +5,7 @@
 # mission=APPROVE J while its result.json says mission=FIX J. Each: base == head bytes,
 # exit 1, stale K/a.
 set -uo pipefail
+# shellcheck source=tests/drsp_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drsp_lib.sh"
 setup
 if want KB13; then mut KB13; kb KB13; fi
@@ -13,4 +14,4 @@ for c in KB19-file-fix KB19-file-none KB19-result-fix; do
   want "$c" || continue
   mut "$c"; kb "$c"
 done
-pass
+pass "KB13 KB14 KB19"

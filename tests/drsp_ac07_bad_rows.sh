@@ -4,6 +4,7 @@
 # launch row with ts absent; the same with a numeric ts; J's row scope numeric. Each:
 # base == head bytes, exit 1, stale K/a, no traceback (pair checks every stderr).
 set -uo pipefail
+# shellcheck source=tests/drsp_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drsp_lib.sh"
 setup
 for c in KB15-j-ts-absent KB15-j-ts-bad KB15-k-ts-bad KB15-other-ts-absent KB15-other-ts-numeric; do
@@ -11,4 +12,4 @@ for c in KB15-j-ts-absent KB15-j-ts-bad KB15-k-ts-bad KB15-other-ts-absent KB15-
   mut "$c"; kb "$c"
 done
 if want KB15-j-scope-numeric; then mut KB15-j-scope-numeric; kb KB15-j-scope-numeric review-scope-mismatch; fi
-pass
+pass "KB15"

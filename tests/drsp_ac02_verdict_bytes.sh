@@ -4,6 +4,7 @@
 # both stale); KB3 J's file names b and c only. Each: base == head byte for byte (text and
 # --json), exit 1, review-snapshot-stale naming K and slug a.
 set -uo pipefail
+# shellcheck source=tests/drsp_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drsp_lib.sh"
 setup
 if want KB1; then mut KB1; kb KB1; fi
@@ -12,4 +13,4 @@ if want KB2; then
   printf '%s\n' "$OUT" | grep -qF "FAIL review-snapshot-stale: notes/reviews/j.txt: reviewer-session $S_J: slug a: " || fail "KB2: J's pin not stale: $OUT"
 fi
 if want KB3; then mut KB3; kb KB3; fi
-pass
+pass "KB1 KB2 KB3"

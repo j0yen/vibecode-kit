@@ -10,6 +10,7 @@
 # P3/P4's preservation half holds at base trivially (no superseded key at all); their
 # discrimination is the G6.2 mutant (P4 turns red when K-stale is a constant True).
 set -uo pipefail
+# shellcheck source=tests/drsp_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drsp_lib.sh"
 setup
 pos() { # <case> <python assertions on d (head --json)>
@@ -54,4 +55,4 @@ assert "superseded" not in r[K] and "superseded" not in r[J], d["reviews"]'
   [ "$SAME" = 1 ] || fail "P4-only-b: head differs from base"
   echo "ok P4-only-b: no superseded key, base==head bytes"
 fi
-pass
+pass "P1 P3 P4 P4-only-b"
