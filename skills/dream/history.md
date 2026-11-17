@@ -77,3 +77,16 @@ doubts a rule can see what it cost when it was missing. Append-only.
   writes `notes/missions/<name>.edges.jsonl` before decomposition, every edge with its eight
   fields or an owned `unknown` status, and the run note's `Mission:` line makes the lint
   refuse an unexplained arrow (PRD dream-mission-edge-map).
+- **Whole-chain review of a mission (2026-11-16, A1723, parent A1296).** Round-3 reviewers
+  of the closed-loop mission found `R3B5-05 HIGH — CONSUMED has no writer; the repair
+  attributes it to PRD 9 R1, whose bytes do not write it.` after a round-2 repair had
+  claimed the fix, because every reviewer saw at most four PRDs and no record named a
+  mission scope or a mission verdict. The first whole-mission packet (54 PRDs,
+  `snapshot.sha256`, one reviewer with `role` review) was frozen at 08:00 PST on 2026-11-16
+  by an orchestrator's hand, not by the skill. Phase 3 now freezes the mission packet as a
+  manifest listed in the `Mission:` line's `scope=`, launches one whole-chain reviewer on
+  it, and records its per-PRD verdicts, one `mission=` line and a findings sidecar with six
+  failure classes; the lint refuses an incomplete scope, a missing or unbound chain review, a
+  missing or unbound verdict or sidecar, a packet changed under `mission=APPROVE`, and a
+  dependent PRD reaching `eligible`. Only the latest chain review naming a slug pins it,
+  which replaces the gate fix's supersession rule above (PRD dream-mission-chain-review).
