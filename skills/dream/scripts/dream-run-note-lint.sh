@@ -1399,6 +1399,11 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         for nm in sorted(set(a["names"]) & set(b["names"])):
             if nm != rbase and a["names"][nm] != b["names"][nm] and nm not in decl:
                 L.fail("repair-hash-mismatch", f"{nm}: changed but undeclared between {a['path']} and {b['path']}")
+        # the repairs file is exempt only for a pair whose rows it holds (writing them is what moves it)
+        if rbase in a["names"] and rbase in b["names"] and a["names"][rbase] != b["names"][rbase] \
+                and not any(x["bi"] == k and x["ai"] == k + 1 for x in recs):
+            L.fail("repair-hash-mismatch", f"{rbase}: changed but undeclared between {a['path']} and {b['path']} "
+                                           "(no row names this pair; the repairs file is exempt only for a pair whose rows it holds)")
     # R7: holds, released by the mission's final APPROVE (repaired, amended) or by acceptance (declined)
     pos = {id(c): p for p, c in enumerate(chain)}
 

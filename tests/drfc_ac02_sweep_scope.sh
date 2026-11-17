@@ -8,10 +8,12 @@
 # or its following review bound to an earlier manifest, is repair-scope-mismatch naming the row;
 # in the three-review variant, the round-two row (F4, issued by r2 on the second manifest) moved
 # to the consecutive pair before -> after is repair-scope-mismatch naming row 3 and both ids (R5:
-# before canonicalizes to the scope_id of the issuing review), beside the two repair-hash-mismatch
-# lines the move itself causes; the amended-row variant's interrupted sub-variant (the middle
-# manifest's only review row on no Review: line; the third manifest's chain review follows the
-# base rows; r7 F44, r8 F47) exits 0 with pending_after false and the unlisted row reported.
+# before canonicalizes to the scope_id of the issuing review), beside the repair-hash-mismatch
+# lines the move itself causes (PRD-d.md in both pairs, and the repairs file across after ->
+# third, the pair the move leaves with no row: R5, review L13); the amended-row variant's
+# interrupted sub-variant (the middle manifest's only review row on no Review: line; the third
+# manifest's chain review follows the base rows; r7 F44, r8 F47) exits 0 with pending_after
+# false and the unlisted row reported.
 set -uo pipefail
 # shellcheck source=tests/drfc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drfc_lib.sh"
