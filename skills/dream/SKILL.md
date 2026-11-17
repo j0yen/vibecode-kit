@@ -277,6 +277,7 @@ external `contract` file (copied beside the PRDs, so the reviewer reads the byte
 cites). Once any repairs row exists, the repairs file is a packet member: list its basename
 in every `scope=` manifest later than the earliest `before` any row names, including that
 row's own `after`, so write the row (it names `after` by path) before freezing `after`.
+Before launching it, run the pre-launch packet check below (`--packet-only --pending`).
 Launch one reviewer through the launcher with `review.snapshot` = that manifest and a
 pre-drawn `--session-id`, record its `result.json` as `result=` on its `Review:` line, and
 list the chain reviews of one manifest in launch order. The prompt forbids edits to the
@@ -286,7 +287,8 @@ asks for a counterexample, the affected consumers, the minimal correction, a
 discriminating control and one failure class of `provenance`, `missing-producer-runner`,
 `authority-bypass`, `unreachable-transition`, `semantic-incompatibility`,
 `false-green-acceptance`, written as one row of `<verdict file>.findings.jsonl`, numbered
-from the note's next free id and never re-using an id from an earlier sidecar. The final
+from the note's next free id and never re-using an id from an earlier sidecar; no findings
+means no file (the reviewer writes no sidecar, and its line reads `findings=none`). The final
 message ends with one `findings=<sha256 of the sidecar, or none>` line, the per-PRD verdict
 lines and one `mission=<APPROVE|FIX|REJECT> <session>` line verbatim, and the `result=`
 capture carries those same lines. The run note's `Mission:` line gains `scope=` (the
@@ -299,6 +301,44 @@ review, whatever its `mission=` line says, holds the PRDs it names and their one
 neighbours in either direction; an unknown edge holds both its endpoints; a PRD whose verdict
 in the latest chain review naming it is FIX or REJECT, or that no chain review names, is held
 itself; the other PRDs go ahead.
+
+**Pre-launch packet check (after each freeze, before its reviewer launches):** on a mission
+run, write the pending entry to a file outside `notes/dream-log.md`, never appended to the log as a
+draft: its `Task:`, `Route:` (this run's), `Mission:` (`scope=` including the new manifest, and
+`edges=`, `repairs=` and `withdrawn=` where they apply), the full `Analysis:` line (`adversarial=`),
+`State:` (this run's slugs, repeating the re-listed reviews' `reviewed:` tokens; a header member that
+reached no state in this run is not named before launch and enters the Phase 4 `State:` through the
+`reviewed:` token its verdict gives) and its `Review:` lines with `result=`: the chain reviews listed
+by the last same-Task entry that carries the `Mission:` line, re-listed in their order, then this
+run's returned chain reviews in launch order. Then run `scripts/dream-run-note-lint.sh
+notes/dream-log.md --last --packet-only --pending <file> --json` after each freeze and before
+launching its reviewer. It reports only packet errors, over every listed manifest, as if the pending
+entry were appended (a missing or empty note counts as one holding only that entry); it counts the
+review about to launch as the following review and as a `Review:` line other than none, and refuses
+a pending entry missing a `Task:`, `Mission:`, `Analysis:` or `State:` line, a slug a pending
+`Review:` file names that the pending `State:` omits, and a live packet file whose bytes differ from
+the digest the unbound last manifest lists. Fix its errors before the reviewer launches: a defect is
+fixed before a new freeze, never in the live file alone, because the reviewer reads the frozen bytes.
+An unbound manifest (one no review launch has touched) that carries an error is withdrawn and
+replaced: add it to `withdrawn=<manifest>[,<manifest>...]` on the pending `Mission:` line (it keeps
+its place in `scope=`, and a later entry inherits the token), freeze a corrected replacement after
+it, and write any repairs row that named it again, naming the replacement, with its own `sweep` (a
+row naming a withdrawn manifest is void); the lint records each withdrawal and its reason under
+`mission.withdrawn`. A defect beside the manifest, such as a missing copy, is fixed by placing the
+copy, not by a same-content replacement (a replacement with the withdrawn manifest's scope id is
+`mission-scope-mismatch`). A manifest a review launch has touched is never withdrawn
+(`mission-withdrawn-bound`): an error on it that its own frozen copies carry is held and reported
+(`held_packet_errors`, which do not set the exit), and one the pending entry or a new repairs row
+would introduce (for example a new matrix name that a bound manifest lists no copy of, in a mission
+whose header has no `matrix`) is refused until the author keeps the old name. The packet
+obligations, listed once: the matrix rule of PRD dream-matrix-per-manifest (each manifest lists the
+matrix its frozen edges header names, else the first-listing entry's, and the note's `adversarial=`
+names the last); a continued run writes a matrix later than the previous entry; the matrix holds a
+`## PRD-<slug>` section for every PRD the last manifest's edges header lists, which is what "for
+each PRD in the batch" in the adversarial pass means on a mission run; Once any repairs row exists, the repairs file is a packet member: list its basename in every `scope=` manifest later than the earliest `before` any row names, including that row's own `after`, so write the row (it names `after` by path) before freezing `after`. `sweep` on
+`amended` rows (the declared edges incident to each changed PRD); and the reviewer's findings
+sidecar, whose author checks its digest against the `findings=` line before writing the `Review:`
+line (`findings=none` only when no sidecar file exists).
 
 **Adversarial pass (before review):** for each PRD in the batch, write a table with the
 columns `invariant` (the requirement or AC id), `still-broken implementation` (a
@@ -375,7 +415,8 @@ finding it accepts in an advisory sidecar row of class `provenance` with an `acc
 which the lint reads and which needs no repair row: an accepted decline is a reviewer's row
 and never an author's label, an unaccepted one keeps holding its dependents, and an author who
 later agrees writes one `repaired` row after the decline. A round's hold ends with the
-mission's final APPROVE.
+mission's final APPROVE. Each re-frozen `after` passes the pre-launch packet check
+(`--packet-only --pending`) before its reviewer launches.
 
 ## Amend (`/dream amend <slug>`)
 
@@ -417,7 +458,7 @@ Route: <route> <model_id> <effort> session=<id> decision=<decisions.jsonl ts>
 Analysis: wwhtbt=<ran <path> | reused <path> | skipped: <reason>> 5whys=<page <path> | inline | skipped: <reason>> adversarial=<<path> uncovered=<n> | skipped: <reason>>
 Review: <verdict file path> reviewer-session=<id> [result=<json path>]
 State: <slug>=<value> [<slug>=<value> ...]
-Mission: <name> edges=<path> [scope=<manifest>[,<manifest>...]] [repairs=<path>]
+Mission: <name> edges=<path> [scope=<manifest>[,<manifest>...]] [repairs=<path>] [withdrawn=<manifest>[,<manifest>...]]
 Open questions: <items>
 ```
 The six record lines, each on one line (`Mission:` only on a mission run):
@@ -426,7 +467,9 @@ The six record lines, each on one line (`Mission:` only on a mission run):
   host that has one, only a launcher-started run passes: a typed `/dream` there writes
   `Route: ungoverned`, and the lint's `route-ungoverned-on-governed-host` stays in the
   note. `Task: none` admits only `Route: ungoverned`. No `account=`: the row holds it.
-- `Review:` one line per reviewer session, or exactly one `Review: none`.
+- `Review:` one line per reviewer session, or exactly one `Review: none`; a later entry of a
+  mission re-lists the earlier entry's chain reviews before its own, because the lint reads chain
+  reviews only from the linted entry, and that entry's `State:` repeats their `reviewed:` tokens.
 - `State:` values: `drafted`, `linted`, `reviewed:APPROVE|FIX|REJECT`, `persisted:<sha>`,
   `pending-scan`, `eligible`, `ineligible`. A slug repeats once per state it reached, in
   order (`foo=reviewed:FIX foo=persisted:<sha>` is a push after a FIX verdict). Its
@@ -436,14 +479,16 @@ The six record lines, each on one line (`Mission:` only on a mission run):
   `edges=`, `scope=` and `repairs=` tokens it omits, never names another edge map, and carries
   the line whenever its `State:` names a member of the mission (the live header's `prds`, the
   edges copy frozen beside every `scope=` manifest, and earlier entries' `State:` slugs). A
-  run without the line lints as before.
+  run without the line lints as before. `withdrawn=` names the unbound manifests withdrawn at the
+  pre-launch packet check (Phase 3); each keeps its place in `scope=`, a later entry inherits the
+  token, and a present one carries every inherited path.
 - Paths are relative to the PRD home or absolute.
 
 After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md --last
 --json` on it. A note with a `Mission:` line is also checked for `mission-grammar`,
 `mission-edges-missing`, `edge-grammar`, `edge-unexplained`, `edge-unknown-unowned`,
 `edge-node-unlisted` and `mission-prd-unlisted`, and one whose line carries `scope=` for
-`mission-scope-mismatch`, `mission-scope-incomplete`, `mission-review-missing`,
+`mission-scope-mismatch`, `mission-scope-incomplete`, `mission-withdrawn-bound`, `mission-review-missing`,
 `mission-verdict-missing`, `mission-finding-incomplete`, `mission-snapshot-stale` and
 `mission-approval-blocked` (the last also without `scope=`, for a member reaching
 `eligible`), and for its repairs (`repairs=`, or a finding followed by a later chain review,

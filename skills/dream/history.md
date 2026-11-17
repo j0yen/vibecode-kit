@@ -126,3 +126,15 @@ doubts a rule can see what it cost when it was missing. Append-only.
   names the note's `adversarial=` matrix, a renamed matrix in `changed` is checked on its own side
   of the row, and a header without `matrix` keeps the matrix of the entry that first listed the
   manifest, so the existing notes lint unchanged (PRD dream-matrix-per-manifest).
+- **Packet errors named while they are repairable (2026-11-17, A1723, parent A1296).** The lint
+  checked a mission's packet obligations only after its manifests were frozen and bound to reviews,
+  so a slip became permanent: native run3 (8 reviews, mission APPROVE, lint exit 1) carried an
+  omitted repairs file, an amended row with no `sweep` and a finding with no row, each detectable
+  when its manifest was frozen, and `scope=` gave no way to replace a defective manifest. Phase 3
+  now has the author write the pending entry and run `--packet-only --pending <file>` after each
+  freeze and before its reviewer launches; it reports only packet errors, counts the review about
+  to launch as the following review, and holds (does not fail) an error a bound manifest's own
+  frozen copies carry. An unbound defective manifest is withdrawn with `withdrawn=` on the
+  `Mission:` line and replaced; rows naming it are void, the lint records the reason under
+  `mission.withdrawn`, and a bound manifest is never withdrawable (`mission-withdrawn-bound`). The
+  packet obligations are listed once in Phase 3 (PRD dream-packet-errors-while-repairable).
