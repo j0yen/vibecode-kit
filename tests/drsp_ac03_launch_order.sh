@@ -16,7 +16,11 @@
 #   hold, exit 0.
 # KB21 a listed review Y (manifest y between k and j) before J in line order, launched after
 #   J, FIX on a, no mission= line. Changed by R3 (a chain review's file holds exactly one
-#   mission= line): mission-verdict-missing naming y.txt; R5 supersedes K's pin.
+#   mission= line): mission-verdict-missing naming y.txt; R5 supersedes K's pin. Also changed by
+#   PRD-dream-failure-class-sweep R5 ("before and after are consecutive manifests of the
+#   Mission: line's scope= list"; the complement "runs over every consecutive pair"): the copy's
+#   amended row k -> j is no longer consecutive (repair-scope-mismatch naming row 1) and a's
+#   digest moving between k and y is declared by no row (repair-hash-mismatch naming PRD-a.md).
 set -uo pipefail
 # shellcheck source=tests/drsp_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drsp_lib.sh"
@@ -35,5 +39,9 @@ if want KB12-no-role; then
   mut KB12-no-role; ch KB12-no-role 0 ""; not_stale_k KB12-no-role
   jq_ KB12-no-role 'm["unlisted_review_sessions"]==[] and "a" not in dep' "no report, a not held"
 fi
-if want KB21; then mut KB21; ch KB21 1 "mission-verdict-missing" "mission-verdict-missing: notes/reviews/y.txt: "; not_stale_k KB21; fi
+if want KB21; then
+  mut KB21; ch KB21 1 "mission-verdict-missing repair-hash-mismatch repair-scope-mismatch" "mission-verdict-missing: notes/reviews/y.txt: " \
+    "repair-scope-mismatch: row 1: " "repair-hash-mismatch: PRD-a.md: changed but undeclared between notes/snapshots/k/snapshot.sha256 and notes/snapshots/y/snapshot.sha256"
+  not_stale_k KB21
+fi
 pass "KB4 KB11 KB12 KB21"
