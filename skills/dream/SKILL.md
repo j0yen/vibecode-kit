@@ -158,6 +158,22 @@ launcher's row then carries `role` review, `scope` and `scope_id`; a request wit
 snapshot launches as an author, which the lint refuses on a `Review:` line. Keep the
 manifest until the run note is linted.
 
+**Mission trace and edge map (before decomposition).** When a run drafts a mission (several
+PRDs over one shared chain), write `notes/missions/<name>.edges.jsonl` under the PRD home
+before splitting it into PRDs. Line 1 is the header: `mission` (the name), `outcome`,
+`invariants` (the load-bearing ones), `prds` (every mission PRD basename), `external` (names,
+or `{name, contract}` with the path or paths of that external's contract file), optional
+`packet` (other packet basenames, such as the vision) and, for a one-PRD mission,
+`single_component` with its reason. Every later line is one edge: `id`, the eight fields
+`producer`, `consumer`, `command`, `trigger`, `authority`, `effect_id`, `recovery_owner` and
+`postcondition`, and a `status` of `known`, `external` (one endpoint is `external:<name>`) or
+`unknown` (with an `owner`). An endpoint is a `prds` member, `external:<name>` or `UNKNOWN`.
+An unexplained arrow is not completion: a known edge with an empty field or an `UNKNOWN`
+endpoint is refused, and an edge whose producer or runner nobody can name yet is written
+`unknown` with an owner, never left out. Check the file with
+`scripts/dream-run-note-lint.sh --edges <path> --prds <PRD basenames>` before decomposing;
+the run note opts in with its `Mission:` line (Phase 4).
+
 ## Loop-ready fleets (`/dream loop <name>` or a profile `Loop:` line)
 
 The vision carries a Loop contract: loop name, metric (validated by hand on 3–5 known
@@ -330,9 +346,10 @@ Route: <route> <model_id> <effort> session=<id> decision=<decisions.jsonl ts>
 Analysis: wwhtbt=<ran <path> | reused <path> | skipped: <reason>> 5whys=<page <path> | inline | skipped: <reason>> adversarial=<<path> uncovered=<n> | skipped: <reason>>
 Review: <verdict file path> reviewer-session=<id> [result=<json path>]
 State: <slug>=<value> [<slug>=<value> ...]
+Mission: <name> edges=<path> [scope=<manifest>[,<manifest>...]] [repairs=<path>]
 Open questions: <items>
 ```
-The five record lines, each on one line:
+The six record lines, each on one line (`Mission:` only on a mission run):
 - `Route:` names the launcher's decisions row (its `ts`) and the drafting session. On a
   host with no decisions log write `Route: ungoverned session=<id> host=<hostname>`. On a
   host that has one, only a launcher-started run passes: a typed `/dream` there writes
@@ -343,10 +360,18 @@ The five record lines, each on one line:
   `pending-scan`, `eligible`, `ineligible`. A slug repeats once per state it reached, in
   order (`foo=reviewed:FIX foo=persisted:<sha>` is a push after a FIX verdict). Its
   `reviewed:` tokens are exactly the verdicts the `Review:` files give it, in line order.
+- `Mission:` names the mission and its edge map (`edges=`). A mission keeps one `Mission:`
+  name and one edge map across its entries: a later entry of the same `Task:` inherits the
+  `edges=`, `scope=` and `repairs=` tokens it omits, never names another edge map, and carries
+  the line whenever its `State:` names a member of the mission (the live header's `prds`, the
+  edges copy frozen beside every `scope=` manifest, and earlier entries' `State:` slugs). A
+  run without the line lints as before.
 - Paths are relative to the PRD home or absolute.
 
 After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md --last
---json` on it. Fix a finding you can fix and rerun the lint before the reply. A finding
+--json` on it. A note with a `Mission:` line is also checked for `mission-grammar`,
+`mission-edges-missing`, `edge-grammar`, `edge-unexplained`, `edge-unknown-unowned`,
+`edge-node-unlisted` and `mission-prd-unlisted`. Fix a finding you can fix and rerun the lint before the reply. A finding
 you cannot fix (`route-ungoverned-on-governed-host`; `analysis-page-unbound` for a page
 another worker wrote) stays in the note and is quoted in the reply with the lint's JSON.
 The reply quotes the `State:` line and the provenance labels, `snapshot` among them:

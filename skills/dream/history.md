@@ -67,3 +67,13 @@ doubts a rule can see what it cost when it was missing. Append-only.
   bytes, is result-bound and says `mission=APPROVE`. A later FIX, a later stale pin or an
   unlisted later review keeps the pin. The rule is a strict subset of PRD
   dream-mission-chain-review R5 and is replaced when that PRD lands.
+- **Mission edge map before decomposition (2026-11-16, A1723, parent A1296).** The 23
+  wm-loop PRDs of the closed-loop mission each passed their own lint and two full review
+  rounds of at most four PRDs per reviewer before round 3 named `R3B3-01` (CONSUMED has no
+  writer; acceptance and the attempt-2 review are unreachable) and `R3B3-02` (the
+  steady-state census has no runner; the ingest trigger is circular). Both are arrows
+  between PRDs with no producer or no runner, and no record asked who writes `CONSUMED`:
+  `Depends-on` orders builds without saying what crosses the boundary. A mission run now
+  writes `notes/missions/<name>.edges.jsonl` before decomposition, every edge with its eight
+  fields or an owned `unknown` status, and the run note's `Mission:` line makes the lint
+  refuse an unexplained arrow (PRD dream-mission-edge-map).
