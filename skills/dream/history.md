@@ -114,3 +114,15 @@ doubts a rule can see what it cost when it was missing. Append-only.
   `after`, so write the row (it names `after` by path) before freezing `after`." The freeze
   list names the `repairs=` file with that condition, and a drift test lints fixture notes that
   follow and break the sentence (PRD dream-repairs-file-in-packet).
+- **A matrix per manifest (2026-11-17, A1723, parent A1296).** The lint checked every frozen
+  manifest against one matrix basename, the note's single `adversarial=` value, while the skill
+  told the author to write one matrix file per run under a timestamped name. Native run3 (8
+  reviews, mission APPROVE, lint exit 1) renamed its matrix each repair round: 7
+  `mission-scope-incomplete` findings named the final matrix against manifests frozen before it
+  existed, and 58 `repair-hash-mismatch` findings followed from rows naming the old and the new
+  matrix in `changed`; the manifests were frozen, so the refusal was permanent. The edges header
+  now carries an optional `matrix`, each manifest is checked against the matrix its own frozen
+  header names (that copy, at its listed digest, against the matrix grammar), the last header
+  names the note's `adversarial=` matrix, a renamed matrix in `changed` is checked on its own side
+  of the row, and a header without `matrix` keeps the matrix of the entry that first listed the
+  manifest, so the existing notes lint unchanged (PRD dream-matrix-per-manifest).
