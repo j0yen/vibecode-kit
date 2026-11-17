@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# C3 and G9: the lint's --selftest passes and carries the gate fix's P1, P4, KB1, KB4, KB5,
+# KB6, KB11 and KB13 cases; skills/dream/SKILL.md's Phase 3 **Review:** paragraph carries
+# the G9 sentence right after "(FIX and REJECT are not pinned)", its Phase 4
+# provenance-label text says `verified` counts a superseded APPROVE as matched and the
+# JSON names it under `superseded`; history.md has one entry naming the gate fix, A1723
+# and the witness note. DREAM_SKILL_MD, when set, names the SKILL.md to check.
+set -uo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/drsp_lib.sh"
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; mkdir -p "$T/fakehome"; export HOME="$T/fakehome"; unset SKILL_ROUTING_DECISIONS
+st=$("$LINT" --selftest 2>&1); rc=$?
+[ "$rc" = 0 ] || fail "selftest rc=$rc: $(printf '%s\n' "$st" | grep -v '^PASS' | head -20)"
+for n in pass:drsp-p1-superseded pass:drsp-p4-b-not-superseded \
+         refuse:review-snapshot-stale:drsp-kb1-j-fix refuse:review-snapshot-stale:drsp-kb4-j-launched-before-k \
+         refuse:review-snapshot-stale:drsp-kb5-no-mission refuse:review-snapshot-stale:drsp-kb6-j-legacy \
+         refuse:review-snapshot-stale:drsp-kb11-unlisted-x-fix-after-j refuse:review-snapshot-stale:drsp-kb13-j-no-result; do
+  printf '%s\n' "$st" | grep -qx "PASS $n" || fail "selftest has no passing case $n"
+done
+f="${DREAM_SKILL_MD:-$REPO/skills/dream/SKILL.md}"
+[ -r "$f" ] || fail "skill file missing or unreadable: $f"
+section() { awk -v h="$1" '/^```/{fence=!fence} !fence&&/^## /{f=(index($0,h)==1);next} f' "$f"; }
+para() { awk -v s="$1" 'index($0,s)==1{f=1} f&&/^$/{exit} f' | tr '\n' ' ' | tr -s ' '; }
+rv=$(section '## Phase 3 — Draft' | para '**Review:**')
+g9='(FIX and REJECT are not pinned). A note may carry one `Mission:` line with a `scope=` token, a comma list of reviewer `review.snapshot` manifests (a gate-fix convention, no other `Mission:` semantics); on such a note an earlier listed review'"'"'s stale APPROVE on a slug is superseded (not pinned) only when the latest-launched bound review of the task is a listed review that names the slug, APPROVEs its current bytes, carries `result=` and a single `mission=APPROVE`; a later FIX keeps the earlier pin.'
+printf '%s' "$rv" | grep -qF -- "$g9" || fail "Phase 3 **Review:** paragraph lacks the G9 sentence after '(FIX and REJECT are not pinned)': $rv"
+p4=$(section '## Phase 4 — Persist' | tr '\n' ' ' | tr -s ' ')
+printf '%s' "$p4" | grep -qF -- '`verified` counts a superseded APPROVE as matched, and the JSON names it under `superseded`' \
+  || fail "Phase 4 provenance-label text lacks the superseded sentence"
+hist="$REPO/skills/dream/history.md"
+n=$(grep -c '^- \*\*.*A1723' "$hist")
+[ "$n" = 1 ] || fail "history.md: $n entries naming A1723, want 1"
+e=$(awk '/^- \*\*.*A1723/{f=1;print;next} f&&/^- \*\*/{exit} f' "$hist" | tr '\n' ' ')
+for s in 'superseded' 'notes/dream-log.md' 'dream-early-integration' 'r9'; do
+  printf '%s' "$e" | grep -qF -- "$s" || fail "history.md A1723 entry does not name $s: $e"
+done
+pass "$(printf '%s\n' "$st" | tail -1)"
