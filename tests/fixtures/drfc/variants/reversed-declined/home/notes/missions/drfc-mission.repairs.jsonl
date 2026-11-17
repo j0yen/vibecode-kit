@@ -1,0 +1,1 @@
+{"finding": "F1", "class": "missing-producer-runner", "author_session": "eeeeeeee-0000-4000-8000-000000000001", "before": "notes/snapshots/m/m.sha256", "after": "notes/snapshots/m/m.sha256", "changed": [], "sweep": ["E1", "E2"], "disposition": "declined", "reason": "the runner already exists in PRD b; a writes nothing new"}

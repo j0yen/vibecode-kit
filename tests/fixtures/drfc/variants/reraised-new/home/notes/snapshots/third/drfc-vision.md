@@ -1,0 +1,1 @@
+# Vision (drfc fixture stub)

@@ -1,0 +1,2 @@
+{"finding": "F1", "class": "missing-producer-runner", "author_session": "eeeeeeee-0000-4000-8000-000000000001", "before": "notes/snapshots/before/before.sha256", "after": "notes/snapshots/after/after.sha256", "changed": ["PRD-a.md", "PRD-b.md", "drfc-mission.edges.jsonl"], "sweep": ["E1", "E2"], "disposition": "repaired"}
+{"finding": "F2", "class": "provenance", "author_session": "eeeeeeee-0000-4000-8000-000000000002", "before": "notes/snapshots/before/before.sha256", "after": "notes/snapshots/after/after.sha256", "changed": [], "sweep": [], "disposition": "repaired"}

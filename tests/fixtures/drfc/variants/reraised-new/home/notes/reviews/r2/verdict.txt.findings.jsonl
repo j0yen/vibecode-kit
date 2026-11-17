@@ -1,0 +1,2 @@
+{"id": "F4", "class": "semantic-incompatibility", "severity": "MEDIUM", "prds": ["PRD-d.md"], "consumers": ["PRD-c.md"], "counterexample": "F4 counterexample", "correction": "F4 minimal correction", "control": "F4 discriminating control"}
+{"id": "F6", "class": "missing-producer-runner", "severity": "MEDIUM", "prds": ["PRD-a.md"], "consumers": ["PRD-b.md"], "counterexample": "F6 counterexample", "correction": "F6 minimal correction", "control": "F6 discriminating control"}
