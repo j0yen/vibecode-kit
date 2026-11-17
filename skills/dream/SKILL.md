@@ -335,7 +335,8 @@ that review's manifest.
 **After the first systemic finding or material repair:** classify each finding by the six
 names (`provenance`, `missing-producer-runner`, `authority-bypass`, `unreachable-transition`,
 `semantic-incompatibility`, `false-green-acceptance`). A `provenance` failure repairs
-provenance only: the record, not the design, with an empty `changed` and `sweep`. A systemic
+provenance only: the record, not the design: `changed` names only the packet files it moved
+(it may be empty), and `sweep` is optional. A systemic
 class triggers a failure-class sweep across every edge incident to the affected PRDs and
 consumers (the finding's `prds` and `consumers`, read from the edges copy frozen in the
 `before` manifest), recorded as one row of the `repairs=` file without waiting for a full

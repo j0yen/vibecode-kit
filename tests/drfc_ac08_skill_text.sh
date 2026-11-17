@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # AC8 (R10) — SKILL.md Phase 3 carries, after **Review:**, the paragraph "After the first
-# systemic finding or material repair": the six classes, a provenance-only repair, the sweep
-# over incident edges, same-author feedback, the `before`/`after` hashes, a bounded re-review
-# and the reviewer's advisory `accepts` row for an accepted decline; Phase 4's template shows
-# `repairs=` and its lint step names the eleven new ids, as does the lint's header list;
+# systemic finding or material repair": the six classes, a provenance-only repair (`changed`
+# naming only the packet files it moved, possibly empty, and `sweep` optional: R3, review L15),
+# the sweep over incident edges, same-author feedback, the `before`/`after` hashes, a bounded
+# re-review and the reviewer's advisory `accepts` row for an accepted decline; Phase 4's template
+# shows `repairs=` and its lint step names the eleven new ids, as does the lint's header list;
 # history.md has an entry naming R3B5-05 and the three-round pattern; and
 # tests/dream_analysis_skills_ref.sh exits 0. DREAM_SKILL_MD, when set, names the SKILL.md.
 set -uo pipefail
@@ -20,7 +21,7 @@ par=$(printf '%s' "$rv" | grep -o 'After the first systemic finding or material 
 # shellcheck disable=SC2016  # literal backticks of the skill text
 for s in provenance missing-producer-runner authority-bypass unreachable-transition semantic-incompatibility false-green-acceptance \
   'provenance only' 'failure-class sweep' 'incident' 'same author' '`before`' '`after`' 'bounded re-review' 'advisory' '`accepts`' \
-  'declined' 'no blanket hold'; do
+  'declined' 'no blanket hold' '`changed` names only the packet files it moved (it may be empty), and `sweep` is optional'; do
   printf '%s' "$par" | grep -qF -- "$s" || fail "the repair paragraph lacks '$s'"
 done
 p4=$(section '## Phase 4 — Persist' | tr '\n' ' ' | tr -s ' ')
