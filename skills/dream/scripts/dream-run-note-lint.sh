@@ -58,6 +58,13 @@
 # de-duplicated, newline-terminated, under the shared line rule; --scope-id prints its
 # sha256 (exit 0) or the review-scope-mismatch detail (exit 1) and reads nothing else.
 #
+# Superseded pins (gate fix, A1723 prerequisite): on an entry with one `Mission:` line
+# carrying one `scope=<manifest>[,<manifest>...]` token, a listed (chain) review's stale
+# APPROVE pin on a slug is not checked, and is named in its `reviews[].superseded`, only when
+# the latest-launched bound review of the task is a later listed review of another session
+# that APPROVEs the slug's current bytes, is result-bound and carries one
+# `mission=APPROVE <session>` line. Otherwise the pin is checked as before; never a new finding.
+#
 # Env seams: SKILL_ROUTING_DECISIONS (default decisions path, as fable-launch.sh),
 #   ANALYSIS_WIKI_DIR (gated wiki root for reused pages; default ~/Notes/wiki, whose
 #   decisions/ and answers/ analysis-page-gate.sh protects).
@@ -213,6 +220,151 @@ def check_snapshot(L, who, full, digests, last, home):
                    "the APPROVE was given on other bytes")
             ok = False
     return ok
+
+
+def mission_scope(lines):
+    """Gate fix G1: the items of the entry's one `Mission:` line's one `scope=<p1>[,<p2>...]`
+    token, or None (rule inactive): zero or several Mission: lines, no or several scope=
+    tokens, an empty item. Nothing else on the line is read."""
+    ms = [ln for ln in lines if ln.startswith("Mission:")]
+    if len(ms) != 1:
+        return None
+    toks = [t for t in ms[0].split() if t.startswith("scope=")]
+    if len(toks) != 1:
+        return None
+    items = toks[0][len("scope="):].split(",")
+    return items if all(items) else None
+
+
+def supersede(entry_lines, reviews, rows, task, governed, rsess, home, resolve):
+    """Gate fix G1-G6 (A1723 prerequisite): {Review line index K: {slug: J session}} for each
+    chain review K whose stale APPROVE pin on a slug the latest-launched chain review J
+    re-approved on the slug's current bytes. Pure reads, finding-free (borrowed checks run
+    on a scratch Lint), never raises: an exception makes its condition false. {} when the
+    rule is inactive. The bound-review test repeats the reviews loop's own (rrow)."""
+    try:
+        items = mission_scope(entry_lines)
+        if items is None or not governed or task is None:
+            return {}
+        try:
+            ids = [scope_canon(resolve(p))[0] for p in items]           # G2
+        except (ScopeError, OSError):
+            return {}
+
+        def launch(r):
+            return r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("task_id") == task
+
+        def ts(r):
+            t = r.get("ts")
+            return parse_iso(t) if isinstance(t, str) else None
+
+        def chain(row):                                                   # G3
+            return any(row.get("scope_id") == x for x in ids)
+
+        def pins(row):
+            """{basename: digest} of the row's manifest when it canonicalizes to the row's scope_id."""
+            scope, sid = row.get("scope"), row.get("scope_id")
+            if not isinstance(scope, str) or not isinstance(sid, str):
+                return None
+            got, digests = scope_canon(resolve(scope))
+            return digests if got == sid else None
+
+        def current(slug):
+            cur = next((os.path.join(home, d, f"PRD-{slug}.md") for d in PRD_DIRS
+                        if os.path.isfile(os.path.join(home, d, f"PRD-{slug}.md"))), None)
+            if cur is None:
+                return None
+            with open(cur, "rb") as fh:
+                return hashlib.sha256(fh.read()).hexdigest()
+
+        bound, files = {}, {}       # index -> (rv, row); index -> (verdict path, vlines, last)
+        for i, rv in enumerate(reviews):
+            if rv["session"] == "none" or (rsess is not None and rv["session"] == rsess):
+                continue
+            m4 = [r for r in rows if r.get("session") == rv["session"] and launch(r)]
+            if not m4:
+                continue
+            role_review = m4[-1].get("role") == "review"
+            if not role_review:
+                continue
+            bound[i] = (rv, m4[-1])
+            try:
+                full = resolve(rv["file"])
+                if os.path.isfile(full) and os.access(full, os.R_OK):
+                    vlines = [v for v in (verdict_of(x) for x in read_text(full).split("\n")) if v]
+                    last = {}
+                    for slug, verdict, _ in vlines:
+                        last.pop(slug, None)
+                        last[slug] = verdict
+                    files[i] = (full, vlines, last)
+            except Exception:
+                pass
+        jof = {}                    # G5: slug -> greatest bound index whose readable file names it
+        for i in sorted(files):
+            for slug in files[i][2]:
+                jof[slug] = i
+
+        def by(k, s):
+            """G6 for K = Review line k and slug s: J's session, or None (the pin stays)."""
+            krv, krow = bound[k]
+            prd = b"PRD-" + s.encode() + b".md"
+            if not (chain(krow) and files[k][2].get(s) == "APPROVE"):                # G6.1
+                return None
+            cur = current(s)
+            kpins = pins(krow)
+            if not (kpins is not None and cur is not None and kpins.get(prd) not in (None, cur)):  # G6.2
+                return None
+            j = jof.get(s)
+            if j is None:                                                          # G6.3 J(s) exists
+                return None
+            jrv, jrow = bound[j]
+            if not chain(jrow):                                                    # G6.3 J(s) listed
+                return None
+            if not j > k:                                                          # G6.3 index
+                return None
+            if jrv["session"] == krv["session"]:                                   # G6.3 session
+                return None
+            if not files[j][2].get(s) == "APPROVE":                                # G6.4
+                return None
+            kt, jt = ts(krow), ts(jrow)
+            if not (kt is not None and jt is not None and jt > kt):               # G6.5
+                return None
+            if not (jt is not None and all(ts(r) is not None and ts(r) < jt for r in rows if launch(r)
+                                           and r.get("role") != "author" and r.get("session") != jrv["session"])):  # G6.6
+                return None
+            if any(launch(r) and r.get("role") == "author" and r.get("session") == jrv["session"] for r in rows):  # G6.7
+                return None
+            jpins = pins(jrow)
+            if not (jpins is not None and cur is not None and jpins.get(prd) == cur):  # G6.8
+                return None
+            scratch = Lint()
+            if not (jrv["result"] and check_result(scratch, jrv, resolve(jrv["result"]), files[j][1]) == "checked"
+                    and not scratch.findings):                                     # G6.9
+                return None
+            want = f"mission=APPROVE {jrv['session']}"
+            fm = [t for t in (norm_line(x) for x in read_text(files[j][0]).split("\n")) if t.startswith("mission=")]
+            if not (len(fm) == 1 and fm[0] == want):                               # G6.10 file
+                return None
+            res = str(json.loads(read_text(resolve(jrv["result"])))["result"])
+            rm = [t for t in (" ".join(norm_line(x).split()) for x in res.split("\n")) if t.startswith("mission=")]
+            if not (len(rm) == 1 and rm[0] == want):                               # G6.10 result
+                return None
+            return jrv["session"]
+
+        out = {}
+        for k in bound:
+            if k not in files:
+                continue
+            for s in files[k][2]:
+                try:
+                    j = by(k, s)
+                except Exception:
+                    j = None
+                if j is not None:
+                    out.setdefault(k, {})[s] = j
+        return out
+    except Exception:
+        return {}
 
 
 def read_text(path):
@@ -817,7 +969,8 @@ def lint_log(a):
             L.fail("review-self", f"Review: none beside reviewed: state for {', '.join(reviewed_slugs)}")
     elif review_grammar_ok and reviews:
         rsess = route["session"] if route else None
-        for rv in reviews:
+        sup = supersede(entry["lines"], reviews, rows, task, governed, rsess, home, resolve)
+        for i, rv in enumerate(reviews):
             label = "self"
             rrow = None              # the reviewer's latest launch row (m4[-1]) when its role is review
             rv["snapshot"] = "self"
@@ -861,7 +1014,11 @@ def lint_log(a):
                 last.pop(slug, None)
                 last[slug] = verdict
             if rrow is not None:
-                rv["snapshot"] = "verified" if check_scope(L, rv, rrow, vlines, last, home, resolve) else "self"
+                gone = sup.get(i, {})       # superseded pins skip check_snapshot only (G4, G7)
+                if gone:
+                    rv["superseded"] = [{"slug": s, "by": gone[s]} for s in last if s in gone]
+                pinned = {s: v for s, v in last.items() if s not in gone}
+                rv["snapshot"] = "verified" if check_scope(L, rv, rrow, vlines, pinned, home, resolve) else "self"
             for slug, verdict in last.items():
                 seq.setdefault(slug, []).append(verdict)
             if rv["result"]:
@@ -931,8 +1088,9 @@ def lint_log(a):
         "route": None if route is None else {k: route[k] for k in ("route", "model_id", "effort", "session", "decision")},
         "analysis": {"wwhtbt": akind(an.get("wwhtbt")), "fivewhys": akind(an.get("fivewhys"))},
         "adversarial": None if adv is None else {"kind": adv[0], "value": adv[1], "uncovered": adv[2]},
-        "reviews": [{"file": r["file"], "session": r["session"], "result": r["result"],
-                     "role": r.get("role"), "scope_id": r.get("scope_id")} for r in reviews],
+        "reviews": [dict({"file": r["file"], "session": r["session"], "result": r["result"],
+                          "role": r.get("role"), "scope_id": r.get("scope_id")},
+                         **({"superseded": r["superseded"]} if r.get("superseded") else {})) for r in reviews],
         "states": states,
         "provenance": prov,
     }
@@ -1135,6 +1293,7 @@ class Fx:
             M_REL: mx_file(["foo"]),
         }
         self.prev_entry = None
+        self.tail = []               # lines after the five record lines (a Mission: line)
         self.git = False
         self.mtimes = {}
 
@@ -1163,7 +1322,7 @@ class Fx:
             if v is None:
                 continue
             lines += v if isinstance(v, list) else [v]
-        lines += ["Open questions: none", ""]
+        lines += self.tail + ["Open questions: none", ""]
         os.makedirs(os.path.join(self.home, "notes"), exist_ok=True)
         with open(os.path.join(self.home, "notes", "dream-log.md"), "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines))
@@ -1348,6 +1507,56 @@ def selftest():
         d["provenance"]["snapshot"] == "verified" and d["reviews"][0]["role"] == "review", (d["provenance"], d["reviews"])))
     passes("snapshot-legacy", new(), lambda d: expect(
         d["provenance"]["snapshot"] == "legacy" and d["reviews"][0]["role"] is None, (d["provenance"], d["reviews"])))
+
+    # superseded chain-review pins (gate fix G1-G7): S_R1 on m1 APPROVEs foo, foo is edited,
+    # S_R2 on m2 (launched later, result=, mission=APPROVE) re-APPROVEs foo on the new bytes
+    def chain(fx, slugs=("foo",)):
+        old, new, bar = b"# foo stub\n", b"# foo stub, edited\n", b"# bar stub\n"
+        h = lambda b: hashlib.sha256(b).hexdigest()
+        sid = lambda t: h("".join(sorted(set(t.splitlines(True)))).encode())
+        m1 = f"{h(old)}  PRD-foo.md\n{h(bar)}  PRD-bar.md\n"
+        m2 = f"{h(new)}  PRD-foo.md\n{h(bar)}  PRD-bar.md\n"
+        fx.files.update({"notes/snapshots/m1.sha256": m1, "notes/snapshots/m2.sha256": m2,
+                         "built-prds/PRD-foo.md": new.decode(), M_REL: mx_file(["foo", "bar"])})
+        fx.rows[3] = dict(fx.rows[3], role="author", scope="", scope_id="")
+        fx.rows[4] = dict(fx.rows[4], role="review", scope="notes/snapshots/m1.sha256", scope_id=sid(m1))
+        fx.rows[5] = dict(fx.rows[5], role="review", scope="notes/snapshots/m2.sha256", scope_id=sid(m2))
+        v1 = "".join(f"{x} APPROVE fable\n" for x in slugs)
+        v2 = v1 + f"mission=APPROVE {S_R2}\n"
+        fx.files["notes/reviews/r1.txt"], fx.files["notes/reviews/r2.txt"] = v1, v2
+        result_json(fx, "notes/reviews/r1.json", S_R1, "Done.\n" + v1)
+        result_json(fx, "notes/reviews/r2.json", S_R2, "Done.\n" + v2)
+        fx.entry["Review"] = [f"Review: notes/reviews/r1.txt reviewer-session={S_R1} result=notes/reviews/r1.json",
+                              f"Review: notes/reviews/r2.txt reviewer-session={S_R2} result=notes/reviews/r2.json"]
+        fx.entry["State"] = "State: " + " ".join(f"{x}=reviewed:APPROVE {x}=reviewed:APPROVE" for x in slugs)
+        fx.tail = ["Mission: selftest scope=notes/snapshots/m1.sha256,notes/snapshots/m2.sha256"]
+        return fx
+    passes("drsp-p1-superseded", chain(new()), lambda d: expect(
+        d["provenance"]["snapshot"] == "verified" and d["reviews"][0].get("superseded") == [{"slug": "foo", "by": S_R2}]
+        and "superseded" not in d["reviews"][1], (d["provenance"], d["reviews"])))
+    passes("drsp-p4-b-not-superseded", chain(new(), ("foo", "bar")), lambda d: expect(
+        d["reviews"][0].get("superseded") == [{"slug": "foo", "by": S_R2}], d["reviews"]))
+    stale_r1 = ["notes/reviews/r1.txt", S_R1, "slug foo"]
+    fx = chain(new()); fx.files["notes/reviews/r2.txt"] = f"foo FIX fable\nmission=APPROVE {S_R2}\n"
+    result_json(fx, "notes/reviews/r2.json", S_R2, f"foo FIX fable\nmission=APPROVE {S_R2}")
+    fx.entry["State"] = "State: foo=reviewed:APPROVE foo=reviewed:FIX"
+    refuse("drsp-kb1-j-fix", fx, "review-snapshot-stale", stale_r1)
+    fx = chain(new()); fx.rows[5] = dict(fx.rows[5], ts="2026-11-15T01:20:00-08:00")
+    refuse("drsp-kb4-j-launched-before-k", fx, "review-snapshot-stale", stale_r1)
+    fx = chain(new()); fx.tail = []
+    refuse("drsp-kb5-no-mission", fx, "review-snapshot-stale", stale_r1)
+    fx = chain(new()); fx.rows[5] = {k: v for k, v in fx.rows[5].items() if k != "role"}
+    refuse("drsp-kb6-j-legacy", fx, "review-snapshot-stale", stale_r1)
+    fx = chain(new()); s_x = "bbbbbbbb-0000-4000-8000-000000000006"
+    fx.files["notes/snapshots/m3.sha256"] = fx.files["notes/snapshots/m2.sha256"] + "0" * 64 + "  notes.md\n"
+    fx.rows.append(dict(fx.rows[5], ts="2026-11-15T01:50:00-08:00", session=s_x, scope="notes/snapshots/m3.sha256",
+                        scope_id=hashlib.sha256("".join(sorted(fx.files["notes/snapshots/m3.sha256"].splitlines(True))).encode()).hexdigest()))
+    fx.files["notes/reviews/r3.txt"] = "foo FIX fable\n"
+    fx.entry["Review"].append(f"Review: notes/reviews/r3.txt reviewer-session={s_x}")
+    fx.entry["State"] = "State: foo=reviewed:APPROVE foo=reviewed:APPROVE foo=reviewed:FIX"
+    refuse("drsp-kb11-unlisted-x-fix-after-j", fx, "review-snapshot-stale", stale_r1)
+    fx = chain(new()); fx.entry["Review"][1] = f"Review: notes/reviews/r2.txt reviewer-session={S_R2}"
+    refuse("drsp-kb13-j-no-result", fx, "review-snapshot-stale", stale_r1)
 
     # ---------- refusal fixtures, each exactly [id]
     refuse("scope-id", scoped(new(), scope_id="0" * 64), "review-scope-mismatch", ["notes/snapshots/s.sha256", "0" * 64])
