@@ -4,8 +4,12 @@
 # exits 0 when the second review's advisory row accepts row 1 (accepted_by that reviewer; a
 # same-manifest third review's row when it moves there); with nothing accepting, or a
 # non-advisory row re-using the id (r6 F39), repair-declined-unaccepted names F1, a eligible is
-# refused naming F1 and accepted_by is null; the reversed same-manifest variant (r7 F42) is
-# repair-missing for F1, repair-declined-unaccepted with a declined row, exit 0 once accepted.
+# refused naming F1 and accepted_by is null; the unaccepted decline holds the finding's prds and
+# consumers and their one-hop edge neighbours in either direction (R7, over the issuing review's
+# frozen edges copy): with F1 on a and b, c (consumer of E2 b -> c) is held and d is not; with F1
+# on c and d (sweep E1-E3), b (producer of E2 b -> c) is held and a is not; the reversed
+# same-manifest variant (r7 F42) is repair-missing for F1, repair-declined-unaccepted with a
+# declined row, exit 0 once accepted.
 # Matrix controls: a row for an unknown id beside the real finding unrepaired is repair-grammar
 # and repair-missing (R1); `provenance` written for a missing-producer-runner finding is
 # repair-class-mismatch (R3). A malformed sidecar row (chain-review R4) still names its id for R1.
@@ -30,6 +34,23 @@ unacc() { # <label>: the refusal, a held naming F1, accepted_by null
 use declined; rm -f -- "${H:?}/$R2D/verdict.txt.findings.jsonl"; capture "$R2D/result.json" "L[:] = [('findings=none' if l.startswith('findings=') else l) for l in L]"
 run_fc; findings_eq '["repair-declined-unaccepted", "mission-approval-blocked"]'; unacc "nothing accepts"
 has_fail repair-declined-unaccepted "F1" "$R2D/verdict.txt"
+# held: F1's a and b and their one-hop neighbour c (E2 b -> c, producer to consumer); d is two hops
+held() { # <slug...>: dependent_slugs is exactly these slugs, each held by the decline alone
+  local want; want=$(printf "'%s', " "$@")
+  jtrue "[(x['slug'], x['reason']) for x in d['mission']['dependent_slugs']] == [(s, 'declined F1 (row 1)') for s in [${want%, }]]" "declined hold [$*]"
+}
+has_fail mission-approval-blocked "slug c=eligible" "declined F1 (row 1)"
+if printf '%s\n' "$ERR" | grep -q '^FAIL mission-approval-blocked: slug d='; then fail "d (two hops from F1) held: $ERR"; fi
+held a b c
+# the other direction: F1 on c (prds) and d (consumers), its sweep widened to E1-E3; b, the
+# producer of E2 b -> c, is held by that hop alone, and a (two hops) is not
+use declined; rm -f -- "${H:?}/$R2D/verdict.txt.findings.jsonl"; capture "$R2D/result.json" "L[:] = [('findings=none' if l.startswith('findings=') else l) for l in L]"
+side "$R1D" "R[0]['prds'] = ['PRD-c.md']; R[0]['consumers'] = ['PRD-d.md']"; resign "$R1D"
+redit "R[0]['sweep'] = ['E1', 'E2', 'E3']"
+run_fc; findings_eq '["repair-declined-unaccepted", "mission-approval-blocked"]'
+has_fail mission-approval-blocked "slug b=eligible" "declined F1 (row 1)"
+if printf '%s\n' "$ERR" | grep -q '^FAIL mission-approval-blocked: slug a='; then fail "a (two hops from F1) held: $ERR"; fi
+held b c d
 use reused-id; run_fc; has_id mission-finding-incomplete; unacc "re-used id"
 use reversed; run_fc; findings_eq '["repair-missing"]'; has_fail repair-missing "F1" "no repairs= token"
 use reversed-declined; run_fc; findings_eq '["repair-declined-unaccepted", "mission-approval-blocked"]'; unacc "reversed, declined"
@@ -41,4 +62,4 @@ use base; redit "R[0]['class'] = 'provenance'"; run_fc; has_fail repair-class-mi
 # sidecar"): chain-review R4 refuses the row on its own, the repairs row for it is no repair-grammar
 use base; side "$R1D" "R[0]['consumers'] = []"; resign "$R1D"; run_fc; findings_eq '["mission-finding-incomplete"]'
 has_fail mission-finding-incomplete "row 1" "consumers"
-pass "base rows 2; declined accepted x2; unaccepted, re-used id; reversed x3; unknown id; class; malformed row's id"
+pass "base rows 2; declined accepted x2; unaccepted (its one-hop hold both ways), re-used id; reversed x3; unknown id; class; malformed row's id"
