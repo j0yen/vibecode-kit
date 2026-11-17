@@ -7,12 +7,33 @@
 # shows `repairs=` and its lint step names the eleven new ids, as does the lint's header list;
 # history.md has an entry naming R3B5-05 and the three-round pattern; and
 # tests/dream_analysis_skills_ref.sh exits 0. DREAM_SKILL_MD, when set, names the SKILL.md.
+# PRD-dream-repairs-file-in-packet R1-R3: the **Whole-chain review paragraph and the repair
+# paragraph (each sliced from its bold heading to the next blank line, lines joined) both carry
+# R1's sentence, and the whole-chain freeze-member sentence names the repairs file with its
+# condition; a paragraph that lacks it is named with the missing clause. An empty, missing or
+# unreadable DREAM_SKILL_MD exits 2 naming the path.
 set -uo pipefail
-# shellcheck source=tests/drfc_lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/drfc_lib.sh"
+# shellcheck source=tests/drrp_lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/drrp_lib.sh"
 T_OUT=$(mktemp); trap 'rm -f "$T_OUT"' EXIT
-f="${DREAM_SKILL_MD:-$REPO/skills/dream/SKILL.md}"
-[ -r "$f" ] || fail "skill file missing or unreadable: $f"
+if [ "${DREAM_SKILL_MD+set}" = set ]; then f=$DREAM_SKILL_MD; else f="$REPO/skills/dream/SKILL.md"; fi
+if [ -z "$f" ]; then echo "ERROR DREAM_SKILL_MD is set to an empty path ('')" >&2; exit 2; fi
+if [ ! -f "$f" ] || [ ! -r "$f" ]; then echo "ERROR skill file missing or unreadable: $f" >&2; exit 2; fi
+# R1, R2: the sentence in both paragraphs (a copy in another section satisfies neither)
+miss=""
+for h in "$RP_H1" "$RP_H2"; do
+  p=$(rp_para "$f" "$h")
+  if [ -z "$p" ]; then miss="${miss:+$miss | }paragraph '$h' not found"; continue; fi
+  m=$(rp_missing "$p")
+  [ -z "$m" ] || miss="${miss:+$miss | }paragraph '$h' lacks R1's sentence (missing clause: $m)"
+done
+p=$(rp_para "$f" "$RP_H1")
+fm=$(printf '%s' "$p" | grep -o 'listing every mission PRD[^.]*\.' | head -1)
+# shellcheck disable=SC2016
+for s in 'the `repairs=` file' 'later than the earliest `before`'; do
+  case "$fm" in *"$s"*) ;; *) miss="${miss:+$miss | }paragraph '$RP_H1': the freeze-member sentence ('listing every mission PRD ...') does not name '$s'";; esac
+done
+[ -z "$miss" ] || fail "$miss"
 section() { awk -v h="$1" '/^```/{fence=!fence} !fence&&/^## /{f=(index($0,h)==1);next} f' "$f"; }
 p3=$(section '## Phase 3 — Draft' | tr '\n' ' ' | tr -s ' ')
 rv=${p3#*\*\*Review:\*\*}
@@ -35,4 +56,4 @@ e=$(awk '/^- \*\*/{if(f)exit; f=0} /^- \*\*.*[Ff]ailure-class sweep/{f=1} f' "$R
 [ -n "$e" ] || fail "history.md has no failure-class sweep entry"
 for s in R3B5-05 'three rounds'; do printf '%s' "$e" | grep -qF -- "$s" || fail "the failure-class sweep history entry lacks '$s'"; done
 bash "$REPO/tests/dream_analysis_skills_ref.sh" >"$T_OUT" 2>&1 || fail "dream_analysis_skills_ref.sh: $(tail -3 "$T_OUT")"
-pass "Phase 3 repair paragraph, Phase 4 repairs= + ids, header ids, history, skills ref"
+pass "R1 sentence in both paragraphs + freeze list, Phase 3 repair paragraph, Phase 4 repairs= + ids, header ids, history, skills ref"

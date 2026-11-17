@@ -270,8 +270,12 @@ no pin stands in for the absent route, and the Phase 4 run note writes `Route: u
 **Whole-chain review (before the first independent review):** on a mission run, once the
 edge map is written, freeze the packet: one `sha256sum` manifest under
 `notes/snapshots/` listing every mission PRD, the vision and other `packet` members the
-edges header names, the adversarial matrix, the edges file and a copy of each external
-`contract` file (copied beside the PRDs, so the reviewer reads the bytes the edge cites).
+edges header names, the adversarial matrix, the edges file, the `repairs=` file in every
+manifest later than the earliest `before` once any repairs row exists, and a copy of each
+external `contract` file (copied beside the PRDs, so the reviewer reads the bytes the edge
+cites). Once any repairs row exists, the repairs file is a packet member: list its basename
+in every `scope=` manifest later than the earliest `before` any row names, including that
+row's own `after`, so write the row (it names `after` by path) before freezing `after`.
 Launch one reviewer through the launcher with `review.snapshot` = that manifest and a
 pre-drawn `--session-id`, record its `result.json` as `result=` on its `Review:` line, and
 list the chain reviews of one manifest in launch order. The prompt forbids edits to the
@@ -343,7 +347,10 @@ consumers (the finding's `prds` and `consumers`, read from the edges copy frozen
 batch: `{finding, class, author_session, before, after, changed, sweep, disposition}`, where
 `disposition` is `repaired`, `declined` (with a `reason`) or `amended` (an author change
 between two reviews that answers no finding: `finding` and `class` null, a `reason`, and
-`changed` naming what moved). Feedback goes to the same author: `author_session` is a session
+`changed` naming what moved). Once any repairs row exists, the repairs file is a packet
+member: list its basename in every `scope=` manifest later than the earliest `before` any
+row names, including that row's own `after`, so write the row (it names `after` by path)
+before freezing `after`. Feedback goes to the same author: `author_session` is a session
 of this run's author lineage (an author launch row under the `Task:`). Compare each changed
 contract and every affected consumer against the actual `before` and `after` hashes: `before`
 and `after` are consecutive `scope=` manifests, every basename that moved between two listed
