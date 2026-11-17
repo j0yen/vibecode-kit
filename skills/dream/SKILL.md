@@ -287,9 +287,13 @@ lines and one `mission=<APPROVE|FIX|REJECT> <session>` line verbatim, and the `r
 capture carries those same lines. The run note's `Mission:` line gains `scope=` (the
 manifests, in freeze order). A mission split over several run entries keeps one `Mission:`
 name and one multi-PRD edge map, and a repair appends the re-frozen manifest to `scope=`
-rather than replacing it. A FIX or REJECT finding, an unknown edge or a PRD with no APPROVE
-in the latest chain review naming it holds that PRD and its one-hop consumers back from
-`eligible`; the other PRDs go ahead.
+rather than replacing it. Until the `Mission:` line carries `scope=` and a chain review of
+the last listed manifest binds, and while that manifest's latest-launched review is on no
+`Review:` line, every mission PRD is held back from `eligible`. A finding of the last chain
+review, whatever its `mission=` line says, holds the PRDs it names and their one-hop edge
+neighbours in either direction; an unknown edge holds both its endpoints; a PRD whose verdict
+in the latest chain review naming it is FIX or REJECT, or that no chain review names, is held
+itself; the other PRDs go ahead.
 
 **Adversarial pass (before review):** for each PRD in the batch, write a table with the
 columns `invariant` (the requirement or AC id), `still-broken implementation` (a

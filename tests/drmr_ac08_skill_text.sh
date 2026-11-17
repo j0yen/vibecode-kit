@@ -2,8 +2,11 @@
 # AC8 (R11) — SKILL.md Phase 3 carries, before **Adversarial pass**, the paragraph
 # "Whole-chain review (before the first independent review)": the packet freeze with external
 # contract copies, review.snapshot, the attack sentence, the five finding fields, the six
-# classes, the findings= and mission= lines and the one-name-per-mission rule; Phase 4's labels
-# include `mission` and the lint step names the seven new ids; history.md names R3B5-05;
+# classes, the findings= and mission= lines and the one-name-per-mission rule, and a hold
+# sentence that matches R6 (a finding's PRDs and their one-hop edge neighbours in either
+# direction, an unknown edge's endpoints, a FIX/REJECT or absent per-PRD verdict, every member
+# until a chain review of the last listed manifest binds); Phase 4's labels include `mission`
+# and the lint step names the seven new ids; history.md names R3B5-05;
 # tests/dream_analysis_skills_ref.sh exits 0. DREAM_SKILL_MD, when set, names the SKILL.md.
 set -uo pipefail
 # shellcheck source=tests/drmr_lib.sh
@@ -23,6 +26,16 @@ for s in 'freeze' 'external' 'contract' 'review.snapshot' 'sha256sum -c' 'satisf
   'findings=' '`mission=' 'result=' 'one `Mission:` name' 'appends'; do
   printf '%s' "$wc" | grep -qF -- "$s" || fail "whole-chain review paragraph lacks '$s'"
 done
+# the hold sentence as R6 holds: a finding's PRDs and their one-hop edge neighbours in either
+# direction, an unknown edge's endpoints, a FIX/REJECT or absent per-PRD verdict, and every member
+# until a chain review of the last listed manifest binds (no scope=, an unlisted latest review)
+# shellcheck disable=SC2016
+for s in 'every mission PRD is held' 'a chain review of the last listed manifest binds' '`scope=`' 'no `Review:` line' \
+  'whatever its `mission=` line says' 'one-hop edge neighbours in either direction' 'both its endpoints' \
+  'FIX or REJECT' 'that no chain review names'; do
+  printf '%s' "$wc" | grep -qF -- "$s" || fail "whole-chain review hold sentence lacks '$s'"
+done
+printf '%s' "$wc" | grep -qF -- 'one-hop consumers' && fail "whole-chain review hold sentence names one-hop consumers only"
 p4=$(section '## Phase 4 — Persist' | tr '\n' ' ' | tr -s ' ')
 # shellcheck disable=SC2016
 printf '%s' "$p4" | grep -qF -- '`mission`' || fail "Phase 4 reply labels do not include \`mission\`"
@@ -33,4 +46,4 @@ for id in mission-scope-mismatch mission-scope-incomplete mission-review-missing
 done
 grep -q 'R3B5-05' "$REPO/skills/dream/history.md" || fail "history.md lacks R3B5-05"
 bash "$REPO/tests/dream_analysis_skills_ref.sh" >"$T_OUT" 2>&1 || fail "dream_analysis_skills_ref.sh: $(tail -3 "$T_OUT")"
-pass "Phase 3 whole-chain paragraph, Phase 4 mission label + ids, history R3B5-05, skills ref"
+pass "Phase 3 whole-chain paragraph and its R6 hold sentence, Phase 4 mission label + ids, history R3B5-05, skills ref"
