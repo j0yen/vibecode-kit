@@ -328,6 +328,31 @@ whose file names a slug pins that slug; an earlier chain review's APPROVE on it 
 superseded by that later verdict, and under `mission=APPROVE` the whole packet is pinned to
 that review's manifest.
 
+**After the first systemic finding or material repair:** classify each finding by the six
+names (`provenance`, `missing-producer-runner`, `authority-bypass`, `unreachable-transition`,
+`semantic-incompatibility`, `false-green-acceptance`). A `provenance` failure repairs
+provenance only: the record, not the design, with an empty `changed` and `sweep`. A systemic
+class triggers a failure-class sweep across every edge incident to the affected PRDs and
+consumers (the finding's `prds` and `consumers`, read from the edges copy frozen in the
+`before` manifest), recorded as one row of the `repairs=` file without waiting for a full
+batch: `{finding, class, author_session, before, after, changed, sweep, disposition}`, where
+`disposition` is `repaired`, `declined` (with a `reason`) or `amended` (an author change
+between two reviews that answers no finding: `finding` and `class` null, a `reason`, and
+`changed` naming what moved). Feedback goes to the same author: `author_session` is a session
+of this run's author lineage (an author launch row under the `Task:`). Compare each changed
+contract and every affected consumer against the actual `before` and `after` hashes: `before`
+and `after` are consecutive `scope=` manifests, every basename that moved between two listed
+manifests is in some row's `changed`, and every consumer of a changed producer appears at its
+`after` digest in a later review's manifest. Reuse unchanged accepted evidence: a bounded
+re-review covers changed ∪ affected, and an unaffected PRD keeps its earlier APPROVE. There is
+no blanket hold: only the rows' `changed` members and their affected consumers wait, until the
+mission's final APPROVE. A later chain reviewer, under any verdict, names each `declined`
+finding it accepts in an advisory sidecar row of class `provenance` with an `accepts` list,
+which the lint reads and which needs no repair row: an accepted decline is a reviewer's row
+and never an author's label, an unaccepted one keeps holding its dependents, and an author who
+later agrees writes one `repaired` row after the decline. A round's hold ends with the
+mission's final APPROVE.
+
 ## Amend (`/dream amend <slug>`)
 
 Run `dream.amend <slug> <keys>` (absent → `scripts/amend-key-gate.sh <status>
@@ -397,7 +422,11 @@ After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md
 `mission-scope-mismatch`, `mission-scope-incomplete`, `mission-review-missing`,
 `mission-verdict-missing`, `mission-finding-incomplete`, `mission-snapshot-stale` and
 `mission-approval-blocked` (the last also without `scope=`, for a member reaching
-`eligible`). Fix a finding you can fix and rerun the lint before the reply. A finding
+`eligible`), and for its repairs (`repairs=`, or a finding followed by a later chain review,
+or a digest moving between two listed manifests) for `repair-grammar`,
+`mission-repairs-missing`, `repair-duplicate`, `repair-missing`, `repair-class-mismatch`,
+`sweep-missing`, `repair-author-mismatch`, `repair-hash-mismatch`, `repair-scope-mismatch`,
+`affected-consumer-unreviewed` and `repair-declined-unaccepted`. Fix a finding you can fix and rerun the lint before the reply. A finding
 you cannot fix (`route-ungoverned-on-governed-host`; `analysis-page-unbound` for a page
 another worker wrote) stays in the note and is quoted in the reply with the lint's JSON.
 The reply quotes the `State:` line and the provenance labels, `snapshot` and `mission` among them

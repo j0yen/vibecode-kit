@@ -90,3 +90,15 @@ doubts a rule can see what it cost when it was missing. Append-only.
   missing or unbound verdict or sidecar, a packet changed under `mission=APPROVE`, and a
   dependent PRD reaching `eligible`. Only the latest chain review naming a slug pins it,
   which replaces the gate fix's supersession rule above (PRD dream-mission-chain-review).
+- **Failure-class sweep and repair rows (2026-11-16, A1723, parent A1296).** The closed-loop
+  mission's wm-loop PRDs were repaired over three rounds, and each round's repair was
+  re-checked only by the next full batch: `R3B5-05 HIGH — CONSUMED has no writer; the repair
+  attributes it to PRD 9 R1, whose bytes do not write it.` was found in round 3 after round 2
+  had claimed the fix, because nothing tied a repair to the bytes it moved, the edges it
+  swept or the consumers it touched. A finding of a chain review followed by a later one now
+  needs a row in the `Mission:` line's `repairs=` file (repaired, declined or amended) whose
+  class, sweep over the incident edges, author lineage and `before`/`after` digests the lint
+  checks; every digest that moves between two listed manifests is declared; affected
+  consumers are re-reviewed at their new digests; only the changed PRDs and their consumers
+  are held until the mission's final APPROVE, and a decline stands only when a later reviewer
+  accepts it (PRD dream-failure-class-sweep).
