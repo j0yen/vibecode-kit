@@ -12,7 +12,7 @@
 #   dream-run-note-lint.sh --selftest
 #
 # The entry is the last `## <ts>  /dream  vision-...` block (--last, the default) or
-# the one whose header ts equals --entry. Its five line kinds:
+# the one whose header ts equals --entry. Its six line kinds (Mission: optional):
 #   Task: <canonical id | none>   Consumer: <name | none>
 #   Route: <route> <model_id> <effort> session=<id> decision=<decisions.jsonl ts>
 #   Route: ungoverned session=<id> host=<hostname>
@@ -80,15 +80,19 @@
 #
 # Mission chain review (PRD-dream-mission-chain-review): only on a Mission: line carrying
 # scope=<manifest>[,<manifest>...] (freeze order). Each manifest must canonicalize, hold its
-# own frozen edges copy, matrix and every member its frozen header names (R1); each needs a
-# bound review row whose session has a Review: line, in manifest then launch order (R2); a
-# chain review's file and result= capture carry one `mission=<VERDICT> <own session>` line and
-# a `findings=<sha256|none>` line binding <file>.findings.jsonl (R3, R4). Only the latest chain
-# review naming a slug pins it; earlier APPROVEs are named in reviews[].superseded (R5); under
-# mission=APPROVE every packet file must still match its manifest digest. A member reaching
-# `eligible` while it is dependent (unknown edge, a finding of the last chain review or its
-# one-hop consumers, a non-APPROVE or absent per-PRD verdict, no mission scope) is
-# mission-approval-blocked (R6).
+# own frozen edges copy, matrix and every member its frozen header names (R1); the chain
+# reviews are the Review: lines whose bound review row carries a listed scope id, at least one
+# on a governed host, listed in manifest then launch order (R2); a chain review's file and
+# result= capture carry one `mission=<VERDICT> <own session>` line and a
+# `findings=<sha256|none>` line binding <file>.findings.jsonl (R3, R4). Only the latest chain
+# review naming a slug pins it; an earlier APPROVE that would now be stale is named in
+# reviews[].superseded (R5); under mission=APPROVE every packet file must still match its
+# manifest digest. A member reaching `eligible` while it is dependent is mission-approval-blocked
+# (R6): an endpoint of an unknown edge; a member named in a finding of the last chain review, and
+# each one-hop edge neighbour of it in either direction over that review's frozen edges copy; a
+# FIX, REJECT or absent per-PRD verdict; and, as blanket holds, every member while no chain
+# review binds, none binds to the last manifest, that manifest's latest-launched review is on no
+# Review: line, or the line carries no scope=.
 #
 # Failure-class sweep (PRD-dream-failure-class-sweep): with repairs=<path> on the Mission: line,
 # a chain-review finding followed by a later chain review, or a digest moving between two
