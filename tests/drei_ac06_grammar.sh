@@ -3,9 +3,9 @@
 # anywhere is mission-grammar naming the token; in the two-entry note (entry 1 with
 # Mission: and scope=, entry 2 same Task: naming a prds member eligible) entry 2 without
 # the line is mission-grammar naming entry 1's timestamp, also when the live header drops
-# that PRD (entry 1's frozen copy keeps it in the continuity set); with the line entry 2
-# inherits edges= and scope= (inherited_from = entry 1); an explicit different edges= is
-# mission-grammar naming the token.
+# that PRD and entry 1's State: names only b (entry 1's frozen copy alone keeps it in the
+# continuity set); with the line entry 2 inherits edges= and scope= (inherited_from =
+# entry 1); an explicit different edges= is mission-grammar naming the token.
 set -uo pipefail
 # shellcheck source=tests/drei_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drei_lib.sh"
@@ -23,16 +23,28 @@ run_ei; [ "$RC" = 1 ] || fail "no edges=: rc=$RC"; findings_eq '["mission-gramma
 reset_ei; two_entry
 run_ei; [ "$RC" = 1 ] || fail "entry 2 without the line: rc=$RC"; findings_eq '["mission-grammar"]'
 has_fail mission-grammar "$EI_TS" "a"
-# the live header drops PRD-a.md (and the edges naming it): the frozen copy keeps a
-reset_ei; two_entry; python3 - "$EF" <<'PY'
+# drop_a: the live header drops PRD-a.md (and the edges naming it)
+drop_a() { python3 - "$EF" <<'PY'
 import sys, json
 p = sys.argv[1]; L = [json.loads(l) for l in open(p).read().splitlines() if l.strip()]
 L[0]["prds"] = ["PRD-b.md"]
 L = [L[0]] + [e for e in L[1:] if "PRD-a.md" not in (e["producer"], e["consumer"])]
 open(p, "w").write("".join(json.dumps(x) + "\n" for x in L))
 PY
-run_ei; [ "$RC" = 1 ] || fail "live header drops a: rc=$RC"; findings_eq '["mission-grammar"]'
-has_fail mission-grammar "$EI_TS"
+}
+# entry1 <Kind> <full new line>: replace entry 1's (the note's first) <Kind>: line
+entry1() { python3 - "$LOG" "$1" "$2" <<'PY'
+import sys
+p, k, new = sys.argv[1:]
+L = open(p).read().split("\n"); L[min(i for i, l in enumerate(L) if l.startswith(k + ":"))] = new
+open(p, "w").write("\n".join(L))
+PY
+}
+# the live header drops a and entry 1's State: names only b: entry 1's frozen copy (scope=
+# drei-m1, which lists PRD-a.md) is the one continuity leg that keeps a
+reset_ei; two_entry; entry1 State "State: b=linted"; drop_a
+run_ei; [ "$RC" = 1 ] || fail "live header drops a, entry 1 State: b only: rc=$RC"; findings_eq '["mission-grammar"]'
+has_fail mission-grammar "entry $EI_TS carries" "State: names a (a member of that mission)"
 # with the line: entry 2 inherits edges= and scope=
 reset_ei; two_entry; python3 - "$LOG" <<'PY'
 import sys
