@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# AC7 (R10, R9, R7, R1) — every recorded scope_id recomputes through --scope-id; the drrec/
-# notes and the drei note lint as at 373ff679 (read by git show, sha256 acde611f…) once
+# AC7 (R10, R9, R7, R1) — every recorded scope_id recomputes through --scope-id;
+# tests/fixtures/drmr/README.md names every file under tests/fixtures/drmr/ (a backticked path
+# relative to it, every variant included) and every scope_id its decisions files record (R10:
+# "a README.md names every file and every recorded scope_id"); the drrec/ notes and the drei
+# note lint as at 373ff679 (read by git show, sha256 acde611f…) once
 # `mission` and `provenance.mission` are deleted; --selftest keeps every predecessor PASS
 # line and carries one passing refusal per new chain-review id plus a passing bound mission;
 # a one-PRD single_component mission passes and echoes its reason, and is edge-grammar after
@@ -23,6 +26,33 @@ for d in "$MRFIX" "$MRFIX"/variants/*; do
   done < "$d/decisions.jsonl"
 done
 echo "ok $n recorded scope_id values recompute"
+# R10: the README names every fixture file and every recorded scope_id; an absent README names
+# nothing, so each path and id is reported missing, one per line
+python3 - "$MRFIX" "$T/readme.count" > "$T/readme.miss" <<'PY'
+import json, os, sys
+root, count = sys.argv[1:]
+rp = os.path.join(root, "README.md")
+text = open(rp, encoding="utf-8").read() if os.path.isfile(rp) else ""
+files = sorted(os.path.relpath(os.path.join(d, f), root) for d, _, fs in os.walk(root) for f in fs)
+files = [f for f in files if f != "README.md"]
+ids = sorted({json.loads(l)["scope_id"] for d, _, fs in os.walk(root) if "decisions.jsonl" in fs
+              for l in open(os.path.join(d, "decisions.jsonl"), encoding="utf-8")
+              if l.strip() and json.loads(l).get("scope_id")})
+for f in files:
+    if f"`{f}`" not in text:
+        print(f"missing file {f}")
+for i in ids:
+    if i not in text:
+        print(f"missing scope_id {i}")
+open(count, "w").write(f"{len(files)} {len(ids)}\n")
+PY
+read -r nf ni < "$T/readme.count" || fail "README check did not run"
+[ "$nf" -gt 0 ] && [ "$ni" -gt 0 ] || fail "README check is vacuous: $nf files, $ni scope_ids"
+if [ -s "$T/readme.miss" ]; then
+  cat "$T/readme.miss"
+  fail "tests/fixtures/drmr/README.md (R10) does not name $(grep -c '^missing file ' "$T/readme.miss") of $nf files and $(grep -c '^missing scope_id ' "$T/readme.miss") of $ni recorded scope_ids (listed above)"
+fi
+echo "ok README.md names all $nf fixture files and $ni recorded scope_ids"
 OLD="$T/pred.sh"; git -C "$REPO" show "$PRED_SHA:skills/dream/scripts/dream-run-note-lint.sh" > "$OLD" 2>/dev/null || fail "git show $PRED_SHA failed"
 [ "$(sha256sum "$OLD" | cut -d' ' -f1)" = "$PRED_LINT_SHA" ] || fail "predecessor sha256"
 eq() { # <tag> <log> <home> <decisions>
@@ -50,4 +80,4 @@ use single; run_mr
 jtrue 'd["mission"]["single_component"] and d["mission"]["prds"] == 1 and d["provenance"]["mission"] == "verified"' "single component echoed"
 use single-split; run_mr; has_fail edge-grammar "single_component"
 use prefix; run_mr; has_fail mission-grammar "$MR_E1_TS"
-pass "$n scope_ids; drrec/drei equal 373ff679 minus mission; selftest; single component; prefix"
+pass "$n scope_ids; README names $nf files and $ni scope_ids; drrec/drei equal 373ff679 minus mission; selftest; single component; prefix"
