@@ -4,8 +4,9 @@
 # Mission: and scope=, entry 2 same Task: naming a prds member eligible) entry 2 without
 # the line is mission-grammar naming entry 1's timestamp, also when the live header drops
 # that PRD and entry 1's State: names only b (entry 1's frozen copy alone keeps it in the
-# continuity set); with the line entry 2 inherits edges= and scope= (inherited_from =
-# entry 1); an explicit different edges= is mission-grammar naming the token.
+# continuity set), or entry 1 carries no scope= (its State: slugs alone keep it); with the
+# line entry 2 inherits edges= and scope= (inherited_from = entry 1); an explicit different
+# edges= is mission-grammar naming the token.
 set -uo pipefail
 # shellcheck source=tests/drei_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drei_lib.sh"
@@ -45,6 +46,11 @@ PY
 reset_ei; two_entry; entry1 State "State: b=linted"; drop_a
 run_ei; [ "$RC" = 1 ] || fail "live header drops a, entry 1 State: b only: rc=$RC"; findings_eq '["mission-grammar"]'
 has_fail mission-grammar "entry $EI_TS carries" "State: names a (a member of that mission)"
+# the live header drops a and entry 1 carries no scope= (no frozen copy is read): entry 1's
+# State: slugs are the one continuity leg that keeps a
+reset_ei; two_entry; entry1 Mission "$GOOD"; drop_a
+run_ei; [ "$RC" = 1 ] || fail "live header drops a, entry 1 without scope=: rc=$RC"; findings_eq '["mission-grammar"]'
+has_fail mission-grammar "entry $EI_TS carries" "State: names a (a member of that mission)"
 # with the line: entry 2 inherits edges= and scope=
 reset_ei; two_entry; python3 - "$LOG" <<'PY'
 import sys
@@ -68,4 +74,4 @@ i = max(k for k, l in enumerate(L) if l.startswith("State:")); L.insert(i + 1, "
 PY
 run_ei; printf '%s' "$JS" | jget 'd["findings"]' | grep -qF '"mission-grammar"' || fail "other edges=: $ERR"
 has_fail mission-grammar "edges=notes/missions/other.edges.jsonl"
-pass "mission-grammar x4 on one entry, continuity x2, inheritance, edges= change refused"
+pass "mission-grammar x4 on one entry, continuity x3, inheritance, edges= change refused"
