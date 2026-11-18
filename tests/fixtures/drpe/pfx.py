@@ -1150,6 +1150,23 @@ def rename_void(nolog=False):
 CASES["rename-void"] = (lambda nolog=False: rename_void(nolog))
 
 
+# rename-row: held-row-copy (row 1's short sweep frozen in bound m2's copy) where E1 already carried repairs= and the
+# pending entry renames the file to one with the same bytes (pending m3 lists it): S2 counts a row as frozen only in
+# a copy of the current file's basename, which m2 does not list, so the row error sets the exit.
+def rename_row(nolog=False):
+    s = CASES["held-row-copy"](nolog=nolog)
+    s.entries[0]["lines"]["Mission"] += f" repairs={REP}"
+    s.files[REP2] = s.rep_bytes()
+    m3 = s.mans["m3"]
+    del m3.members[RB]
+    m3.members[RB2] = s.rep_bytes()
+    s.pending["lines"]["Mission"] = s.pending["lines"]["Mission"].replace(f"repairs={REP}", f"repairs={REP2}")
+    return s
+
+
+CASES["rename-row"] = (lambda nolog=False: rename_row(nolog))
+
+
 def main(argv):
     if argv[:1] == ["--list"]:
         print("\n".join(CASES))

@@ -169,6 +169,9 @@ c_rename_void() { pe rename-void; pk; rc1           # the same, F1 unanswered an
   pheld repair-missing "$F1R: no row in $REP2"; pheld repair-hash-mismatch "$FO $M1 and $M2R"
   pfail repair-hash-mismatch "PRD-bar.md: changed but undeclared between $M2R and $M3"
   pfail repair-hash-mismatch "$PE_REP: changed but undeclared between $M2R and $M3"; nofail repair-missing "F1"; nofail repair-hash-mismatch "$FO"; fullrc1; }
+c_rename_row() { pe rename-row; pk; rc1            # renamed to a file of the same bytes: m2 froze no row of the new file (S2)
+  pfail sweep-missing "finding F1 (row 1): sweep lacks"
+  pfail "$SI" "manifest $M2: lists no drpe-mission.repairs-v2.jsonl (the repairs file;"; noheld "row 1"; noheld "$M2"; fullrc1; }
 c_rename() { pe rv4-rename; pk; held0               # repairs= first named by the pending entry: m2 froze no row of that file
   pheld repair-missing "$F1R: no row in $REP2"; pheld repair-hash-mismatch "$FO $M1 and $M2"
   nofail repair-missing "F1"; nofail repair-hash-mismatch "$FO"; fullrc1; }
@@ -190,7 +193,7 @@ for c in f1_packet f1_prds f1_contract f1_clash f1_dupbase frozen_prds frozen_pa
          frozen_clash dupbase_other clash_other edges edges_member noheader_dupbase matrix_noheader matrix_member mx_member_frozen clash_need \
          late_edited late_edited_row late_deleted late_noid_held late_noid_deleted row_dropped row_dropped_badcopy row_dropped_empty row_dropped_unlisted row_dropped_pair \
          notoken_pair void_row void_row_s3 live_absent own_finding own_finding_notoken \
-         rename_rec rename_void rename relaunch_issuer tier3 rereview_own late_withdrawal pending_early; do
+         rename_rec rename_void rename_row rename relaunch_issuer tier3 rereview_own late_withdrawal pending_early; do
   if out=$("c_$c" 2>&1); then echo "ok  $c"; else echo "RED $c: $out"; red=1; fi
 done
 [ "$red" = 0 ] || fail "held/fail class: RED cells above"
