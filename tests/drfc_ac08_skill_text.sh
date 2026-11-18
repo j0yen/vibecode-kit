@@ -10,15 +10,15 @@
 # PRD-dream-repairs-file-in-packet R1-R3: the **Whole-chain review paragraph and the repair
 # paragraph (each sliced from its bold heading to the next blank line, lines joined) both carry
 # R1's sentence, and the whole-chain freeze-member sentence names the repairs file with its
-# condition; a paragraph that lacks it is named with the missing clause. An empty, missing or
-# unreadable DREAM_SKILL_MD exits 2 naming the path.
+# condition; a paragraph that lacks it is named with the missing clause. An empty DREAM_SKILL_MD
+# exits 2 naming it (Technical considerations, edge cases); a missing or unreadable one fails as before.
 set -uo pipefail
 # shellcheck source=tests/drrp_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drrp_lib.sh"
 T_OUT=$(mktemp); trap 'rm -f "$T_OUT"' EXIT
 if [ "${DREAM_SKILL_MD+set}" = set ]; then f=$DREAM_SKILL_MD; else f="$REPO/skills/dream/SKILL.md"; fi
 if [ -z "$f" ]; then echo "ERROR DREAM_SKILL_MD is set to an empty path ('')" >&2; exit 2; fi
-if [ ! -f "$f" ] || [ ! -r "$f" ]; then echo "ERROR skill file missing or unreadable: $f" >&2; exit 2; fi
+[ -r "$f" ] || fail "skill file missing or unreadable: $f"
 # R1, R2: the sentence in both paragraphs (a copy in another section satisfies neither)
 miss=""
 for h in "$RP_H1" "$RP_H2"; do
