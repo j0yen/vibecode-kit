@@ -381,6 +381,18 @@ def c_two(changed_matrix="both"):
     return f
 
 
+def c_two_old_kept(**kw):
+    """R4's exemption: m2 (header x2) also lists the old matrix x1, edited after m1 froze it (live x1 is the
+    edited copy), and no row's `changed` names x1: a renamed matrix is never an undeclared change."""
+    def tw(k, m, M):
+        if k == 1:
+            x1 = mx_rel(9)
+            edited = M.files[x1] + b"\nEdited after round 1 (fixture).\n"
+            M.files[x1] = edited
+            m["members"][os.path.basename(x1)] = m["copies"][os.path.basename(x1)] = edited
+    return rounds(2, changed_matrix="neither", man_tweak=tw)
+
+
 def c_added_prd(**kw):
     """m1 freezes prds [foo] with x1 (section foo); m2 adds bar with x2 (sections foo, bar)."""
     return rounds(2, prds_by_round=[["foo"], ["foo", "bar"]])
@@ -499,6 +511,7 @@ CASES = {
     "two-old": c_two("old"),
     "two-new": c_two("new"),
     "two-neither": c_two("neither"),
+    "two-old-kept": c_two_old_kept,
     "added-prd": c_added_prd,
     "m1-no-matrix": c_m1_tweak(_m1_no_matrix),
     "m1-no-sections": c_m1_tweak(_m1_copy(lambda M: M.matrix(slugs=[], sections=""))),
