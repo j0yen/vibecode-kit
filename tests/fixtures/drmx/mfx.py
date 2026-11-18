@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Mission fixture builder for the drmx tests (PRD-dream-matrix-per-manifest) and the tests that
-build on it (drpe, drle).
+"""Mission fixture builder for the drmx tests (PRD-dream-matrix-per-manifest).
 
 The fixture matrices and edge maps come from the lint's own selftest helpers (`mx_file`,
 `mission_edges`), loaded from skills/dream/scripts/dream-run-note-lint.sh (its Python body, every

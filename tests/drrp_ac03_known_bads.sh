@@ -55,8 +55,11 @@ mk phase4-only "s = sub_in(sub_in(s, P1, S, ''), P2, S, ''); s = s.replace('Afte
 grep -qF "$RP_SENTENCE After appending the note" "$T/phase4-only.md" || fail "phase4-only: the sentence was not placed in Phase 4"
 run1 phase4-only "$RP_H1" "${RP_CLAUSES[0]}"
 run1 phase4-only "$RP_H2" "${RP_CLAUSES[0]}"
+# shellcheck disable=SC2016  # literal backticks of the skill text
+D1='later than the earliest `before` any row names, '
 # shellcheck disable=SC2016
-D1='later than the earliest `before` any row names, '; D2='including that row'"'"'s own `after`, '
+D2='including that row'"'"'s own `after`, '
+# shellcheck disable=SC2016
 for which in 1 2; do
   h=$RP_H1; [ "$which" = 2 ] && h=$RP_H2
   P=P$which
@@ -68,13 +71,13 @@ done
 # empty path: exit 2 naming it (Technical considerations, edge cases); missing and unreadable paths
 # keep the landed test's refusal (exit 1, "skill file missing or unreadable: <path>")
 out=$(DREAM_SKILL_MD='' bash "$AC8" 2>&1); rc=$?
-[ "$rc" = 2 ] && printf '%s' "$out" | grep -qF "''" || fail "empty path: rc=$rc: $out"
+{ [ "$rc" = 2 ] && printf '%s' "$out" | grep -qF "''"; } || fail "empty path: rc=$rc: $out"
 out=$(DREAM_SKILL_MD="$T/nope/SKILL.md" bash "$AC8" 2>&1); rc=$?
-[ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "skill file missing or unreadable: $T/nope/SKILL.md" || fail "missing path: rc=$rc: $out"
+{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "skill file missing or unreadable: $T/nope/SKILL.md"; } || fail "missing path: rc=$rc: $out"
 note=""
 if [ "$(id -u)" != 0 ]; then
   cp "$SK" "$T/unreadable.md"; chmod 000 "$T/unreadable.md"
   out=$(DREAM_SKILL_MD="$T/unreadable.md" bash "$AC8" 2>&1); rc=$?
-  [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "skill file missing or unreadable: $T/unreadable.md" || fail "unreadable path: rc=$rc: $out"
+  { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "skill file missing or unreadable: $T/unreadable.md"; } || fail "unreadable path: rc=$rc: $out"
 else note=" (unreadable case skipped as root)"; fi
 pass "3 removal copies + 4 clause drops refused naming paragraph and clause; empty path exit 2, missing/unreadable path refused as landed$note"

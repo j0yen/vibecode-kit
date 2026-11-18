@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility driver for drmx_ac05 (and drpe_ac05, drle_ac05): lint every checked-in
+"""Compatibility driver for drmx_ac05: lint every checked-in
 compatibility note with two lints and compare stdout, stderr and exit code.
 
 Usage: compat.py <tests/fixtures> <base lint> <head lint> <report> <allowed: python expr on tag, mode, entry>
@@ -60,9 +60,7 @@ def notes():
 def run(lint, log, home, dec, entry, js, wiki):
     args = ["bash", lint, log] + (["--entry", entry] if entry != "--last" else ["--last"]) + \
            ["--prd-dir", home, "--decisions", dec] + (["--json"] if js else [])
-    env = {k: v for k, v in os.environ.items() if k not in ("SKILL_ROUTING_DECISIONS", "DREAM_TERMINAL_READER",
-                                                            "DREAM_LINT_TEST_READER", "ACCOUNT_LANE_STATE",
-                                                            "FABLE_LAUNCH_TEST")}
+    env = {k: v for k, v in os.environ.items() if k != "SKILL_ROUTING_DECISIONS"}
     env.update(HOME=home_env, ANALYSIS_WIKI_DIR=wiki)
     p = subprocess.run(args, capture_output=True, text=True, env=env, timeout=300)
     return p.returncode, p.stdout, p.stderr
