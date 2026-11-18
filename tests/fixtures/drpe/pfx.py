@@ -1167,6 +1167,277 @@ def rename_row(nolog=False):
 CASES["rename-row"] = (lambda nolog=False: rename_row(nolog))
 
 
+# ---- reviewer round 5 (db9e3389): oracle search cases
+def rv5_base_f1(nolog=False):
+    """rv4-relaunch-issuer without the relaunch: live-bound-none, one amended row (no row answers F1), r2 on m2."""
+    s = rv4_relaunch_issuer(nolog)
+    s.dec = [r for r in s.dec if not (r.get("session") == S["R1"] and r.get("ts") == at(14, 30))]
+    return s
+
+
+def rv5_rename_early(nolog=False):
+    """rv4-rename-rec with the pending entry's own header written before r3's launch (16:00; r3 at 16:30)."""
+    s = rv4_rename_rec(nolog)
+    s.pending["ts"] = at(16)
+    return s
+
+
+def rv5_reuse_b(nolog=False):
+    """rv5-base-f1, but m2 (B) is reviewed by r1's own session (resumed onto m2 at 14:00, its own Review: line r2).
+    F1 existed when that session launched on m2 (r1 returned before it)."""
+    s = rv5_base_f1(nolog)
+    for r in s.dec:
+        if r.get("session") == S["R2"] and r.get("role") == "review":
+            r["session"], r["resume"] = S["R1"], True
+    r2 = s.review("notes/reviews/r2", S["R1"], [("foo", "APPROVE"), ("bar", "APPROVE")], "APPROVE")
+    s.pending["lines"]["Review"] = [x for x in s.pending["lines"]["Review"] if "notes/reviews/r2/" not in x] + [r2]
+    return s
+
+
+def rv5_naive_ts(nolog=False):
+    """rv5-base-f1 with r2's launch row on m2 carrying a timestamp with no UTC offset."""
+    s = rv5_base_f1(nolog)
+    for r in s.dec:
+        if r.get("session") == S["R2"] and r.get("role") == "review":
+            r["ts"] = at(14)[:-6]
+    return s
+
+
+def rv5_dec_order(nolog=False):
+    """rv5-base-f1 with r1's 11:30 launch row written after r2's 14:00 row in the decisions log."""
+    s = rv5_base_f1(nolog)
+    i1 = next(i for i, r in enumerate(s.dec) if r.get("session") == S["R1"] and r.get("role") == "review")
+    s.dec.append(s.dec.pop(i1))
+    return s
+
+
+def rv5_resume_own(nolog=False):
+    """own-finding (r2 on m2 returned FIX with F2, no row answers it), and r2's session resumed on m2 at 14:30."""
+    s = CASES["own-finding"](nolog=nolog)
+    s.drow(at(14, 30), S["R2"], role="review", man=s.mans["m2"], resume=True)
+    return s
+
+
+def rv5_prelaunch_rep2(nolog=False):
+    """continued (m2 unbound, last; it lists the repairs file with row 1) with the pending repairs= naming a
+    differently named file of the same bytes: the pre-launch check before r2's launch."""
+    s = build("continued", nolog=nolog)
+    s.files[REP2] = s.rep_bytes()
+    s.pending["lines"]["Mission"] = s.pending["lines"]["Mission"].replace(f"repairs={REP}", f"repairs={REP2}")
+    return s
+
+
+def rv5_prelaunch_rep2_absent(nolog=False):
+    """continued with the pending repairs= naming a file that does not exist yet."""
+    s = build("continued", nolog=nolog)
+    s.pending["lines"]["Mission"] = s.pending["lines"]["Mission"].replace(f"repairs={REP}", f"repairs={REP2}")
+    return s
+
+
+CASES["rv5-rename-early"] = (lambda nolog=False: rv5_rename_early(nolog))
+CASES["rv5-reuse-b"] = (lambda nolog=False: rv5_reuse_b(nolog))
+CASES["rv5-naive-ts"] = (lambda nolog=False: rv5_naive_ts(nolog))
+CASES["rv5-dec-order"] = (lambda nolog=False: rv5_dec_order(nolog))
+CASES["rv5-resume-own"] = (lambda nolog=False: rv5_resume_own(nolog))
+CASES["rv5-prelaunch-rep2"] = (lambda nolog=False: rv5_prelaunch_rep2(nolog))
+CASES["rv5-prelaunch-rep2-absent"] = (lambda nolog=False: rv5_prelaunch_rep2_absent(nolog))
+
+
+# ---- reviewer round 5 (db9e3389): controls for the C3 lookups no case discriminates
+REP0 = "notes/missions/drpe-mission.repairs-v0.jsonl"
+
+
+def rv5_rep_two(nolog=False):
+    """ac8, but E1 (12:00) already carried repairs= REP0 and E2 (15:00) moved it to the current file, both
+    recorded before r3's 16:30 launch on m3; the live file has lost row 2 (F1, m1 -> m2r), which m3's copy
+    holds. The token at the launch is E2's: its copy answered F1 and declared PRD-foo.md (m1, m2r) - both exit."""
+    s = CASES["ac8"](nolog=nolog)
+    s.entries[0]["lines"]["Mission"] += f" repairs={REP0}"
+    s.raw_rep = (json.dumps(s.rows[0]) + "\n" + json.dumps(s.rows[2]) + "\n").encode()
+    return s
+
+
+def rv5_tier3_other(nolog=False):
+    """own-finding (r2 on m2 returned FIX with F2), plus a later launch row carrying m2's scope id from a session
+    no Review: line names (role author): it binds nothing (R3), so m2's launch is r2's and F2 exits."""
+    s = CASES["own-finding"](nolog=nolog)
+    s.drow(at(14, 45), S["X1"], role="author", man=s.mans["m2"])
+    return s
+
+
+CASES["rv5-rep-two"] = (lambda nolog=False: rv5_rep_two(nolog))
+CASES["rv5-tier3-other"] = (lambda nolog=False: rv5_tier3_other(nolog))
+
+
+def rv5_rename_copy(nolog=False):
+    """three, but after r2's launch on m2 the pending entry renames the repairs file to REP2 holding the same rows
+    (the old file stays); pending m3 lists REP2. Before r2's launch the check refused this name (rv5-prelaunch-rep2):
+    m2 lists no REP2. That refusal is the only error here."""
+    s = build("three", nolog=nolog)
+    s.files[REP2] = s.rep_bytes()
+    m3 = s.mans["m3"]
+    del m3.members[RB]
+    m3.members[RB2] = s.rep_bytes()
+    s.pending["lines"]["Mission"] = s.pending["lines"]["Mission"].replace(f"repairs={REP}", f"repairs={REP2}")
+    return s
+
+
+CASES["rv5-rename-copy"] = (lambda nolog=False: rv5_rename_copy(nolog))
+
+
+def rv5_resume_three(nolog=False):
+    """three with F2 left unanswered (row 2 amended: no finding, still declaring PRD-bar.md m2 -> m3) and r2's
+    session resumed on m2 at 13:45 (resume: true). F2 is a finding of m2's own latest review: the frozen copies of
+    m2 record the state when that review launched, before F2; the review about to launch on m3 follows it."""
+    s = build("three", nolog=nolog)
+    s.rows[1].update({"finding": None, "class": None, "disposition": "amended", "reason": "bar re-worded"})
+    s.drow(at(13, 45), S["R2"], role="review", man=s.mans["m2"], resume=True)
+    return s
+
+
+def rv5_noresume_three(nolog=False):
+    """rv5-resume-three without the resume row: the control."""
+    s = build("three", nolog=nolog)
+    s.rows[1].update({"finding": None, "class": None, "disposition": "amended", "reason": "bar re-worded"})
+    return s
+
+
+CASES["rv5-resume-three"] = (lambda nolog=False: rv5_resume_three(nolog))
+CASES["rv5-noresume-three"] = (lambda nolog=False: rv5_noresume_three(nolog))
+
+
+# ---- round 5 (F22): the lookup branches no case decided
+# rep-at-bts: rv4-rename, with an entry recorded exactly at r2's launch on m2 (13:30) that already names the new
+# file: recorded at the launch is not recorded before it, so no recorded token was in force and m2's own listed
+# repairs copy (row 1: F1 answered, PRD-foo.md declared) decides: both errors FAIL.
+def rep_at_bts(nolog=False):
+    s = rv4_rename(nolog)
+    e = {"ts": at(13, 30), "lines": dict(s.entries[0]["lines"], Analysis=s.pending["lines"]["Analysis"])}
+    e["lines"]["Mission"] = f"Mission: {NAME} edges={EDGES} scope={s.mans['m1'].rel},{s.mans['m2'].rel} repairs={REP2}"
+    s.entries.append(e)
+    return s
+
+
+# rename-back: three with E1 (12:00, before r2's launch on m2) naming repairs= REPX, a file m2 lists (its copy holds
+# row 1); m1 and m2 also list the current file REP with other bytes (an earlier repairs file), and the pending entry
+# renames back to REP, holding row 2 only. At the launch REP was a plain member that row 1 (the only row naming
+# (m1, m2)) does not declare: its undeclared change is HELD, while F1 and PRD-foo.md, answered in m2's copy, FAIL.
+REPX = "notes/missions/drpe-mission.repairs-x.jsonl"
+
+
+def rename_back(nolog=False):
+    s = build("three", nolog=nolog)
+    r1b, r2b = (json.dumps(r) + "\n" for r in s.rows)
+    s.entries[0]["lines"]["Mission"] += f" repairs={REPX}"
+    s.files[REPX] = r1b.encode()
+    s.mans["m1"].members[RB] = b'{"note": "repairs file before m1 (fixture)"}\n'
+    s.mans["m2"].members[RB] = b'{"note": "repairs file before m2 (fixture)"}\n'
+    s.mans["m2"].members[os.path.basename(REPX)] = r1b.encode()
+    s.mans["m3"].members[RB] = r2b.encode()
+    s.raw_rep = r2b.encode()
+    return s
+
+
+CASES["rep-at-bts"] = (lambda nolog=False: rep_at_bts(nolog))
+CASES["rename-back"] = (lambda nolog=False: rename_back(nolog))
+
+
+# ---- round 5 (F24): states that differ from a neighbour only in the object of an error
+# two-f1: rv5-base-f1 (no row answers F1 of r1, r2 on bound m2), but r2 returned FIX with a finding of its own that
+# also has the id F1. r1's F1 existed at r2's launch (HELD); r2's did not (FAIL): one id, two review files.
+def two_f1(nolog=False):
+    s = rv5_base_f1(nolog)
+    s.review("notes/reviews/r2", S["R2"], [("foo", "APPROVE"), ("bar", "FIX")], "FIX", findings=[dict(F2, id="F1")])
+    st = s.pending["lines"]["State"]
+    s.pending["lines"]["State"] = st[:st.rindex(" bar=reviewed:APPROVE")] + " bar=reviewed:FIX"
+    return s
+
+
+# pair-objects: ac8 (r3 on m3 the latest launch), with PRD-bar.md also changed between m1 and m2r, which no row ever
+# declared, and the live repairs file reduced to row 1 (rows 2 and 3, which m3's copy holds, dropped): PRD-bar.md
+# (m1, m2r) is HELD, while PRD-foo.md on the same pair and PRD-bar.md on the next pair (m2r, m3) FAIL.
+def pair_objects(nolog=False):
+    s = CASES["ac8"](nolog=nolog)
+    s.mans["m2r"].members["PRD-bar.md"] = prd("bar", 3)
+    s.raw_rep = (json.dumps(s.rows[0]) + "\n").encode()
+    return s
+
+
+# row-edited-same: held-row-copy, but live row 1 was edited in place (a reason added) keeping its short sweep: the
+# same sweep-missing text on the same row number, other bytes than m2's copy holds (S2: FAIL).
+def row_edited_same(nolog=False):
+    s = CASES["held-row-copy"](nolog=nolog)
+    s.raw_rep = "".join(json.dumps(dict(r, reason="edited in place") if i == 0 else r) + "\n"
+                        for i, r in enumerate(s.rows)).encode()
+    return s
+
+
+CASES["two-f1"] = (lambda nolog=False: two_f1(nolog))
+CASES["pair-objects"] = (lambda nolog=False: pair_objects(nolog))
+CASES["row-edited-same"] = (lambda nolog=False: row_edited_same(nolog))
+
+
+# reuse-f1: rv5-reuse-b (r1's session resumed to review m2, the only session launching on it), plus r1b (another
+# session) re-reviewing m1 at 12:00 with a sidecar that re-uses the id F1 (refused by chain-review R4: F1's issuing
+# review stays r1). At m2's launch only r1b's review was in the launch state (a session other than its own launched
+# on m2 after it), so that state carries F1 of r1b, not F1 of r1: F1 of r1 FAILS (one id, another review file).
+def reuse_f1(nolog=False):
+    s = rv5_reuse_b(nolog)
+    r1b = s.review("notes/reviews/r1b", S["R3"], [("foo", "FIX"), ("bar", "APPROVE")], "FIX", findings=[F1])
+    s.drow(at(12, 0), S["R3"], role="review", man=s.mans["m1"])
+    rv = s.pending["lines"]["Review"]
+    s.pending["lines"]["Review"] = rv[:1] + [r1b] + rv[1:]
+    return s
+
+
+CASES["reuse-f1"] = (lambda nolog=False: reuse_f1(nolog))
+
+
+# ---- round 5 (F22): the launch time and the issuer's date after F21
+# rereview-withdrawal: rv4-void-row-s3 (r3 on m3 at 16:30; only the pending entry withdraws m2), plus E3 recorded at
+# 17:00 withdrawing m2 and r3b re-reviewing m3 at 17:30 (the pending entry at 18:00). m3's latest launch is r3b's,
+# after the withdrawal was recorded: F1's only row names the withdrawn m2 (void then too) and (m1, m2r) was a pair
+# with no declaring row: both HELD (the launch time is the latest launch, not the first).
+def rereview_withdrawal(nolog=False):
+    s = rv4_void_row_s3(nolog)
+    e3 = {"ts": at(17), "lines": dict(s.pending["lines"])}
+    s.entries.append(e3)
+    r3b = s.review("notes/reviews/r3b", S["R4"], [("foo", "APPROVE"), ("bar", "APPROVE")], "APPROVE")
+    s.drow(at(17, 30), S["R4"], role="review", man=s.mans["m3"])
+    s.pending = {"ts": at(18), "lines": dict(s.pending["lines"], Review=s.pending["lines"]["Review"] + [r3b])}
+    return s
+
+
+# late-issuer: rv5-base-f1 (no row answers F1 of r1), but r2's launch on m2 came at 11:00, before r1's launch on m1
+# (11:30), while another session (r0) had launched on m1 at 10:00. F1 is dated by its own review's launch (11:30),
+# not by m1's first launch from any session: it did not exist at m2's launch, so it FAILS.
+def late_issuer(nolog=False):
+    s = rv5_base_f1(nolog)
+    for r in s.dec:
+        if r.get("session") == S["R2"] and r.get("role") == "review":
+            r["ts"] = at(11)
+    s.drow(at(10), S["R5"], role="review", man=s.mans["m1"])
+    return s
+
+
+CASES["rereview-withdrawal"] = (lambda nolog=False: rereview_withdrawal(nolog))
+CASES["late-issuer"] = (lambda nolog=False: late_issuer(nolog))
+
+
+# late-issuer-rereview: late-issuer (r2 on m2 at 11:00, r1 issues F1 on m1 at 11:30) plus r2b re-reviewing m2 at
+# 12:00: m2's latest launch by a session other than r1's came after F1 existed, so F1 is HELD (the latest such
+# launch, not the earliest).
+def late_issuer_rereview(nolog=False):
+    s = late_issuer(nolog)
+    r2b = s.review("notes/reviews/r2b", S["R4"], [("foo", "APPROVE"), ("bar", "APPROVE")], "APPROVE")
+    s.drow(at(12), S["R4"], role="review", man=s.mans["m2"])
+    s.pending["lines"]["Review"] = s.pending["lines"]["Review"] + [r2b]
+    return s
+
+
+CASES["late-issuer-rereview"] = (lambda nolog=False: late_issuer_rereview(nolog))
+
+
 def main(argv):
     if argv[:1] == ["--list"]:
         print("\n".join(CASES))
