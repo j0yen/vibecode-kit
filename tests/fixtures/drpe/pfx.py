@@ -718,6 +718,128 @@ for _k in ("none", "packet", "prds", "contract", "clash", "dupbase"):
     CASES[f"live-bound-{_k}"] = (lambda k=_k, nolog=False: live_bound(k, nolog))
 
 
+# AC 5 held rule, the whole class (R1: held only "when it is also present in the bound manifest's own
+# frozen copies ... which record the state when its review launched"). On the same bound m2: a defect
+# m2's frozen edges header raises too (the same member, contract basename or collision), or one no header
+# supplies (the edges file, the matrix), is held under both labels; a live collision on another basename,
+# or a live member with no readable frozen header, is not.
+def frozen_live(s, mutate, live_mutate=None):
+    """m2's frozen edges copy carries `mutate`, the live header `live_mutate` (default the same)."""
+    fe = edges(None, mutate=mutate)
+    s.mans["m2"].members[EB] = fe
+    s.files[EDGES] = edges(None, mutate=live_mutate) if live_mutate else fe
+    s.rows[0]["changed"] = s.rows[0]["changed"] + [EB]
+
+
+def held_class(kind, nolog=False):
+    s = live_bound("none", nolog)
+    m2 = s.mans["m2"]
+    ext = lambda *cs: (lambda h, es: h.update(external=[{"name": "hermes", "contract": list(cs) if len(cs) > 1 else cs[0]}]))
+    if kind == "frozen-prds":           # both headers list PRD-bar.md, m2 does not
+        del m2.members["PRD-bar.md"]
+    elif kind == "frozen-packet":       # run9g's shape: a packet member both headers name
+        s.files["visions/drpe-glossary.md"] = b"# drpe glossary (fixture)\n"
+        frozen_live(s, lambda h, es: h.update(packet=list(h.get("packet") or []) + ["drpe-glossary.md"]))
+    elif kind == "frozen-contract":
+        s.files["contracts/hermes-contract.md"] = b"# hermes contract (fixture)\n"
+        frozen_live(s, ext("contracts/hermes-contract.md"))
+    elif kind == "frozen-dupbase":      # m2 lists hermes.md: the collision is the only defect
+        s.files["contracts/a/hermes.md"] = b"# hermes contract a (fixture)\n"
+        s.files["contracts/b/hermes.md"] = b"# hermes contract b (fixture)\n"
+        frozen_live(s, ext("contracts/a/hermes.md", "contracts/b/hermes.md"))
+        m2.members["hermes.md"] = s.files["contracts/a/hermes.md"]
+    elif kind == "frozen-clash":
+        s.files["contracts/PRD-foo.md"] = b"# hermes contract named like a PRD (fixture)\n"
+        frozen_live(s, ext("contracts/PRD-foo.md"))
+    elif kind == "dupbase-other":       # the frozen header collides on x.md, the live one on hermes.md
+        for p in ("contracts/a/x.md", "contracts/b/x.md", "contracts/a/hermes.md", "contracts/b/hermes.md"):
+            s.files[p] = f"# {p} (fixture)\n".encode()
+        frozen_live(s, ext("contracts/a/x.md", "contracts/b/x.md"), ext("contracts/a/hermes.md", "contracts/b/hermes.md"))
+        m2.members["x.md"] = s.files["contracts/a/x.md"]
+        m2.members["hermes.md"] = s.files["contracts/a/hermes.md"]
+    elif kind == "clash-other":         # the frozen header clashes on PRD-foo.md, the live one on PRD-bar.md
+        s.files["contracts/PRD-foo.md"] = b"# contract named like PRD-foo (fixture)\n"
+        s.files["contracts/PRD-bar.md"] = b"# contract named like PRD-bar (fixture)\n"
+        frozen_live(s, ext("contracts/PRD-foo.md"), ext("contracts/PRD-bar.md"))
+    elif kind == "edges":               # run9h's shape: m2 lists no edges file (no readable frozen header)
+        del m2.members[EB]
+    elif kind == "edges-member":        # ... and the live header names the edges file as a packet member
+        del m2.members[EB]
+        s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(packet=list(h.get("packet") or []) + [EB]))
+    elif kind == "noheader-dupbase":    # no readable frozen header; the live header collides on hermes.md
+        del m2.members[EB]
+        s.files["contracts/a/hermes.md"] = b"# hermes contract a (fixture)\n"
+        s.files["contracts/b/hermes.md"] = b"# hermes contract b (fixture)\n"
+        s.files[EDGES] = edges(None, mutate=ext("contracts/a/hermes.md", "contracts/b/hermes.md"))
+    elif kind in ("matrix-noheader", "matrix-member"):  # no readable frozen header, no copy of the note's matrix x2
+        del m2.members[EB]
+        del m2.members[os.path.basename(s.x2)]
+        if kind == "matrix-member":     # ... and the live header names x2 as a packet member
+            s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(
+                packet=list(h.get("packet") or []) + [os.path.basename(s.x2)]))
+    return s
+
+
+for _k in ("frozen-prds", "frozen-packet", "frozen-contract", "frozen-dupbase", "frozen-clash", "dupbase-other",
+           "clash-other", "edges", "edges-member", "noheader-dupbase", "matrix-noheader", "matrix-member"):
+    CASES[f"live-bound-{_k}"] = (lambda k=_k, nolog=False: held_class(k, nolog))
+
+
+# AC 5 held rule, launch state: m2 bound by the path of r2's launch row, then edited after the launch (a
+# line appended, so m2's scope id is no longer the row's) or deleted. Its copies no longer record the state
+# when r2 launched (R3: "edited or deleted after a launch"), so no error on m2 is held and its repairs copy
+# holds no row. A launch row with no scope_id records no id to compare: noid-held (m2 unedited, both headers
+# list PRD-bar.md, m2 does not) is held; noid-deleted (m2 deleted) is not.
+def late(kind, nolog=False):
+    s = held_class("frozen-prds", nolog) if kind in ("edited", "noid-held") else live_bound("none", nolog)
+    if kind == "edited-row":            # frozen row 1 (in m2's copy) has a short sweep
+        s.rows[0]["sweep"] = s.rows[0]["sweep"][:1]
+    if kind.startswith("noid"):
+        del s.dec[-1]["scope_id"]
+    if kind in ("edited", "edited-row"):
+        s.post_edit = ("notes/snapshots/m2/m2.sha256", "0" * 64 + "  late-addition.md\n")
+    elif kind in ("deleted", "noid-deleted"):
+        s.live_override["notes/snapshots/m2/m2.sha256"] = None
+    return s
+
+
+for _k in ("edited", "edited-row", "deleted", "noid-held", "noid-deleted"):
+    CASES[f"late-{_k}"] = (lambda k=_k, nolog=False: late(k, nolog))
+
+
+# AC 5 held rule, missing rows: three (m2 bound by r2, m3 pending), the live repairs file drops row 1
+# (F1, m1 -> m2). m2's copy holds row 1 (the reviewer of m2 read it: repair-missing and the undeclared
+# PRD-foo.md change are new), is listed but differs from its digest (no hold), holds no row or is not
+# listed (m2 froze no row: both are carried). row-dropped-pair: m3 bound too (a launch row on m3), the
+# live file drops row 2 (F2, m2 -> m3), which m3's copy holds.
+def row_dropped(kind, nolog=False):
+    s = build("three", nolog=nolog)
+    r1, r2 = (json.dumps(r) + "\n" for r in s.rows)
+    m2, m3 = s.mans["m2"], s.mans["m3"]
+    if kind == "pair":
+        s.drow(at(14, 30), S["R3"], role="review", man=m3)
+        s.raw_rep = r1.encode()
+        m2.members[RB] = r1.encode()
+        m3.members[RB] = (r1 + r2).encode()
+        return s
+    s.raw_rep = r2.encode()
+    m3.members[RB] = r2.encode()
+    if kind == "copy":
+        m2.members[RB] = r1.encode()
+    elif kind == "badcopy":
+        m2.members[RB] = r1.encode()
+        m2.copies[RB] = (r1 + r1).encode()
+    elif kind == "empty":
+        m2.members[RB] = b""
+    elif kind == "unlisted":
+        del m2.members[RB]
+    return s
+
+
+for _k in ("copy", "badcopy", "empty", "unlisted", "pair"):
+    CASES["row-dropped" + ("" if _k == "copy" else f"-{_k}")] = (lambda k=_k, nolog=False: row_dropped(k, nolog))
+
+
 # AC 8: E2 records the withdrawal of m2 (edges copy unlisted) with r2 on m2r returning APPROVE; E3 (pending
 # here, appended by the test) extends scope= with m3 (an amended bar), omits withdrawn= and binds r3 APPROVE
 @case("ac8")
