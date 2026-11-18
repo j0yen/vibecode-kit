@@ -474,6 +474,8 @@ class Oracle:
         if self.repbad and fid in SWEEP_IDS + ("mission-scope-incomplete",) and (fid != "mission-scope-incomplete"
                                                                                  or "(the repairs file;" in d):
             return "FAIL", "S2/R-5 the repairs copy beside B is listed but absent or differs"
+        if rows and self.rep_at != self.rep_now:
+            return "FAIL", "S2 a row of the current repairs file, renamed since B's launch: B froze no row of it"
         if self.nohdr and self.B in ms and ("of the live edges header)" in d or "live edges header: contract" in d
                                             or "(matrix named by adversarial=" in d):
             # B froze no readable edges header: the live header at its launch is not recorded. A need no header

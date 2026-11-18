@@ -45,6 +45,7 @@ fi
 for why in "S3 mission-withdrawn-bound" "S3/S5 names a withdrawn manifest" "S4 mission-grammar" "S4 names no manifest" \
            "S5 names an unbound or pending manifest" "R3 names a bound manifest edited or deleted" \
            "S2/R-5 the repairs copy beside B is listed but absent or differs" \
+           "S2 a row of the current repairs file, renamed since B's launch" \
            "R-1 no readable frozen header: a need no header supplies" \
            "R-1 no readable frozen header: a live-header defect" "present in the frozen evaluation" \
            "absent from the frozen evaluation"; do
