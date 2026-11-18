@@ -6,7 +6,8 @@
 # rename names the bound manifest m1; a forgotten row is repair-missing governed, and the no-log run
 # reports no repair-missing. The finding-row defects (a forgotten row, a short sweep under a live-file
 # repairs line, a frozen row edited in place) run governed only: with no decisions log no chain review
-# binds, so no finding exists for a row to answer.
+# binds, so no finding exists for a row to answer. A pending entry with no Task: line, no Mission:
+# line, or a Task: line without Consumer: exits 1 naming the line (R1: "exits 1 naming the line").
 set -uo pipefail
 # shellcheck source=tests/drpe_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drpe_lib.sh"
@@ -25,6 +26,9 @@ for v in "" "@nolog"; do
   pe "d-analysis-malformed$v"; pk; rc1; ppend "Analysis:"
   pe "d-analysis-absent$v"; pk; rc1; ppend "no Analysis: line"
   pe "d-state-absent$v"; pk; rc1; ppend "no State: line"
+  pe "d-task-absent$v"; pk; rc1; ppend "line: no Task: line in the pending entry"
+  pe "d-mission-absent$v"; pk; rc1; ppend "line: no Mission: line in the pending entry"
+  pe "d-task-malformed$v"; pk; rc1; ppend "line: Task: the line lacks"
   pe "d-first-skipped$v"; pk; rc1; pfail adversarial-missing "adversarial=skipped:"
   pe "d-state-short$v"; pk; rc1; ppend "slug bar"
   pe "d-recency-same$v"; pk; rc1; ppend "Analysis:" "$X1" "not later than the previous entry"

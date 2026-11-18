@@ -485,6 +485,28 @@ def _(nolog=False):
     return s
 
 
+@case("d-task-absent")
+def _(nolog=False):
+    s = build("continued", nolog=nolog)
+    setp(s, "Task", None)
+    return s
+
+
+@case("d-mission-absent")
+def _(nolog=False):
+    s = build("continued", nolog=nolog)
+    setp(s, "Mission", None)
+    return s
+
+
+@case("d-task-malformed")
+def _(nolog=False):
+    """The Task: line names the task but no Consumer:."""
+    s = build("continued", nolog=nolog)
+    setp(s, "Task", "Task: PE-1")
+    return s
+
+
 @case("d-first-skipped")
 def _(nolog=False):
     s = build("first", nolog=nolog)
