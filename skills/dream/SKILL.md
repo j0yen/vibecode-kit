@@ -328,7 +328,8 @@ row naming a withdrawn manifest is void); the lint records each withdrawal and i
 copy, not by a same-content replacement (a replacement with the withdrawn manifest's scope id is
 `mission-scope-mismatch`). A manifest a review launch has touched is never withdrawn
 (`mission-withdrawn-bound`): an error on it that its own frozen copies carry is held and reported
-(`held_packet_errors`, which do not set the exit), and one the pending entry or a new repairs row
+(`held_packet_errors`, which do not set the exit; none on a manifest edited or deleted after its
+launch, whose copies no longer record that state), and one the pending entry or a new repairs row
 would introduce (for example a new matrix name that a bound manifest lists no copy of, in a mission
 whose header has no `matrix`) is refused until the author keeps the old name. The packet
 obligations, listed once: the matrix rule of PRD dream-matrix-per-manifest (each manifest lists the

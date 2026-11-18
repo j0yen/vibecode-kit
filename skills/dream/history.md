@@ -134,7 +134,8 @@ doubts a rule can see what it cost when it was missing. Append-only.
   now has the author write the pending entry and run `--packet-only --pending <file>` after each
   freeze and before its reviewer launches; it reports only packet errors, counts the review about
   to launch as the following review, and holds (does not fail) an error a bound manifest's own
-  frozen copies carry. An unbound defective manifest is withdrawn with `withdrawn=` on the
+  frozen copies carry (none on a manifest edited or deleted after its launch, whose copies no
+  longer record that state). An unbound defective manifest is withdrawn with `withdrawn=` on the
   `Mission:` line and replaced; rows naming it are void, the lint records the reason under
   `mission.withdrawn`, and a bound manifest is never withdrawable (`mission-withdrawn-bound`). The
   packet obligations are listed once in Phase 3 (PRD dream-packet-errors-while-repairable).
