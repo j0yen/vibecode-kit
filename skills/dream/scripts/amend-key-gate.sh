@@ -9,7 +9,18 @@
 #   keys:   comma-separated list of frontmatter keys the amendment would add
 #           or change (e.g. "Superseded-by,transferred_acs")
 #
-# Verdict on stdout: "allow" or "deny: <reason>". Exit 0 for allow, 2 for deny.
+# Rule:
+#   queued + no dispatch iter_log      -> any keys (full amend)
+#   blocked | parked                   -> only Superseded-by / transferred_acs,
+#                                         dispatched or not (/dream drafts some
+#                                         PRDs blocked, and those have no
+#                                         dispatch iter_log)
+#   building | in_progress             -> the same two keys, and only with a
+#                                         dispatch iter_log
+#   anything else                      -> deny; draft a successor
+#
+# Verdict on stdout: "allow" or "deny: <reason>", the reason naming the
+# condition that failed. Exit 0 for allow, 2 for deny.
 
 set -uo pipefail
 
@@ -21,6 +32,8 @@ keys_csv=$3
 
 ownership_keys="Superseded-by transferred_acs"
 
+# is_ownership_only: rc 0 when every key is an ownership key; otherwise rc 1
+# and the first other key on stdout.
 is_ownership_only() {
   local IFS=','
   local k
@@ -29,7 +42,7 @@ is_ownership_only() {
     [ -z "$k" ] && continue
     case " $ownership_keys " in
       *" $k "*) ;;
-      *) return 1 ;;
+      *) echo "$k"; return 1 ;;
     esac
   done
   return 0
@@ -42,12 +55,25 @@ fi
 
 case "$status" in
   building|in_progress|blocked|parked)
-    if [ "$has_iter_log" = "yes" ] && [ -n "$keys_csv" ] && is_ownership_only; then
-      echo "allow"
-      exit 0
+    owned="${ownership_keys// /, }"
+    if [ -z "$keys_csv" ]; then
+      echo "deny: no keys named; a $status predecessor accepts only $owned via amend"
+      exit 2
     fi
-    echo "deny: building/blocked/parked predecessor accepts only ${ownership_keys// /, } via amend; draft a successor for anything else"
-    exit 2
+    if ! other="$(is_ownership_only)"; then
+      echo "deny: $other is not an ownership key; a $status predecessor accepts only $owned via amend; draft a successor for anything else"
+      exit 2
+    fi
+    case "$status" in
+      building|in_progress)
+        if [ "$has_iter_log" != "yes" ]; then
+          echo "deny: $status predecessor has no dispatch iter_log; $owned are accepted on a building/in_progress PRD only after a dispatch"
+          exit 2
+        fi
+        ;;
+    esac
+    echo "allow"
+    exit 0
     ;;
 esac
 
