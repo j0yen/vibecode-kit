@@ -21,7 +21,7 @@ pe() { rm -rf "${W:?}"; python3 -I "$PFX" "$1" "$W" || fail "fixture $1 did not 
   LOG="$W/home/notes/dream-log.md"; DEC="$W/decisions.jsonl"; H="$W/home"; P="$W/pending.md"; CASE=$1; }
 decargs() { if [ -f "$DEC" ]; then printf '%s\n' --decisions "$DEC"; fi; }
 pk() { local d; mapfile -t d < <(decargs)
-  JS=$("$LINT" "$LOG" --last --packet-only --pending "$P" --prd-dir "$H" "${d[@]}" --json "$@" 2>"$T/err"); RC=$?; ERR=$(cat "$T/err"); no_tb; }
+  JS=$("$LINT" "$LOG" --last --packet-only --pending "$P" --prd-dir "$H" "${d[@]}" --json 2>"$T/err"); RC=$?; ERR=$(cat "$T/err"); no_tb; }
 appended() { mkdir -p "$(dirname "$LOG")"; { if [ -s "$LOG" ]; then cat "$LOG"; echo; fi; cat "$P"; } > "$T/app.md"; cp "$T/app.md" "$LOG"; }
 full() { local d; mapfile -t d < <(decargs); appended
   JS=$("$LINT" "$LOG" --last --prd-dir "$H" "${d[@]}" --json 2>"$T/err"); RC=$?; ERR=$(cat "$T/err"); no_tb; }
