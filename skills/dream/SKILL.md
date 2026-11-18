@@ -335,10 +335,13 @@ obligations, listed once: the matrix rule of PRD dream-matrix-per-manifest (each
 matrix its frozen edges header names, else the first-listing entry's, and the note's `adversarial=`
 names the last); a continued run writes a matrix later than the previous entry; the matrix holds a
 `## PRD-<slug>` section for every PRD the last manifest's edges header lists, which is what "for
-each PRD in the batch" in the adversarial pass means on a mission run; Once any repairs row exists, the repairs file is a packet member: list its basename in every `scope=` manifest later than the earliest `before` any row names, including that row's own `after`, so write the row (it names `after` by path) before freezing `after`. `sweep` on
+each PRD in the batch" in the adversarial pass means on a mission run; the repairs-file sentence:
+"Once any repairs row exists, the repairs file is a packet member: list its basename in every
+`scope=` manifest later than the earliest `before` any row names, including that row's own
+`after`, so write the row (it names `after` by path) before freezing `after`."; `sweep` on
 `amended` rows (the declared edges incident to each changed PRD); and the reviewer's findings
-sidecar, whose author checks its digest against the `findings=` line before writing the `Review:`
-line (`findings=none` only when no sidecar file exists).
+sidecar: the run's author checks its digest against the `findings=` line before writing the
+`Review:` line (`findings=none` only when no sidecar file exists).
 
 **Adversarial pass (before review):** for each PRD in the batch, write a table with the
 columns `invariant` (the requirement or AC id), `still-broken implementation` (a

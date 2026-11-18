@@ -9,8 +9,9 @@
 # new freeze, the command after each freeze and before its reviewer, withdrawn= with a corrected
 # replacement, a defect beside the manifest fixed by placing the copy, held errors and refused new
 # ones, and the packet obligations once (the matrix rule naming its PRD, a later matrix, a section
-# for every header PRD qualifying "for each PRD in the batch", the repairs-file sentence word for
-# word, `sweep` on `amended` rows, the sidecar digest checked before the Review: line, findings=none
+# for every header PRD qualifying "for each PRD in the batch", the repairs-file sentence quoted word
+# for word, `sweep` on `amended` rows, the sidecar digest the run's author checks before the Review:
+# line, findings=none
 # only with no sidecar file); the reviewer prompt says no findings means no file; Phase 4 shows
 # withdrawn=, its Review: bullet carries the re-list sentence and its lint step names
 # mission-withdrawn-bound, which the lint header list and MISSION_IDS carry; history.md has one
@@ -47,8 +48,8 @@ for s in 'pending entry' '`Task:`' '`Mission:`' 'full `Analysis:`' '`State:`' '`
   'a new matrix name that a bound manifest lists no copy of' 'mission-withdrawn-bound' \
   'packet obligations' 'dream-matrix-per-manifest' 'later than the previous entry' \
   'a `## PRD-<slug>` section for every PRD the last manifest'"'"'s edges header lists' 'for each PRD in the batch' \
-  "$RP_SENTENCE" '`sweep` on `amended` rows' 'sidecar' \
-  'checks its digest against the `findings=` line before writing the `Review:` line' '`findings=none` only when no sidecar file exists'; do
+  "the repairs-file sentence: \"$RP_SENTENCE\"" '`sweep` on `amended` rows' 'sidecar' \
+  'the run'"'"'s author checks its digest against the `findings=` line before writing the `Review:` line' '`findings=none` only when no sidecar file exists'; do
   case "$pp" in *"$s"*) ;; *) fail "the '$H' paragraph lacks '$s'";; esac
 done
 case "$(rp_para "$f" "$RP_H1")" in *'no findings means no file'*) ;; *) fail "the reviewer prompt (whole-chain review paragraph) does not say no findings means no file";; esac
