@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # AC4 (R1) — drift between the pre-launch command and the full lint. For every fixture of this PRD
-# (tests/fixtures/drpe/pfx.py, governed) and of its siblings (tests/fixtures/drmx/mfx.py, the drfc
-# notes S3 reuses, and any later builder under tests/fixtures/*/ that names itself in DRIFT_BUILDERS
-# below), `--packet-only --pending P` (exit-setting plus held findings) is compared with the full lint
+# (tests/fixtures/drpe/pfx.py, governed) and of its siblings (tests/fixtures/drmx/mfx.py and the drfc
+# notes S3 reuses), `--packet-only --pending P` (exit-setting plus held findings) is compared with the full lint
 # on the note with P appended as its last entry, filtered to the packet ids (a sibling note is split:
 # its last entry is P, the rest the note). The two agree, (id, detail) for (id, detail), except the
 # designed deltas of R1, which this test asserts each occur: in the pre-launch output only, a
@@ -72,7 +71,6 @@ run_case() { local pj perr ferr
 n=0
 while IFS= read -r c; do pe "$c"; run_case; n=$((n+1)); done < <(python3 -I "$PFX" --list)
 DRIFT_BUILDERS=("$MFX")
-for extra in "$here"/fixtures/*/drift-builder.py; do [ -f "$extra" ] && DRIFT_BUILDERS+=("$extra"); done
 for bld in "${DRIFT_BUILDERS[@]}"; do
   while IFS= read -r c; do
     rm -rf "${W:?}"; python3 -I "$bld" "$c" "$W" || fail "$bld $c did not build"
