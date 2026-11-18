@@ -52,10 +52,27 @@ STUB_DIR = "notes/reviews/oracle-launch"
 
 
 def parse_iso(s):
+    """A time as the lint reads one: ISO 8601 with a UTC offset (Z, +HH:MM or +HHMM); anything else, a time with
+    no offset included, is no time (oracle-scope.md: no parsable time)."""
     try:
-        return datetime.datetime.fromisoformat(s.replace("Z", "+00:00")) if isinstance(s, str) else None
-    except ValueError:
+        t = s.replace("Z", "+00:00")
+        m = re.match(r"^(.*[T ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?)([+-]\d\d)(\d\d)$", t)
+        if m:
+            t = m.group(1) + m.group(2) + ":" + m.group(3)
+        d = datetime.datetime.fromisoformat(t)
+        return d if d.tzinfo else None
+    except (ValueError, TypeError, AttributeError):
         return None
+
+
+def repairs_rows(path):
+    """Whether a file reads as repairs rows: every non-blank line a JSON object carrying before and after."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rs = [json.loads(z) for z in fh.read().splitlines() if z.strip()]
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return bool(rs) and all(isinstance(r, dict) and "before" in r and "after" in r for r in rs)
 
 
 def entries_of(text):
@@ -243,14 +260,14 @@ class Oracle:
             self.notes.append("B has no launch row with a timestamp: no launch state (every error exits)")
             return
         self.bts, self.bi, self.brow = max(ts, key=lambda x: (x[0], x[1]))
+        self.brows = [(t, r) for t, _, r in ts]
 
     # ---- the launch state
     def launch_entry(self):
         B, bts = self.B, self.bts
-        # recorded before the launch (the evaluated entry too when it is recorded and its header precedes it; a
-        # pending entry is never recorded, S3)
+        # recorded before the launch: never the evaluated entry, which plays the pending entry in --last too (S3)
         self.rec = [e for e in self.recorded if parse_iso(e["ts"]) is not None and parse_iso(e["ts"]) < bts
-                    and not (self.pending and e is self.E)]
+                    and e is not self.E]
         rec_same = [e for e in self.rec if task_of(e) == self.task and mission_of(e)]
         rep_rec = None
         for e in rec_same:
@@ -259,11 +276,25 @@ class Oracle:
                 rep_rec = v
         self.rep_now = self.eff.get("repairs")
         self.rep_at = rep_rec or self.rep_now
+        if not rep_rec and self.rep_now and B["names"] is not None and os.path.basename(self.rep_now) not in B["names"]:
+            # no recorded token: the repairs file B lists is the one in force at its launch (the pre-launch check
+            # admits a launch only with repairs= naming a file B lists; a pending value is never in force, S3)
+            eb = os.path.basename(self.eff["edges"]) if self.eff.get("edges") else None
+            alt = [n for n in B["names"] if n.endswith(".jsonl") and n != eb]
+            if len(alt) > 1:
+                alt = [n for n in alt if repairs_rows(os.path.join(os.path.dirname(B["full"]), n))]
+            if len(alt) == 1:
+                self.rep_at = os.path.join(os.path.dirname(self.rep_now), alt[0])
         cut = next(i for i, p in enumerate(self.scope) if self.norm(p) == self.norm(B["path"]))
         toks = [f"edges={self.eff['edges']}"] if self.eff.get("edges") else []
         toks.append("scope=" + ",".join(self.scope[:cut + 1]))
         if self.rep_at:
             toks.append(f"repairs={self.rep_at}")
+        mE = mission_of(self.E)
+        if not self.pending and parse_iso(self.E["ts"]) is not None and parse_iso(self.E["ts"]) < bts and mE \
+                and mE[1].get("withdrawn"):
+            # --last: the lint dates the evaluated entry's own withdrawals by its header
+            toks.append("withdrawn=" + ",".join(mE[1]["withdrawn"]))
         mline = f"Mission: {self.name} " + " ".join(toks)
         adv = adv_of(self.E)
         self.adv_at = adv
@@ -271,11 +302,14 @@ class Oracle:
             prior = [adv_of(e) for e in self.rec if task_of(e) == self.task and adv_of(e)]
             self.adv_at = prior[-1] if prior else None
         keep_rv = []
+        self.dec_at = [r for r in self.rows if parse_iso(r.get("ts")) is not None and parse_iso(r.get("ts")) <= bts]
         for rv in reviews_of(self.E):
-            t = [parse_iso(r.get("ts")) for _, r in enumerate(self.rows[:self.bi + 1])
+            t = [parse_iso(r.get("ts")) for r in self.dec_at
                  if r.get("session") == rv["session"] and self.launch(r) and r.get("skill") == "dream"]
-            t = [x for x in t if x is not None]
-            if t and min(t) < bts:
+            # a review is in the launch state when another session launched on B after it: a resume of the review
+            # launches no review and refreezes nothing (R-10; a session reused across reviews is one session)
+            other = [x for x, r in self.brows if r.get("session") != rv["session"]]
+            if t and other and min(t) < max(other):
                 keep_rv.append(rv["line"])
         keep_rv.append(f"Review: {STUB_DIR}/verdict.txt reviewer-session={STUB_SESSION} result={STUB_DIR}/result.json")
         lines, rv_done = [], False
@@ -367,7 +401,7 @@ class Oracle:
                     decision="launch", skill="dream", task_id=self.task, resume=False)
         dec = os.path.join(rt, "decisions.jsonl")
         with open(dec, "w", encoding="utf-8") as fh:
-            fh.write("".join(json.dumps(r) + "\n" for r in self.rows[:self.bi + 1] + [stub]))
+            fh.write("".join(json.dumps(r) + "\n" for r in self.dec_at + [stub]))
         note = os.path.join(rt, "dream-log.md")
         with open(note, "w", encoding="utf-8") as fh:
             fh.write("# dream log (oracle launch-state reconstruction)\n\n"
