@@ -347,8 +347,9 @@ plausible one that passes the ACs as written), `counterexample`, `discriminating
 owner), over the six case families of the Hermes adapter's
 `references/adversarial-planning-pass.md`: Identity and provenance; Boundary environment;
 Evidence interpretation; Alternative bypasses and ordering; Falsifier quality;
-Whole-scope coverage and handoff. One file per review round, `notes/reviews/<ISO-ts>-adversarial.md`
-under the PRD home, holds one section per PRD, headed by a line reading `## PRD-<slug>`
+Whole-scope coverage and handoff. One file per run (on a mission run whose edges header carries
+`matrix`, one per review round), `notes/reviews/<ISO-ts>-adversarial.md` under the PRD home,
+holds one section per PRD, headed by a line reading `## PRD-<slug>`
 and nothing else (text before the first is a preamble; a section ends at the next `##`
 heading of any kind). Inside it each family is a heading line `### <family name>` (the
 six names above, alone on the line, once each) over its table, or that heading followed
