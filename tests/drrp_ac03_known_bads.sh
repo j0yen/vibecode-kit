@@ -4,8 +4,9 @@
 # paragraph, from the repair paragraph, present only in Phase 4, or kept with its prefix while
 # dropping "later than the earliest `before`" or "including that row's own `after`" (each drop in
 # each paragraph). Each copy is first checked to lack the sentence in the extracted paragraph, so
-# a copy that removed some other line cannot pass for a known-bad. An empty, missing or unreadable
-# DREAM_SKILL_MD exits 2 naming the path.
+# a copy that removed some other line cannot pass for a known-bad. An empty DREAM_SKILL_MD exits 2
+# naming it (Technical considerations, edge cases); a missing or unreadable one is refused as the
+# landed test refuses it (exit 1 naming the path).
 set -uo pipefail
 # shellcheck source=tests/drrp_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/drrp_lib.sh"
@@ -64,15 +65,16 @@ for which in 1 2; do
   mk "drop-after-$which" "s = sub_in(s, $P, S, S.replace('''$D2''', ''))"
   run1 "drop-after-$which" "$h" "including that row's own \`after\`"
 done
-# exit 2: empty, missing, unreadable path (named)
+# empty path: exit 2 naming it (Technical considerations, edge cases); missing and unreadable paths
+# keep the landed test's refusal (exit 1, "skill file missing or unreadable: <path>")
 out=$(DREAM_SKILL_MD='' bash "$AC8" 2>&1); rc=$?
 [ "$rc" = 2 ] && printf '%s' "$out" | grep -qF "''" || fail "empty path: rc=$rc: $out"
 out=$(DREAM_SKILL_MD="$T/nope/SKILL.md" bash "$AC8" 2>&1); rc=$?
-[ "$rc" = 2 ] && printf '%s' "$out" | grep -qF "$T/nope/SKILL.md" || fail "missing path: rc=$rc: $out"
+[ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "skill file missing or unreadable: $T/nope/SKILL.md" || fail "missing path: rc=$rc: $out"
 note=""
 if [ "$(id -u)" != 0 ]; then
   cp "$SK" "$T/unreadable.md"; chmod 000 "$T/unreadable.md"
   out=$(DREAM_SKILL_MD="$T/unreadable.md" bash "$AC8" 2>&1); rc=$?
-  [ "$rc" = 2 ] && printf '%s' "$out" | grep -qF "$T/unreadable.md" || fail "unreadable path: rc=$rc: $out"
+  [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "skill file missing or unreadable: $T/unreadable.md" || fail "unreadable path: rc=$rc: $out"
 else note=" (unreadable case skipped as root)"; fi
-pass "3 removal copies + 4 clause drops refused naming paragraph and clause; empty/missing/unreadable path exit 2$note"
+pass "3 removal copies + 4 clause drops refused naming paragraph and clause; empty path exit 2, missing/unreadable path refused as landed$note"
