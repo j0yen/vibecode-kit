@@ -115,11 +115,14 @@
 # note is one whose only entry is the pending one). The review about to launch counts as the
 # following review (repair-missing) and as a Review: line (adversarial-missing). An error on a
 # manifest a review launch of the task bound (role review, by scope path or scope id) is held
-# (`HELD <id>:`, held_packet_errors, exit 0) when its own frozen copies carry it: a row error only
-# when every row it names is byte-identical at its row number in the digest-matching repairs copy
-# beside the latest bound manifest; an error naming no manifest, an unbound manifest or a new row, or
-# raised only by a pending token or the live edges header, sets the exit (`FAIL <id>:`,
-# packet_errors). --pending also exits 1 with
+# (`HELD <id>:`, held_packet_errors, exit 0) when its own frozen copies, the state when its review
+# launched, carry it: a live edges header error only when the frozen header raises the same defect
+# (the edges file and the matrix: when the manifest lacks them, unless a pending adversarial= names
+# the matrix); a row error only when every row it names is byte-identical at its row number in the
+# digest-matching repairs copy beside the latest bound manifest, and an error a missing row raises
+# only when that copy lacks the row too; none on a manifest edited or deleted after its launch. An
+# error naming no manifest, an unbound manifest or a new row, or raised only by a pending token, sets
+# the exit (`FAIL <id>:`, packet_errors). --pending also exits 1 with
 # `PENDING <line|slug|digest>: <detail>` (no id) for a missing Task:/Mission:/Analysis:/State: line,
 # an Analysis: grammar or recency failure, a Review: file slug the State: omits, and (also without
 # --pending) a live edges, repairs or matrix file differing from the unbound last manifest's digest;
