@@ -777,6 +777,14 @@ def held_class(kind, nolog=False):
         if kind == "matrix-member":     # ... and the live header names x2 as a packet member
             s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(
                 packet=list(h.get("packet") or []) + [os.path.basename(s.x2)]))
+    elif kind == "clash-need":          # both headers list PRD-baz.md (m2 lacks it); the live one adds contracts/PRD-baz.md
+        s.files["built-prds/PRD-baz.md"] = b"# PRD-baz (fixture v1)\n"
+        s.files["contracts/PRD-baz.md"] = b"# contract named like PRD-baz (fixture)\n"
+        s.files[s.x2] = matrix(slugs=["foo", "bar", "baz"], tag=" x2")     # no slug error for baz
+        m2.members[os.path.basename(s.x2)] = s.files[s.x2]
+        frozen_live(s, lambda h, es: h.update(prds=h["prds"] + ["PRD-baz.md"]),
+                    lambda h, es: h.update(prds=h["prds"] + ["PRD-baz.md"],
+                                           external=[{"name": "hermes", "contract": "contracts/PRD-baz.md"}]))
     elif kind == "mx-member-frozen":    # m2 keeps its frozen header, lists no x2; the live header names x2
         del m2.members[os.path.basename(s.x2)]
         s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(
@@ -786,7 +794,7 @@ def held_class(kind, nolog=False):
 
 for _k in ("frozen-prds", "frozen-packet", "frozen-contract", "frozen-dupbase", "frozen-clash", "dupbase-other",
            "clash-other", "edges", "edges-member", "noheader-dupbase", "matrix-noheader", "matrix-member",
-           "mx-member-frozen"):
+           "mx-member-frozen", "clash-need"):
     CASES[f"live-bound-{_k}"] = (lambda k=_k, nolog=False: held_class(k, nolog))
 
 

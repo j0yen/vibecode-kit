@@ -94,6 +94,12 @@ c_matrix_member() { local mx="-adversarial.md (packet member of the live edges h
   pfail "$SI" "manifest $M2: lists no" "$mx"; noheld "$mx"
   pe live-bound-matrix-member; pkl; held0   # without --pending both are m2's own listing
   pheld "$SI" "manifest $M2: lists no" "$mx"; nofail "$SI" "manifest $M2:"; fullrc1; }
+c_clash_need() { pe live-bound-clash-need; pk; rc1   # a frozen need and a live clash on one basename: two defects
+  pfail "$SM" "manifest $M2: live edges header: contract path contracts/PRD-baz.md and the member PRD-baz.md"
+  pheld "$SI" "manifest $M2: lists no PRD-baz.md (prds member of the frozen edges header)"
+  pheld "$SI" "manifest $M2: lists no PRD-baz.md (prds member of the live edges header)"
+  pheld "$SI" "manifest $M2: lists no PRD-baz.md (external hermes contract copy of the live edges header)"
+  nofail "$SI" "PRD-baz.md"; noheld "share the basename PRD-baz.md"; fullrc1; }
 c_mx_member_frozen() { local mx="-adversarial.md (packet member of the live edges header)"
   pe live-bound-mx-member-frozen; pk; rc1  # frozen header kept; the pending adversarial= names x2 (S3)
   pfail "$SI" "manifest $M2: lists no" "-adversarial.md (matrix named by adversarial= (the header names none))"
@@ -123,7 +129,7 @@ c_row_dropped_pair() { pe row-dropped-pair; pk; rc1
 
 red=0
 for c in f1_packet f1_prds f1_contract f1_clash f1_dupbase frozen_prds frozen_packet frozen_contract frozen_dupbase \
-         frozen_clash dupbase_other clash_other edges edges_member noheader_dupbase matrix_noheader matrix_member mx_member_frozen \
+         frozen_clash dupbase_other clash_other edges edges_member noheader_dupbase matrix_noheader matrix_member mx_member_frozen clash_need \
          late_edited late_edited_row late_deleted late_noid_held late_noid_deleted row_dropped row_dropped_badcopy row_dropped_empty row_dropped_unlisted row_dropped_pair; do
   if out=$("c_$c" 2>&1); then echo "ok  $c"; else echo "RED $c: $out"; red=1; fi
 done
