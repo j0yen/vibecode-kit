@@ -61,7 +61,7 @@
 #
 # Mission (PRD-dream-mission-edge-map): opt-in. A Mission: line names the mission's edge map
 # (notes/missions/<name>.edges.jsonl: a header {mission, outcome, invariants, prds, external,
-# [packet], [single_component]} then one edge per line with id, the eight fields producer
+# [packet], [matrix], [single_component]} then one edge per line with id, the eight fields producer
 # consumer command trigger authority effect_id recovery_owner postcondition, status
 # known|external|unknown and, for unknown, an owner). A later entry of the same Task: inherits
 # the tokens it omits and must carry the line while its State: names a member of the mission
@@ -80,7 +80,8 @@
 #
 # Mission chain review (PRD-dream-mission-chain-review): only on a Mission: line carrying
 # scope=<manifest>[,<manifest>...] (freeze order). Each manifest must canonicalize, hold its
-# own frozen edges copy, matrix and every member its frozen header names (R1); the chain
+# own frozen edges copy, matrix (the one its frozen header's `matrix` names, else the adversarial=
+# matrix of the entry that first lists it: PRD-dream-matrix-per-manifest) and every member its frozen header names (R1); the chain
 # reviews are the Review: lines whose bound review row carries a listed scope id, at least one
 # on a governed host, listed in manifest then launch order (R2); a chain review's file and
 # result= capture carry one `mission=<VERDICT> <own session>` line and a
@@ -388,6 +389,28 @@ def read_edges(path, shown, name=None):
             bad(1, "single_component", "not a non-empty reason string")
         elif len(prds) != 1:
             bad(1, "single_component", f"beside {len(prds)} prds members (admitted with one)")
+    # PRD-dream-matrix-per-manifest R1: the optional `matrix`, the basename of the adversarial
+    # matrix current at this freeze; never a PRD, packet, edges-file or contract basename
+    mxv = None
+    if "matrix" in h:
+        mx = h["matrix"]
+        others = [("prds", set(prds)), ("packet", set(y for y in pk if isinstance(y, str)) if isinstance(pk, list) else set()),
+                  ("edges file", {os.path.basename(path)}),
+                  ("external contract", {os.path.basename(y) for x in ext if isinstance(x, dict)
+                                         for y in (x.get("contract") if isinstance(x.get("contract"), list) else [x.get("contract")])
+                                         if isinstance(y, str)})]
+        if not isinstance(mx, str) or not mx.strip():
+            bad(1, "matrix", "not a non-empty basename string")
+        elif "/" in mx or mx != mx.strip() or mx in (".", ".."):
+            bad(1, "matrix", f"'{mx}' is a path, not a basename")
+        elif not mx.endswith(".md"):
+            bad(1, "matrix", f"'{mx}' is not a basename ending .md")
+        elif any(mx in v for _, v in others):
+            kind = next(k for k, v in others if mx in v)
+            bad(1, "matrix", f"'{mx}' is the basename of {'an' if kind[0] in 'aeiou' else 'a'} {kind} member of this "
+                             "header (a PRD or the vision cannot stand in for the matrix)")
+        else:
+            mxv = mx
     prset, exts = set(prds), set(names)
     edges, seen, nlines = [], set(), 0
     for n, ln in enumerate(lines[1:], 2):
@@ -441,7 +464,8 @@ def read_edges(path, shown, name=None):
     if not nlines:
         probs.append(("mission-edges-missing", f"{shown}: no edge line after the header"))
     hd = {"mission": m, "prds": prds, "external": ext, "external_names": names,
-          "packet": pk if isinstance(pk, list) else [], "single_component": sc if nonempty(sc) else None}
+          "packet": pk if isinstance(pk, list) else [], "single_component": sc if nonempty(sc) else None,
+          "matrix": mxv}
     return hd, edges, probs
 
 
@@ -476,6 +500,35 @@ def entry_state_slugs(e):
         if m and m.group(1) not in out:
             out.append(m.group(1))
     return out
+
+
+def entry_matrix(e):
+    """The matrix path of one log entry's last Analysis: line (None for skipped: or no line)."""
+    a = None
+    for ln in e["lines"]:
+        if ln.startswith("Analysis:"):
+            a = ln
+    if a is None:
+        return None
+    v = parse_analysis(a)[0]["adversarial"]
+    return v[1] if v and v[0] == "matrix" else None
+
+
+def manifest_matrix(m, mrec, adv, states, resolve):
+    """PRD-dream-matrix-per-manifest R2: (matrix basename or None, the rule that named it, the State
+    slugs of the entry that first lists the manifest in scope=). The frozen header's `matrix`, else
+    the adversarial= matrix of that entry when it names one, else of the next entry of the mission
+    that does (the linted entry last), else none."""
+    seq = [((x["eff"].get("scope") or ([], None))[0], x.get("adv"), x["slugs"]) for x in mrec["earlier"]]
+    seq.append((mrec["scope"], adv[1] if adv and adv[0] == "matrix" else None, list(states)))
+    n = os.path.normpath(m["full"])
+    first = next((i for i, (sc, _, _) in enumerate(seq) if any(os.path.normpath(resolve(p)) == n for p in sc)), len(seq) - 1)
+    fh = m["frozen"]
+    if fh and fh.get("matrix"):
+        return fh["matrix"], "matrix named by the frozen edges header", seq[first][2]
+    src = next((i for i, (_, a, _) in enumerate(seq) if i >= first and a), None)
+    mx = seq[src][1] if src is not None else None
+    return (os.path.basename(mx) if mx else None), "matrix named by adversarial= (the header names none)", seq[first][2]
 
 
 def frozen_edges_copy(manifest_full, edges_base):
@@ -521,7 +574,7 @@ def mission_record(L, entries, ei, task, states, resolve):
             for k, v in toks.items():
                 eff[k] = (v, e["ts"])
             prev = eff
-            earlier.append({"ts": e["ts"], "name": nm, "eff": eff, "slugs": entry_state_slugs(e)})
+            earlier.append({"ts": e["ts"], "name": nm, "eff": eff, "slugs": entry_state_slugs(e), "adv": entry_matrix(e)})
     if not mls and not earlier:
         return None
     reported = set()
@@ -799,12 +852,17 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
         if err:
             once("mission-scope-mismatch", f"manifest {m['path']}: {err}")
         else:
-            fh, fe, _ = read_edges(copy, copy)
+            fh, fe, fpr = read_edges(copy, copy)
             if fh is None:
                 once("mission-scope-mismatch", f"manifest {m['path']}: frozen edges copy {copy} has no header")
+            for fid, d in fpr:      # matrix-per-manifest R1 on a frozen header (its other fields stay unread here)
+                if fid == "edge-grammar" and ": field matrix: " in d:
+                    once("edge-grammar", f"manifest {m['path']}: {d}")
             m["frozen"], m["frozen_edges"] = fh, fe
+        mxm, mxl, mslugs = manifest_matrix(m, mrec, adv, states, resolve)
+        m["matrix"] = mxm
         heads = ([("frozen", m["frozen"])] if m["frozen"] else []) + ([("live", hd)] if k == last and hd else [])
-        for label, h in heads:
+        for hi, (label, h) in enumerate(heads):
             cons = header_contracts(h)
             byb = {}
             for nm, cp in cons:
@@ -817,11 +875,38 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
                     once("mission-scope-mismatch", f"manifest {m['path']}: {label} edges header: contract path "
                                                    f"{cps[0]} and the member {b} share the basename {b}")
             need = [(b, "prds member") for b in h["prds"]] + [(b, "packet member") for b in h["packet"]]
-            need += ([(mxb, "matrix")] if mxb else []) + ([(eb, "edges file")] if eb else [])
+            need += ([(mxm, None)] if mxm and hi == 0 else []) + ([(eb, "edges file")] if eb else [])
             need += [(os.path.basename(cp), f"external {nm} contract copy") for nm, cp in cons]
             for b, kind in need:
                 if b not in m["names"]:
-                    once("mission-scope-incomplete", f"manifest {m['path']}: lists no {b} ({kind} of the {label} edges header)")
+                    once("mission-scope-incomplete", f"manifest {m['path']}: lists no {b} ({mxl})" if kind is None else
+                         f"manifest {m['path']}: lists no {b} ({kind} of the {label} edges header)")
+        # matrix-per-manifest R3: the last manifest's frozen header, and the live header, name the
+        # note's adversarial= matrix
+        for label, h in (heads if k == last else []):
+            if h.get("matrix") and h["matrix"] != mxb:
+                where = f"manifest {m['path']}: frozen edges header" if label == "frozen" else f"{mrec['edges']}: live edges header"
+                once("mission-scope-mismatch", f"{where} names matrix {h['matrix']}; the note's adversarial= names "
+                                               f"{mxb or 'no matrix (adversarial=skipped:)'}")
+        # matrix-per-manifest R5b: the matrix a header names is the copy beside the manifest, at its
+        # listed digest, and passes the matrix grammar for the first-listing entry's State slugs
+        # that are prds members of this header (a legacy header keeps the basename-only check)
+        fhd = m["frozen"]
+        if fhd and fhd.get("matrix") and mxm in m["names"]:
+            cp = os.path.join(os.path.dirname(m["full"]), mxm)
+            got = file_sha(cp)
+            if got is None:
+                once("adversarial-missing", f"manifest {m['path']}: matrix copy {cp} absent or unreadable "
+                                            f"(the frozen edges header names {mxm})")
+            elif got != m["names"][mxm]:
+                once("adversarial-missing", f"manifest {m['path']}: matrix copy {cp} sha256 {got[:12]} differs from "
+                                            f"the manifest's {m['names'][mxm][:12]}")
+            else:
+                sub = Lint()
+                sl = [s for s in dict.fromkeys(mslugs) if f"PRD-{s}.md" in fhd["prds"]]
+                lint_matrix(sub, cp, cp, sl)
+                for fid, d in sub.findings:
+                    once(fid, f"manifest {m['path']}: {d}")
     ids = [m["id"] for m in mans]
     # R2: binding, line order against manifest index, launch order within one index
     if not chain and governed and task is not None:
@@ -1346,7 +1431,15 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             L.fail("repair-scope-mismatch", f"row {n}: its following review {fol['rv']['file']} is bound to "
                                             f"{ids[fol['idx']]}, earlier than after {r['after']} ({ids[ai]})")
         if cb is not None and ca is not None and not (same_ok and not x["changed"]):
+            mxo = mans[bi].get("matrix") if bi is not None else None
+            mxn = mans[ai].get("matrix") if ai is not None else None
             for b in x["changed"]:
+                if mxo != mxn and b in (mxo, mxn):     # matrix-per-manifest R4: old against before, new against after
+                    if b == mxo and b not in cb[1]:
+                        L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from before {r['before']}")
+                    elif b == mxn and b not in ca[1]:
+                        L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from after {r['after']}")
+                    continue
                 if b not in cb[1]:
                     L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from before {r['before']}")
                 elif b not in ca[1]:
@@ -1396,8 +1489,9 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         for x in recs:
             if x["bi"] == k and x["ai"] == k + 1:
                 decl |= set(x["changed"])
+        mxr = {a.get("matrix"), b.get("matrix")} - {None} if a.get("matrix") != b.get("matrix") else set()
         for nm in sorted(set(a["names"]) & set(b["names"])):
-            if nm != rbase and a["names"][nm] != b["names"][nm] and nm not in decl:
+            if nm != rbase and nm not in mxr and a["names"][nm] != b["names"][nm] and nm not in decl:
                 L.fail("repair-hash-mismatch", f"{nm}: changed but undeclared between {a['path']} and {b['path']}")
         # the repairs file is exempt only for a pair whose rows it holds (writing them is what moves it)
         if rbase in a["names"] and rbase in b["names"] and a["names"][rbase] != b["names"][rbase] \

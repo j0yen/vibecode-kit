@@ -163,7 +163,8 @@ PRDs over one shared chain), write `notes/missions/<name>.edges.jsonl` under the
 before splitting it into PRDs. Line 1 is the header: `mission` (the name), `outcome`,
 `invariants` (the load-bearing ones), `prds` (every mission PRD basename), `external` (names,
 or `{name, contract}` with the path or paths of that external's contract file), optional
-`packet` (other packet basenames, such as the vision) and, for a one-PRD mission,
+`packet` (other packet basenames, such as the vision), optional `matrix` (the basename of the
+adversarial matrix current at that freeze, Phase 3) and, for a one-PRD mission,
 `single_component` with its reason. Every later line is one edge: `id`, the eight fields
 `producer`, `consumer`, `command`, `trigger`, `authority`, `effect_id`, `recovery_owner` and
 `postcondition`, and a `status` of `known`, `external` (one endpoint is `external:<name>`) or
@@ -270,8 +271,12 @@ no pin stands in for the absent route, and the Phase 4 run note writes `Route: u
 **Whole-chain review (before the first independent review):** on a mission run, once the
 edge map is written, freeze the packet: one `sha256sum` manifest under
 `notes/snapshots/` listing every mission PRD, the vision and other `packet` members the
-edges header names, the adversarial matrix, the edges file and a copy of each external
-`contract` file (copied beside the PRDs, so the reviewer reads the bytes the edge cites).
+edges header names, the adversarial matrix, the edges file, the `repairs=` file in every
+manifest later than the earliest `before` once any repairs row exists, and a copy of each
+external `contract` file (copied beside the PRDs, so the reviewer reads the bytes the edge
+cites). Once any repairs row exists, the repairs file is a packet member: list its basename
+in every `scope=` manifest later than the earliest `before` any row names, including that
+row's own `after`, so write the row (it names `after` by path) before freezing `after`.
 Launch one reviewer through the launcher with `review.snapshot` = that manifest and a
 pre-drawn `--session-id`, record its `result.json` as `result=` on its `Review:` line, and
 list the chain reviews of one manifest in launch order. The prompt forbids edits to the
@@ -302,8 +307,9 @@ plausible one that passes the ACs as written), `counterexample`, `discriminating
 owner), over the six case families of the Hermes adapter's
 `references/adversarial-planning-pass.md`: Identity and provenance; Boundary environment;
 Evidence interpretation; Alternative bypasses and ordering; Falsifier quality;
-Whole-scope coverage and handoff. One file per run, `notes/reviews/<ISO-ts>-adversarial.md`
-under the PRD home, holds one section per PRD, headed by a line reading `## PRD-<slug>`
+Whole-scope coverage and handoff. One file per run (on a mission run whose edges header carries
+`matrix`, one per review round), `notes/reviews/<ISO-ts>-adversarial.md` under the PRD home,
+holds one section per PRD, headed by a line reading `## PRD-<slug>`
 and nothing else (text before the first is a preamble; a section ends at the next `##`
 heading of any kind). Inside it each family is a heading line `### <family name>` (the
 six names above, alone on the line, once each) over its table, or that heading followed
@@ -318,7 +324,18 @@ the matrix before launching the review turn (`scripts/dream-run-note-lint.sh --m
 packet beside the PRDs, and the review prompt asks the reviewer to end with its verdict
 lines verbatim in its final message, so a `result=` capture can verify the verdict file.
 It is the run note's `adversarial=<path> uncovered=<n>`; `adversarial=skipped: <reason>`
-only when the run's `Review:` line is `none`.
+only when the run's `Review:` line is `none`. On a mission run the edges header's `matrix`
+names the matrix current at each freeze: a repair round writes a new matrix and updates
+`matrix` before freezing, each manifest lists the matrix its own frozen header names (the lint
+reads that copy beside the manifest, at its listed digest, against the matrix grammar), and
+the note's `adversarial=` names the last, which the last manifest's header and the live header
+name too. Until every listed manifest's frozen header carries `matrix`, a manifest whose header
+has none keeps the matrix of the entry that first listed it: a repair round inside one run
+entry keeps the matrix name, and a continued legacy mission writes the new run's matrix, later
+than the previous entry. Updating `matrix` moves the edges file's digest between consecutive
+manifests, so the repair row's `changed` lists the edges basename (it may also name the old
+matrix, checked against `before`, and the new one, checked against `after`), and the round does
+not cascade into `repair-hash-mismatch`.
 
 **Review:** one review turn per batch of at most 4 PRDs, with one verdict line per PRD;
 approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one that
@@ -343,7 +360,10 @@ consumers (the finding's `prds` and `consumers`, read from the edges copy frozen
 batch: `{finding, class, author_session, before, after, changed, sweep, disposition}`, where
 `disposition` is `repaired`, `declined` (with a `reason`) or `amended` (an author change
 between two reviews that answers no finding: `finding` and `class` null, a `reason`, and
-`changed` naming what moved). Feedback goes to the same author: `author_session` is a session
+`changed` naming what moved). Once any repairs row exists, the repairs file is a packet
+member: list its basename in every `scope=` manifest later than the earliest `before` any
+row names, including that row's own `after`, so write the row (it names `after` by path)
+before freezing `after`. Feedback goes to the same author: `author_session` is a session
 of this run's author lineage (an author launch row under the `Task:`). Compare each changed
 contract and every affected consumer against the actual `before` and `after` hashes: `before`
 and `after` are consecutive `scope=` manifests, every basename that moved between two listed
