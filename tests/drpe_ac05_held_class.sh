@@ -7,14 +7,19 @@
 # - a defect m2's frozen edges header raises too (the same prds/packet member or contract copy m2 lacks,
 #   the same contract collision or contract/member clash), or one no header supplies (m2 lists no edges
 #   file; the note's matrix with no readable frozen header, without --pending) is HELD under both labels
-#   with exit 0 and no FAIL line for it; the matrix a pending adversarial= names is FAIL;
-# - a live collision or clash on another basename, a live member with no readable frozen header, and F1's
-#   five live-only defects are FAIL with exit 1;
+#   with exit 0 and no FAIL line for it; the matrix a pending adversarial= names is FAIL, and so is a live
+#   member named like it when the frozen header is kept;
+# - a live collision or clash on another basename, or on a basename the frozen header carries only as a
+#   need, a live member with no readable frozen header, and F1's five live-only defects are FAIL with exit 1;
 # - m2 edited or deleted after r2's launch holds nothing (its errors and the rows of its repairs copy FAIL);
 #   a launch row with no scope_id records no edit (held), unless m2 no longer canonicalizes;
 # - with the live repairs file missing a row the copy beside the latest bound manifest holds (repair-missing,
 #   an undeclared change), FAIL; with a copy that lacks it or no listed repairs file, HELD; a listed copy
-#   that differs from its digest grants no hold.
+#   that differs from its digest grants no hold. The copy is read as at the latest bound manifest's latest
+#   launch: no repairs= token ever means no row (HELD); a row naming a manifest whose withdrawal was recorded
+#   before that launch is void (HELD), one only the pending entry withdraws is not, and the pair it forms
+#   did not exist (FAIL); a deleted live file does not empty the copy (FAIL); a finding of that manifest's
+#   own latest review did not exist at the launch (FAIL).
 # The full lint on each note with the pending entry appended still exits 1. Each case runs on its own and
 # prints ok or RED, so a known-bad lint (DRREC_LINT) shows every cell.
 set -uo pipefail
@@ -127,10 +132,32 @@ c_row_dropped_pair() { pe row-dropped-pair; pk; rc1
   pfail repair-hash-mismatch "PRD-bar.md: changed but undeclared between $M2 and $M3"
   pfail repair-hash-mismatch "$PE_REP: changed but undeclared between $M2 and $M3"; noheld "$M3"; fullrc1; }
 
+FO="PRD-foo.md: changed but undeclared between"
+c_notoken_pair() { pe notoken-pair; pk; held0       # no repairs= token ever: no row at either launch
+  pheld repair-hash-mismatch "$FO $M1 and $M2"; nofail repair-hash-mismatch "$FO"; fullrc1; }
+c_void_row() { pe void-row; pk; held0               # F1's only row names m2, withdrawn (recorded) before r3's launch
+  pheld repair-missing "finding F1 of notes/reviews/r1/verdict.txt: no row in notes/missions/$PE_REP"
+  pheld repair-hash-mismatch "$FO $M1 and $M2R"; nofail repair-missing "F1"; nofail repair-hash-mismatch "$FO"; fullrc1; }
+c_void_row_s3() { pe void-row-s3; pk; rc1           # only the pending entry withdraws m2 (S3)
+  pfail repair-missing "finding F1 of notes/reviews/r1/verdict.txt: no row in notes/missions/$PE_REP"
+  pfail repair-hash-mismatch "$FO $M1 and $M2R"; noheld "F1"; noheld "$FO"; fullrc1; }
+c_live_absent() { pe live-absent; pk; rc1           # the live repairs file deleted; m2's copy holds row 1
+  pfail mission-repairs-missing "notes/missions/$PE_REP: absent, unreadable or empty"
+  pfail repair-missing "finding F1 of notes/reviews/r1/verdict.txt: no row in notes/missions/$PE_REP"
+  pfail repair-hash-mismatch "$FO $M1 and $M2"; noheld "F1"; noheld "$FO"; fullrc1; }
+c_own_finding() { pe own-finding; pk; rc1           # F2 of r2, the latest review of bound last m2: not there at its launch
+  pfail repair-missing "finding F2 of notes/reviews/r2/verdict.txt: no row in notes/missions/$PE_REP" "(the review about to launch on $M2 follows it)"
+  noheld "F2"; full; rc0; }             # the full lint has no review about to launch: no finding
+c_own_finding_notoken() { pe own-finding-notoken; pk; rc1
+  pheld repair-missing "finding F1 of notes/reviews/r1/verdict.txt: no repairs= token on the Mission: line"
+  pfail repair-missing "finding F2 of notes/reviews/r2/verdict.txt: no repairs= token on the Mission: line" "(the review about to launch on $M2 follows it)"
+  nofail repair-missing "F1"; noheld "F2"; fullrc1; }
+
 red=0
 for c in f1_packet f1_prds f1_contract f1_clash f1_dupbase frozen_prds frozen_packet frozen_contract frozen_dupbase \
          frozen_clash dupbase_other clash_other edges edges_member noheader_dupbase matrix_noheader matrix_member mx_member_frozen clash_need \
-         late_edited late_edited_row late_deleted late_noid_held late_noid_deleted row_dropped row_dropped_badcopy row_dropped_empty row_dropped_unlisted row_dropped_pair; do
+         late_edited late_edited_row late_deleted late_noid_held late_noid_deleted row_dropped row_dropped_badcopy row_dropped_empty row_dropped_unlisted row_dropped_pair \
+         notoken_pair void_row void_row_s3 live_absent own_finding own_finding_notoken; do
   if out=$("c_$c" 2>&1); then echo "ok  $c"; else echo "RED $c: $out"; red=1; fi
 done
 [ "$red" = 0 ] || fail "held/fail class: RED cells above"

@@ -853,6 +853,55 @@ for _k in ("copy", "badcopy", "empty", "unlisted", "pair"):
     CASES["row-dropped" + ("" if _k == "copy" else f"-{_k}")] = (lambda k=_k, nolog=False: row_dropped(k, nolog))
 
 
+# AC 5 held rule, the repairs copy evaluated at the latest bound manifest's launch (round 3): the frozen
+# evaluation reads the copy beside that manifest with the withdrawals recorded before its latest launch, over
+# the findings that existed then.
+# - notoken-pair: no Mission: line ever carries repairs=; PRD-foo.md moved between bound m1 and m2 (r1 APPROVE,
+#   no findings): no row existed at either launch, so the undeclared change is carried (held).
+# - void-row: ac8 without row 2 (F1, m1 -> m2r): F1's only row names m2, whose withdrawal E2 recorded before
+#   r3's launch on m3; void at that launch too (held). void-row-s3: the same, but only the pending entry
+#   withdraws m2 (S3): at the launch the row answered F1 and (m1, m2r) was no pair (both exit).
+# - live-absent: three, the live repairs file deleted; m2's copy holds row 1 (exit).
+# - own-finding: live-bound-none, but r2 (launched on m2, still the last manifest) returned FIX with F2: F2 did
+#   not exist at r2's launch (exit); own-finding-notoken: the same with no repairs= token, where F1 of r1 is held.
+def frozen_eval(kind, nolog=False):
+    if kind == "notoken-pair":
+        s = live_bound("none", nolog)
+        s.files.pop("notes/reviews/r1/verdict.txt.findings.jsonl", None)
+        s.review("notes/reviews/r1", S["R1"], [("foo", "APPROVE"), ("bar", "APPROVE")], "APPROVE")
+        s.entries[0]["lines"]["State"] = "State: foo=linted foo=reviewed:APPROVE bar=linted bar=reviewed:APPROVE"
+        s.rows = []
+        del s.mans["m2"].members[RB]
+        s.pending["lines"]["State"] = ("State: foo=linted foo=reviewed:APPROVE bar=reviewed:APPROVE "
+                                       "foo=reviewed:APPROVE bar=reviewed:APPROVE")
+        setp(s, "Mission", f"Mission: {NAME} scope={s.scope}")
+    elif kind in ("void-row", "void-row-s3"):
+        s = CASES["ac8"](nolog=nolog)
+        del s.rows[1]
+        s.frozen_rows["m2r"] = 1
+        if kind == "void-row-s3":
+            e2 = s.entries[-1]
+            e2["lines"]["Mission"] = e2["lines"]["Mission"].replace(" withdrawn=notes/snapshots/m2/m2.sha256", "")
+            s.pending["lines"]["Mission"] += " withdrawn=notes/snapshots/m2/m2.sha256"
+    elif kind == "live-absent":
+        s = build("three", nolog=nolog)
+        s.live_override[REP] = None
+    else:
+        s = live_bound("none", nolog)
+        s.review("notes/reviews/r2", S["R2"], [("foo", "APPROVE"), ("bar", "FIX")], "FIX", findings=[F2])
+        st = s.pending["lines"]["State"]
+        s.pending["lines"]["State"] = st[:st.rindex(" bar=reviewed:APPROVE")] + " bar=reviewed:FIX"
+        if kind == "own-finding-notoken":
+            s.rows = []
+            del s.mans["m2"].members[RB]
+            setp(s, "Mission", f"Mission: {NAME} scope={s.scope}")
+    return s
+
+
+for _k in ("notoken-pair", "void-row", "void-row-s3", "live-absent", "own-finding", "own-finding-notoken"):
+    CASES[_k] = (lambda k=_k, nolog=False: frozen_eval(k, nolog))
+
+
 # AC 8: E2 records the withdrawal of m2 (edges copy unlisted) with r2 on m2r returning APPROVE; E3 (pending
 # here, appended by the test) extends scope= with m3 (an amended bar), omits withdrawn= and binds r3 APPROVE
 @case("ac8")

@@ -120,7 +120,10 @@
 # (the edges file and the matrix: when the manifest lacks them, unless a pending adversarial= names
 # the matrix); a row error only when every row it names is byte-identical at its row number in the
 # digest-matching repairs copy beside the latest bound manifest, and an error a missing row raises
-# only when that copy lacks the row too; none on a manifest edited or deleted after its launch. An
+# only when that copy, read as at that manifest's latest launch, lacks the row too (a mission with no
+# repairs= token froze none; a copy row naming a manifest whose withdrawal was recorded before that
+# launch answers nothing; a finding counts only if its review launched before it; a pair only if no
+# manifest between them was withdrawn later); none on a manifest edited or deleted after its launch. An
 # error naming no manifest, an unbound manifest or a new row, or raised only by a pending token, sets
 # the exit (`FAIL <id>:`, packet_errors). --pending also exits 1 with
 # `PENDING <line|slug|digest>: <detail>` (no id) for a missing Task:/Mission:/Analysis:/State: line,
@@ -639,6 +642,12 @@ def mission_record(L, entries, ei, task, states, resolve, opts=None):
         else:
             wapplied.append(p)
     wset = {norm(p) for p in wapplied}
+    # packet-errors R1/S3: the timestamp of the entry that first recorded each applied withdrawal; a
+    # withdrawal only the pending entry carries has none
+    wsince = {}
+    for p in wapplied:
+        wsince[norm(p)] = next((x["ts"] for x in earlier if any(norm(q) == norm(p) for q in (x["eff"].get("withdrawn") or ([], None))[0])),
+                               None if opts.get("psem") else entry["ts"])
     reported = set()
 
     def miss(detail, key, mp=None):
@@ -682,7 +691,7 @@ def mission_record(L, entries, ei, task, states, resolve, opts=None):
     members = [s for s in states if f"PRD-{s}.md" in cont]
     rec = {"line": bool(mls), "name": None, "edges": None, "scope": [], "repairs": None, "inherited_from": None,
            "header": None, "edge_list": [], "earlier": earlier, "cont": cont,
-           "withdrawn": wapplied if wlist else None, "wset": wset, "dropset": set(), "opts": opts}
+           "withdrawn": wapplied if wlist else None, "wset": wset, "wsince": wsince, "dropset": set(), "opts": opts}
     if not mls:
         if members:
             L.fail("mission-grammar", f"entry {last['ts']} carries 'Mission: {last['name']}'; this entry's State: names "
@@ -1333,7 +1342,8 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         for p, f in pairs:
             sfx, fm = fol_of(p)
             L.fail("repair-missing", f"finding {f['id']} of {chain[p]['rv']['file']}: no repairs= token on the "
-                                     "Mission: line (carried or inherited)" + (f" ({sfx})" if sfx else ""), man=[fm])
+                                     "Mission: line (carried or inherited)" + (f" ({sfx})" if sfx else ""), man=[fm],
+                   absent=("finding", f["id"], chain[p]["row"]))
     if not tok and not need and not moved():
         no_token(ext)
         return None
@@ -1476,7 +1486,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             sfx, fm = fol_of(p)
             L.fail("repair-missing", f"finding {f['id']} of {chain[p]['rv']['file']}: no row in {tok} "
                                      + (f"({sfx})" if sfx else f"(its following review {chain[p + 1]['rv']['file']} exists)"),
-                   man=[fm], absent=("finding", f["id"]))
+                   man=[fm], absent=("finding", f["id"], chain[p]["row"]))
     accepted = {}
     for fid, xs in byf.items():
         if xs[0]["disp"] != "declined" or fid in sup or fid not in issuer:
@@ -2212,6 +2222,14 @@ def lint_log(a):
                     return r
         return None
 
+    def binding_rows(p, sid):
+        """packet-errors R1: the review launch rows of this task carrying a manifest's scope id, or naming its
+        path on a row with no scope id."""
+        n = os.path.normpath(resolve(p))
+        return [r for r in rrows_all if (sid and r.get("scope_id") == sid) or (
+            not (isinstance(r.get("scope_id"), str) and r["scope_id"]) and isinstance(r.get("scope"), str) and r["scope"]
+            and os.path.normpath(resolve(r["scope"])) == n)]
+
     def wbound(p):
         try:
             sid = scope_canon(resolve(p))[0]
@@ -2586,12 +2604,13 @@ def lint_log(a):
             prov["mission"] = "verified"
     if a.get("packet") and not a.get("_passA"):
         return L, packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mrec, mans, adv, psem,
-                                launch_binds, resolve), None
+                                launch_binds, binding_rows, resolve), None
     ok_line = f"OK {entry['ts']}" + (" persisted=shape-only" if prov["persisted"] == "shape-only" else "")
     return L, obj, ok_line
 
 
-def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mrec, mans, adv, psem, launch_binds, resolve):
+def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mrec, mans, adv, psem, launch_binds,
+                  binding_rows, resolve):
     """PRD-dream-packet-errors-while-repairable R1: the --packet-only object. Packet-error findings
     only, each exit-setting (packet_errors) or held (held_packet_errors: on manifests a review launch
     bound, present in their frozen copies); pending_errors are the --pending exits that carry no id."""
@@ -2632,24 +2651,33 @@ def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mre
                 pend.append({"what": "digest", "detail": f"{tp}: live {'sha256 ' + got[:12] if got else 'file absent or unreadable'} "
                                                          f"differs from manifest {lm['path']}'s {want[:12]} (the reviewer "
                                                          "reads the frozen bytes)"})
-    frozen = set()              # repairs rows byte-identical, at the same row number, in the copy beside the latest bound manifest
-    crows = None                # that copy's rows ([]: the manifest lists no repairs file; None: no verifiable copy)
-    if mrec and mrec.get("repairs"):
-        bidx = [k for k, m in enumerate(mans) if norm(m["path"]) in held_ok]
-        if bidx:
-            bm = mans[max(bidx)]
-            rb = os.path.basename(mrec["repairs"])
-            cp = os.path.join(os.path.dirname(bm["full"]), rb)
-            if bm["names"].get(rb) is None:
-                crows = []
-            elif file_sha(cp) == bm["names"][rb]:
-                try:
-                    with open(resolve(mrec["repairs"]), "rb") as fh:
-                        live = fh.read().split(b"\n")
-                    with open(cp, "rb") as fh:
-                        cpl = fh.read().split(b"\n")
-                except OSError:
-                    live, cpl = [], []
+    bidx = [k for k, m in enumerate(mans) if norm(m["path"]) in held_ok]
+    bm = mans[max(bidx)] if bidx else None          # the latest bound manifest whose launch state is its own
+    # the time its frozen evaluation stands for: its latest review launch
+    bts = max((t for t in (launch_ts(r) for r in binding_rows(bm["path"], bm["id"])) if t), default=None) if bm else None
+    frozen = set()              # repairs rows byte-identical, at the same row number, in the copy beside that manifest
+    crows = None                # that copy's rows: [] when it froze none (no repairs= token was ever carried, or the
+                                # manifest lists no repairs file); None when no copy can be read (listed, but absent,
+                                # differing from the digest or unreadable)
+    if bm is not None and not mrec.get("repairs"):
+        crows = []
+    elif bm is not None:
+        rb = os.path.basename(mrec["repairs"])
+        cp = os.path.join(os.path.dirname(bm["full"]), rb)
+        if bm["names"].get(rb) is None:
+            crows = []
+        elif file_sha(cp) == bm["names"][rb]:
+            try:
+                with open(resolve(mrec["repairs"]), "rb") as fh:
+                    live = fh.read().split(b"\n")
+            except OSError:
+                live = []
+            try:
+                with open(cp, "rb") as fh:
+                    cpl = fh.read().split(b"\n")
+            except OSError:
+                cpl = None
+            if cpl is not None:
                 frozen = {i + 1 for i, ln in enumerate(live) if i < len(cpl) and ln == cpl[i] and ln.strip()}
                 crows = []
                 for ln in cpl:
@@ -2659,15 +2687,32 @@ def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mre
                         continue
                     if isinstance(r, dict):
                         crows.append(r)
+    wsince = mrec.get("wsince") or {} if mrec else {}
+
+    def in_force(p):
+        """A withdrawal first recorded before that launch (never one only the pending entry carries, S3)."""
+        t = wsince.get(norm(p))
+        t = parse_iso(t) if isinstance(t, str) else None
+        return t is not None and bts is not None and t < bts
 
     def carried(ab):
-        """R1: the copy's evaluation also lacks the row whose absence raised the error."""
+        """R1: the copy's evaluation at that launch also lacks the row whose absence raised the error: a finding
+        that existed then (its review launched before it) with no copy row other than one a withdrawal in force
+        voids; a pair that was a pair then (no manifest between them withdrawn later) with no declaring row."""
         if crows is None:
             return False
         if ab[0] == "finding":
-            return not any(r.get("finding") == ab[1] for r in crows)
+            issued = launch_ts(ab[2]) if isinstance(ab[2], dict) else None
+            if issued is None or bts is None or not bts > issued:
+                return False
+            return not any(r.get("finding") == ab[1] and not any(in_force(r[k]) for k in ("before", "after")
+                                                                 if isinstance(r.get(k), str) and r[k].strip()) for r in crows)
+        sc = [norm(p) for p in mrec["scope"]]
+        a, b = norm(ab[1]), norm(ab[2])
+        if a in sc and b in sc[sc.index(a) + 1:] and not all(in_force(p) for p in sc[sc.index(a) + 1:sc.index(b, sc.index(a) + 1)]):
+            return False
         return not any(isinstance(r.get("before"), str) and isinstance(r.get("after"), str) and r["before"].strip()
-                       and r["after"].strip() and norm(r["before"]) == norm(ab[1]) and norm(r["after"]) == norm(ab[2])
+                       and r["after"].strip() and norm(r["before"]) == a and norm(r["after"]) == b
                        and (ab[3] is None or (isinstance(r.get("changed"), list) and ab[3] in r["changed"])) for r in crows)
 
     def exits(fid, mt):
