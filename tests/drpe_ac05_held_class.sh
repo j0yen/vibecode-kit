@@ -94,6 +94,10 @@ c_matrix_member() { local mx="-adversarial.md (packet member of the live edges h
   pfail "$SI" "manifest $M2: lists no" "$mx"; noheld "$mx"
   pe live-bound-matrix-member; pkl; held0   # without --pending both are m2's own listing
   pheld "$SI" "manifest $M2: lists no" "$mx"; nofail "$SI" "manifest $M2:"; fullrc1; }
+c_mx_member_frozen() { local mx="-adversarial.md (packet member of the live edges header)"
+  pe live-bound-mx-member-frozen; pk; rc1  # frozen header kept; the pending adversarial= names x2 (S3)
+  pfail "$SI" "manifest $M2: lists no" "-adversarial.md (matrix named by adversarial= (the header names none))"
+  pfail "$SI" "manifest $M2: lists no" "$mx"; noheld "$mx"; fullrc1; }
 c_late_noid_held() { both late-noid-held PRD-bar.md "prds member"; }
 c_late_noid_deleted() { pe late-noid-deleted; pk; rc1; pfail "$SM" "manifest $M2:" "unreadable"; noheld "manifest $M2:"; fullrc1; }
 c_late_edited() { pe late-edited; pk; rc1
@@ -119,7 +123,7 @@ c_row_dropped_pair() { pe row-dropped-pair; pk; rc1
 
 red=0
 for c in f1_packet f1_prds f1_contract f1_clash f1_dupbase frozen_prds frozen_packet frozen_contract frozen_dupbase \
-         frozen_clash dupbase_other clash_other edges edges_member noheader_dupbase matrix_noheader matrix_member \
+         frozen_clash dupbase_other clash_other edges edges_member noheader_dupbase matrix_noheader matrix_member mx_member_frozen \
          late_edited late_edited_row late_deleted late_noid_held late_noid_deleted row_dropped row_dropped_badcopy row_dropped_empty row_dropped_unlisted row_dropped_pair; do
   if out=$("c_$c" 2>&1); then echo "ok  $c"; else echo "RED $c: $out"; red=1; fi
 done

@@ -968,8 +968,9 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
         heads = ([("frozen", m["frozen"])] if m["frozen"] else []) + ([("live", hd)] if k == last and hd else [])
         # packet-errors R1: the defects the manifest's frozen evaluation carries (its state when its review
         # launched): those its frozen header raises, and the needs no header supplies (the edges file, and
-        # the matrix unless the pending entry's own adversarial= names it). A live-header error is held only
-        # when it states one of them.
+        # the matrix unless the pending entry's own adversarial= names it, S3: the pending clause is read
+        # first, so such a frozen line records no key). A live-header error is held only when it states
+        # one of them.
         carried = {("need", eb)} | ({("need", mxm)} if not (psem and mxp) else set())
 
         def fresh(label, key):          # True: a live-header defect the frozen evaluation lacks (sets the exit)
@@ -997,7 +998,7 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
                 if b not in m["names"]:
                     once("mission-scope-incomplete", f"manifest {m['path']}: lists no {b} ({mxl})" if kind is None else
                          f"manifest {m['path']}: lists no {b} ({kind} of the {label} edges header)",
-                         man=mp, pend=fresh(label, ("need", b)) or (psem and kind is None and mxp))
+                         man=mp, pend=(psem and kind is None and mxp) or fresh(label, ("need", b)))
         # matrix-per-manifest R3: the last manifest's frozen header, and the live header, name the
         # note's adversarial= matrix
         for label, h in (heads if k == last else []):

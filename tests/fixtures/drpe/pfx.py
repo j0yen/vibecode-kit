@@ -777,11 +777,16 @@ def held_class(kind, nolog=False):
         if kind == "matrix-member":     # ... and the live header names x2 as a packet member
             s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(
                 packet=list(h.get("packet") or []) + [os.path.basename(s.x2)]))
+    elif kind == "mx-member-frozen":    # m2 keeps its frozen header, lists no x2; the live header names x2
+        del m2.members[os.path.basename(s.x2)]
+        s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(
+            packet=list(h.get("packet") or []) + [os.path.basename(s.x2)]))
     return s
 
 
 for _k in ("frozen-prds", "frozen-packet", "frozen-contract", "frozen-dupbase", "frozen-clash", "dupbase-other",
-           "clash-other", "edges", "edges-member", "noheader-dupbase", "matrix-noheader", "matrix-member"):
+           "clash-other", "edges", "edges-member", "noheader-dupbase", "matrix-noheader", "matrix-member",
+           "mx-member-frozen"):
     CASES[f"live-bound-{_k}"] = (lambda k=_k, nolog=False: held_class(k, nolog))
 
 
