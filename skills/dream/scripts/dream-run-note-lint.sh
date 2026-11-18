@@ -406,8 +406,9 @@ def read_edges(path, shown, name=None):
         elif not mx.endswith(".md"):
             bad(1, "matrix", f"'{mx}' is not a basename ending .md")
         elif any(mx in v for _, v in others):
-            bad(1, "matrix", f"'{mx}' is the basename of a {next(k for k, v in others if mx in v)} member of this header "
-                             "(a PRD or the vision cannot stand in for the matrix)")
+            kind = next(k for k, v in others if mx in v)
+            bad(1, "matrix", f"'{mx}' is the basename of {'an' if kind[0] in 'aeiou' else 'a'} {kind} member of this "
+                             "header (a PRD or the vision cannot stand in for the matrix)")
         else:
             mxv = mx
     prset, exts = set(prds), set(names)
