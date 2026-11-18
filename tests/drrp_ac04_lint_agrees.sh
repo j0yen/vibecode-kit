@@ -37,7 +37,7 @@ CASE=compliant-base; use base; run_fc; [ "$RC" = 0 ] || fail "$CASE: rc=$RC $ERR
 CASE=compliant-three; use three; run_fc; [ "$RC" = 0 ] || fail "$CASE: rc=$RC $ERR"; sic 0
 CASE=own-after; use base; mansign "$AFT" "L[:] = [l for l in L if not l.endswith('  $FC_RB')]"; run_fc
 only "$AFT"
-CASE=out-of-order; use three
+CASE='out-of-order'; use three
 redit 'R[:] = [R[2], R[0], R[1]]'
 mansign "$AFT" "L[:] = [l for l in L if not l.endswith('  $FC_RB')]"; run_fc
 python3 -c 'import json,sys; R=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; sys.exit(0 if R[0]["before"].endswith("after.sha256") and R[1]["before"].endswith("before.sha256") else 1)' "$H/$FC_RP" \
