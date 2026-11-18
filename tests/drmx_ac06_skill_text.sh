@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # AC6 (R6) — SKILL.md Phase 2 (mission trace paragraph) names the optional header `matrix`;
-# Phase 3 states the per-manifest rule (the header's `matrix` names the matrix current at each
+# Phase 3 keeps one matrix file per run, one per review round only where the edges header carries
+# `matrix`, and states the per-manifest rule (the header's `matrix` names the matrix current at each
 # freeze, a repair round writes a new matrix and updates `matrix` before freezing), the last-matrix
 # rule (adversarial= names the last), the legacy rule (a manifest whose header has no `matrix` keeps
 # the matrix of the entry that first listed it; a continued legacy mission writes the new run's
@@ -23,7 +24,7 @@ for s in 'optional `matrix`' 'the basename of the adversarial matrix current at 
 done
 adv=$(para "$(section '## Phase 3 — Draft')" '**Adversarial pass')
 # shellcheck disable=SC2016
-for s in 'One file per review round' 'names the matrix current at each freeze' 'writes a new matrix and updates `matrix` before freezing' \
+for s in 'One file per run (on a mission run whose edges header carries `matrix`, one per review round)' 'names the matrix current at each freeze' 'writes a new matrix and updates `matrix` before freezing' \
   'the note'"'"'s `adversarial=` names the last' 'keeps the matrix of the entry that first listed it' 'later than the previous entry' \
   'lists the edges basename' 'repair-hash-mismatch'; do
   case "$adv" in *"$s"*) ;; *) fail "Phase 3 Adversarial pass paragraph lacks '$s'";; esac
