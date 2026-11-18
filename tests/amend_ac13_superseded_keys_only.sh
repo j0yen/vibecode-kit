@@ -80,4 +80,47 @@ check_deny_says "blocked + other key: reason names the key" \
 check_deny_says "parked + no keys: reason names the empty list" \
   "no keys named" parked no ""
 
+# A key list is split on commas only; each key is trimmed of surrounding
+# whitespace and compared literally. A list that names no key is refused for
+# every status in the ownership arm, dispatched or not.
+for st_it in "blocked no" "parked no" "building yes"; do
+  read -r st it <<<"$st_it"
+  for keys in "," ",," " " " , "; do
+    check_deny_says "$st/$it + '$keys' names no key" "deny: no keys named" "$st" "$it" "$keys"
+  done
+done
+
+# A foreign key is refused and printed as typed: nothing (quote handling, echo
+# options) may erase it on the way.
+for it in no yes; do
+  check_deny_says "blocked/$it + apostrophe key" \
+    "deny: AC3's wording is not an ownership key" blocked "$it" "AC3's wording"
+  check_deny_says "blocked/$it + unmatched trailing quote" \
+    "deny: Status' is not an ownership key" blocked "$it" "Status'"
+  check_deny_says "blocked/$it + over-quoted list" \
+    "deny: 'Status is not an ownership key" blocked "$it" "'Status,Depends-on'"
+  check_deny_says "blocked/$it + echo-option key" \
+    "deny: -n is not an ownership key" blocked "$it" "-n"
+  check_deny_says "blocked/$it + ownership key then echo-option key" \
+    "deny: -n is not an ownership key" blocked "$it" "Superseded-by,-n"
+  check_deny_says "blocked/$it + space-joined keys are one foreign key" \
+    "deny: Superseded-by transferred_acs is not an ownership key" blocked "$it" "Superseded-by transferred_acs"
+done
+
+# A key is never glob-expanded: '*' run from a directory holding a file named
+# Superseded-by stays the foreign key '*'.
+globdir="$(mktemp -d)"
+trap 'rm -rf "$globdir"' EXIT
+: > "$globdir/Superseded-by"
+(cd "$globdir" && check_deny_says "blocked/no + '*' beside a file named Superseded-by" \
+  "deny: * is not an ownership key" blocked no "*")
+
+# Whitespace and empty fields around real keys are not keys.
+check_allow "blocked/no + ownership keys with blanks and an empty field" \
+  blocked no " Superseded-by ,, transferred_acs "
+
+# The queued + dispatch iter_log deny says why.
+check_deny_says "queued + dispatch iter_log: reason names the dispatch iter_log" \
+  "deny: queued PRD has a dispatch iter_log" queued yes "Superseded-by"
+
 echo "ok"
