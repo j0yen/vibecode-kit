@@ -9,16 +9,20 @@ the lint's held logic, only its command line: `--scope-id`, `--packet-only` and 
 For a note, an evaluated entry E (the `--pending` file, else the note's last entry) and B, the latest
 listed manifest a review launch bound whose launch state is still its own, the launch-state
 reconstruction of B is a private copy of the PRD home in which
-- the note holds the entries recorded before B's latest launch, then E as it stood at that launch: its
-  Mission: scope= cut after B, repairs= the value in force then (the latest entry recorded before the
-  launch, else E's), withdrawn= inherited from those entries only, adversarial= E's (with --pending,
-  a pending adversarial= B does not list is replaced by the matrix in force then, S3); its Review: lines
-  those of the reviews launched before the launch, then the review launching on B, whose verdict carries
+- the note holds the entries recorded before B's latest launch (never E, which plays the pending entry in
+  --last too), then E as it stood at that launch: its Mission: scope= cut after B, repairs= the value in
+  force then (the latest entry recorded before the launch; when none, the repairs file B lists, since a
+  pending repairs= is never in force at a launch; else E's), withdrawn= inherited from those entries (in
+  --last also E's own when its header precedes the launch, as the lint dates it), adversarial= E's (with
+  --pending, a pending adversarial= B does not list is replaced by the matrix in force then, S3); its
+  Review: lines those of the reviews launched before another session's latest launch on B (a resume of a
+  review launches no review and refreezes nothing), then the review launching on B, whose verdict carries
   no finding ("named before launch", R-10): a stub review bound to B at that launch time;
 - every packet file B lists is restored from B's own verified copies, under the names in force at the
   launch: the edges file, the repairs file (absent when B lists none: it froze no row), the matrix, the
   contract copies and packet members of B's frozen header, and the PRDs;
-- the decisions log holds the rows up to and including B's latest launch row, and the stub review's row.
+- the decisions log holds the rows whose time is at or before B's latest launch (times read as the lint
+  reads them: one with no UTC offset is no time), and the stub review's row.
 The full lint (not --packet-only) on that copy is the frozen evaluation. For every packet error:
 - `mission-withdrawn-bound`, an error naming no manifest and no row (S4), an error on an unbound or pending
   manifest (S5), or on a bound manifest edited or deleted after its launch (R3), sets the exit;

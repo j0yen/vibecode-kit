@@ -2,10 +2,11 @@
 # AC5 (R1 held rule) — the frozen-evaluation oracle. R1 holds an error on a bound manifest "only when it is
 # also present in the bound manifest's own frozen copies (... which record the state when its review
 # launched)". tests/fixtures/drpe/oracle.py rebuilds that state for B, the latest bound manifest whose launch
-# state is its own: the entries recorded before B's latest launch, the evaluated entry as it stood then
-# (scope= cut after B, the repairs= and withdrawn= in force, the reviews launched before it and the review
-# launching on B, which has no finding yet), B's frozen packet files under the names in force then, and the
-# decisions log up to that launch. It runs the full lint (not --packet-only) on that copy: every
+# state is its own: the entries recorded before B's latest launch (never the evaluated entry), the evaluated
+# entry as it stood then (scope= cut after B, the repairs= and withdrawn= in force, the reviews launched before
+# another session's launch on B and the review launching on B, which has no finding yet), B's frozen packet
+# files under the names in force then, and the decisions rows timed up to that launch. It runs the full lint
+# (not --packet-only) on that copy: every
 # --packet-only error is HELD iff that evaluation reports the same defect (finding id and object), and every
 # other error sets the exit; the states it cannot rebuild are classified by their own R1/R5 sentence. The
 # oracle reads only the lint's command line, never its held logic.

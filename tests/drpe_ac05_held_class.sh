@@ -20,12 +20,19 @@
 #   before that launch is void (HELD), one only the pending entry withdraws is not, and the pair it forms
 #   did not exist (FAIL); a deleted live file does not empty the copy (FAIL); a finding of that manifest's
 #   own latest review did not exist at the launch (FAIL). The copy read is that of the repairs= in force at that
-#   launch (the latest entry recorded before it, else the current one): renamed after it, the old file's copy
-#   decides (rows it holds answer: FAIL; a defect it carries too: HELD); first named by the pending entry, the
-#   manifest froze no row of it (HELD). A finding is dated by its issuing review's first launch on the manifest it
-#   reviewed (a later relaunch of that session: HELD), and the launch time by every tier that binds (a Review:
-#   line's reviewer row: HELD); that time is the latest launch (a re-review: HELD), a withdrawal counts only when
-#   recorded before it (recorded later, or pending even with an earlier header: FAIL).
+#   launch: the latest entry recorded before it (two recorded: the later; one recorded exactly at the launch is
+#   not before it), else the repairs file the manifest lists, because a pending repairs= is never in force at a
+#   launch: renamed after it, the old file's copy decides (rows it holds answer: FAIL; a defect it carries too:
+#   HELD), also when the pending entry is the first to name repairs= (FAIL); renamed back to a file the manifests
+#   list as a plain member, that member's undeclared change is HELD. A finding is dated by its issuing review's
+#   first launch on the manifest it reviewed (a later relaunch of that session: HELD; another session's earlier
+#   launch there: FAIL), and the manifest's launch for it by its latest binding row from another session (a resume
+#   of the issuing review refreezes nothing: FAIL; a session reused across reviews is one session: FAIL; a row
+#   from a session no Review: line names binds nothing: FAIL). The launch time counts every tier that binds (a
+#   Review: line's reviewer row: HELD) and is the latest launch (a re-review: HELD, also for a withdrawal
+#   recorded between the two launches), a withdrawal counts only when recorded before it (recorded later, or
+#   pending even with an earlier header: FAIL); decisions rows count by their time, not their order in the file
+#   (HELD), and a time with no UTC offset is no time (FAIL).
 # The full lint on each note with the pending entry appended still exits 1. Each case runs on its own and
 # prints ok or RED, so a known-bad lint (DRREC_LINT) shows every cell.
 set -uo pipefail

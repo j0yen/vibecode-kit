@@ -121,11 +121,13 @@
 # the matrix); a row error only when every row it names is byte-identical at its row number in the
 # digest-matching repairs copy beside the latest bound manifest, and an error a missing row raises
 # only when the copy there of the repairs file in force at that manifest's latest launch (by every
-# row binding it; the latest repairs= recorded before it, else the current one), read as at that
-# launch, lacks the row too (a mission with no repairs= token froze none; a copy row naming a manifest
-# whose withdrawal was recorded before that launch answers nothing; a finding counts only if its review
-# first launched on its manifest before it; a pair only if no manifest between them was withdrawn
-# later); none on a manifest edited or deleted after its launch. An
+# row binding it; the latest repairs= recorded before it, else the repairs file the manifest lists, a
+# pending repairs= never being in force at a launch, else the current one), read as at that launch,
+# lacks the row too (a mission with no repairs= token froze none; a copy row naming a manifest whose
+# withdrawal was recorded before that launch answers nothing; a finding counts only if its review first
+# launched on its manifest before the manifest's latest launch by another session, since a resume of
+# that review launches no review; a pair only if no manifest between them was withdrawn later); none
+# on a manifest edited or deleted after its launch. An
 # error naming no manifest, an unbound manifest or a new row, or raised only by a pending token, sets
 # the exit (`FAIL <id>:`, packet_errors). --pending also exits 1 with
 # `PENDING <line|slug|digest>: <detail>` (no id) for a missing Task:/Mission:/Analysis:/State: line,
