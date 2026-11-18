@@ -5,9 +5,12 @@
 # AC13.
 #
 # Usage: amend-key-gate.sh <status> <has-dispatch-iter-log:yes|no> <keys>
-#   status: queued | building | in_progress | blocked | parked | built | archived
+#   status: queued | building | in_progress | blocked | parked | built | shipped
+#           | archived
 #   keys:   comma-separated list of frontmatter keys the amendment would add
-#           or change (e.g. "Superseded-by,transferred_acs")
+#           or change (e.g. "Superseded-by,transferred_acs"); each key is
+#           trimmed of surrounding whitespace and compared literally, and a
+#           list that names no key is refused
 #
 # Rule:
 #   queued + no dispatch iter_log      -> any keys (full amend)
@@ -32,20 +35,31 @@ keys_csv=$3
 
 ownership_keys="Superseded-by transferred_acs"
 
-# is_ownership_only: rc 0 when every key is an ownership key; otherwise rc 1
-# and the first other key on stdout.
+# is_ownership_only: rc 0 when the list names at least one key and every
+# named key is literally an ownership key; otherwise rc 1, with the first other
+# key on stdout verbatim (nothing when the list names no key). The list is split
+# on commas and each key trimmed with parameter expansion only, so no quote,
+# backslash or option-shaped key is lost and no key is word-split or
+# glob-expanded.
 is_ownership_only() {
-  local IFS=','
-  local k
-  for k in $keys_csv; do
-    k="$(echo "$k" | xargs)"
+  local rest="$keys_csv," k o named=0 owned
+  while [ -n "$rest" ]; do
+    k="${rest%%,*}"
+    rest="${rest#*,}"
+    k="${k#"${k%%[![:space:]]*}"}"
+    k="${k%"${k##*[![:space:]]}"}"
     [ -z "$k" ] && continue
-    case " $ownership_keys " in
-      *" $k "*) ;;
-      *) echo "$k"; return 1 ;;
-    esac
+    owned=no
+    for o in $ownership_keys; do
+      [ "$k" = "$o" ] && owned=yes
+    done
+    if [ "$owned" = no ]; then
+      printf '%s\n' "$k"
+      return 1
+    fi
+    named=$((named + 1))
   done
-  return 0
+  [ "$named" -gt 0 ]
 }
 
 if [ "$status" = "queued" ] && [ "$has_iter_log" = "no" ]; then
@@ -53,15 +67,22 @@ if [ "$status" = "queued" ] && [ "$has_iter_log" = "no" ]; then
   exit 0
 fi
 
+if [ "$status" = "queued" ] && [ "$has_iter_log" = "yes" ]; then
+  echo "deny: queued PRD has a dispatch iter_log; draft a successor"
+  exit 2
+fi
+
 case "$status" in
   building|in_progress|blocked|parked)
     owned="${ownership_keys// /, }"
-    if [ -z "$keys_csv" ]; then
-      echo "deny: no keys named; a $status predecessor accepts only $owned via amend"
-      exit 2
-    fi
+    article=a
+    [ "$status" = in_progress ] && article=an
     if ! other="$(is_ownership_only)"; then
-      echo "deny: $other is not an ownership key; a $status predecessor accepts only $owned via amend; draft a successor for anything else"
+      if [ -z "$other" ]; then
+        echo "deny: no keys named; $article $status predecessor accepts only $owned via amend"
+      else
+        printf 'deny: %s is not an ownership key; %s %s predecessor accepts only %s via amend; draft a successor for anything else\n' "$other" "$article" "$status" "$owned"
+      fi
       exit 2
     fi
     case "$status" in
@@ -77,5 +98,5 @@ case "$status" in
     ;;
 esac
 
-echo "deny: $status is not amendable in place; draft a successor"
+echo "deny: ${status:-an empty status} is not amendable in place; draft a successor"
 exit 2
