@@ -2615,6 +2615,16 @@ def lint_log(a):
     return L, obj, ok_line
 
 
+def repairs_copy(path):
+    """Whether a file reads as repairs rows: every non-blank line a JSON object carrying before and after."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rs = [json.loads(z) for z in fh.read().splitlines() if z.strip()]
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return bool(rs) and all(isinstance(r, dict) and "before" in r and "after" in r for r in rs)
+
+
 def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mrec, mans, adv, psem, launch_binds,
                   binding_rows, resolve):
     """PRD-dream-packet-errors-while-repairable R1: the --packet-only object. Packet-error findings
@@ -2666,12 +2676,21 @@ def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mre
                                 # manifest: [] when it froze none (no repairs= token was ever carried, or the manifest
                                 # lists no such file); None when no copy can be read (listed, but absent, differing
                                 # from the digest or unreadable)
-    # the repairs= token in force at that launch: the value of the latest entry recorded before it, else the current
-    rep_at = mrec.get("repairs") if mrec else None
+    # the repairs= token in force at that launch: the value of the latest entry recorded before it; when none
+    # recorded one, the repairs file the manifest lists (the pre-launch check admits a launch only with repairs=
+    # naming a file it lists, and a pending value is never in force at the launch, S3), else the current
+    rep_at, recd = (mrec.get("repairs") if mrec else None), False
     for x in (mrec.get("earlier") or []) if mrec and bts is not None else []:
         xt = parse_iso(x["ts"]) if isinstance(x["ts"], str) else None
         if xt is not None and xt < bts and x["eff"].get("repairs"):
             rep_at = x["eff"]["repairs"][0]
+            recd = True
+    if bm is not None and rep_at and not recd and os.path.basename(rep_at) not in bm["names"]:
+        alt = [n for n in bm["names"] if n.endswith(".jsonl") and n != os.path.basename(mrec.get("edges") or "")]
+        if len(alt) > 1:        # more than one: the members whose copy reads as repairs rows
+            alt = [n for n in alt if repairs_copy(os.path.join(os.path.dirname(bm["full"]), n))]
+        if len(alt) == 1:
+            rep_at = os.path.join(os.path.dirname(rep_at), alt[0])
     same = bool(rep_at and mrec.get("repairs") and norm(rep_at) == norm(mrec["repairs"]))
     rb = os.path.basename(rep_at) if rep_at else None
     if bm is not None and not mrec.get("repairs"):
@@ -2721,7 +2740,11 @@ def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mre
             irs = [r for r in binding_rows(ir["scope"], ir.get("scope_id")) if r.get("session") == ir.get("session")] \
                 if ir and isinstance(ir.get("scope"), str) and ir["scope"] else []
             issued = min((t for t in (launch_ts(r) for r in irs) if t), default=launch_ts(ir) if ir else None)
-            if issued is None or bts is None or not bts > issued:
+            # the manifest's launch for it: its latest binding row from another session (a resume of the issuing
+            # review launches no review and refreezes nothing)
+            bo = max((t for t in (launch_ts(r) for r in binding_rows(bm["path"], bm["id"])
+                                  if not ir or r.get("session") != ir.get("session")) if t), default=None)
+            if issued is None or bo is None or not bo > issued:
                 return False
             return not any(r.get("finding") == ab[1] and not any(in_force(r[k]) for k in ("before", "after")
                                                                  if isinstance(r.get(k), str) and r[k].strip()) for r in crows)
