@@ -660,6 +660,42 @@ for _h in ("review", "launch", "edited", "deleted", "twice", "dropped"):
     CASES[f"bound-{_h}"] = (lambda h=_h, nolog=False: bound_case(h, nolog))
 
 
+# AC 5 held rule, live arm: m2 bound (r2 launched on it and listed APPROVE) and still the last manifest (no
+# new manifest); after the launch the live edges header gains a packet member, a prds member or an external
+# contract that m2 (and its frozen edges copy) lacks. No frozen copy carries the error, so it is exit-setting.
+def live_bound(kind, nolog=False):
+    s = build("continued", nolog=nolog)
+    m2 = s.mans["m2"]
+    r2 = s.review("notes/reviews/r2", S["R2"], [("foo", "APPROVE"), ("bar", "APPROVE")], "APPROVE")
+    s.drow(at(14, 0), S["R2"], role="review", man=m2)
+    s.pending["lines"]["Review"] = s.pending["lines"]["Review"] + [r2]
+    s.pending["lines"]["State"] += " foo=reviewed:APPROVE bar=reviewed:APPROVE"
+    if kind == "packet":
+        s.files["visions/drpe-glossary.md"] = b"# drpe glossary (fixture)\n"
+        s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(packet=list(h.get("packet") or []) + ["drpe-glossary.md"]))
+    elif kind == "prds":
+        s.files["built-prds/PRD-baz.md"] = b"# PRD-baz (fixture v1)\n"
+        s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(prds=h["prds"] + ["PRD-baz.md"]))
+    elif kind == "contract":
+        s.files["contracts/hermes-contract.md"] = b"# hermes contract (fixture)\n"
+        s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(
+            external=[{"name": "hermes", "contract": "contracts/hermes-contract.md"}]))
+    elif kind == "clash":           # a contract path whose basename is a prds member's (m2 lists that member)
+        s.files["contracts/PRD-foo.md"] = b"# hermes contract named like a PRD (fixture)\n"
+        s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(
+            external=[{"name": "hermes", "contract": "contracts/PRD-foo.md"}]))
+    elif kind == "dupbase":         # two contract paths sharing one basename
+        s.files["contracts/a/hermes.md"] = b"# hermes contract a (fixture)\n"
+        s.files["contracts/b/hermes.md"] = b"# hermes contract b (fixture)\n"
+        s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(
+            external=[{"name": "hermes", "contract": ["contracts/a/hermes.md", "contracts/b/hermes.md"]}]))
+    return s
+
+
+for _k in ("none", "packet", "prds", "contract", "clash", "dupbase"):
+    CASES[f"live-bound-{_k}"] = (lambda k=_k, nolog=False: live_bound(k, nolog))
+
+
 # AC 8: E2 records the withdrawal of m2 (edges copy unlisted) with r2 on m2r returning APPROVE; E3 (pending
 # here, appended by the test) extends scope= with m3 (an amended bar), omits withdrawn= and binds r3 APPROVE
 @case("ac8")

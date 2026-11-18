@@ -117,8 +117,9 @@
 # manifest a review launch of the task bound (role review, by scope path or scope id) is held
 # (`HELD <id>:`, held_packet_errors, exit 0) when its own frozen copies carry it: a row error only
 # when every row it names is byte-identical at its row number in the digest-matching repairs copy
-# beside the latest bound manifest; an error naming no manifest, an unbound manifest, a new row or
-# only a pending token sets the exit (`FAIL <id>:`, packet_errors). --pending also exits 1 with
+# beside the latest bound manifest; an error naming no manifest, an unbound manifest or a new row, or
+# raised only by a pending token or the live edges header, sets the exit (`FAIL <id>:`,
+# packet_errors). --pending also exits 1 with
 # `PENDING <line|slug|digest>: <detail>` (no id) for a missing Task:/Mission:/Analysis:/State: line,
 # an Analysis: grammar or recency failure, a Review: file slug the State: omits, and (also without
 # --pending) a live edges, repairs or matrix file differing from the unbound last manifest's digest;
@@ -962,6 +963,7 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
         m["matrix"] = mxm
         heads = ([("frozen", m["frozen"])] if m["frozen"] else []) + ([("live", hd)] if k == last and hd else [])
         for hi, (label, h) in enumerate(heads):
+            live = label == "live"      # packet-errors R1: no frozen copy carries a live-header error (never held)
             cons = header_contracts(h)
             byb = {}
             for nm, cp in cons:
@@ -969,10 +971,12 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
             for b, cps in byb.items():
                 if len(set(cps)) > 1:
                     once("mission-scope-mismatch", f"manifest {m['path']}: {label} edges header: contract paths "
-                                                   f"{' and '.join(sorted(set(cps)))} share the basename {b}", man=mp)
+                                                   f"{' and '.join(sorted(set(cps)))} share the basename {b}",
+                         man=mp, pend=live)
                 if b in h["prds"] or b in h["packet"]:
                     once("mission-scope-mismatch", f"manifest {m['path']}: {label} edges header: contract path "
-                                                   f"{cps[0]} and the member {b} share the basename {b}", man=mp)
+                                                   f"{cps[0]} and the member {b} share the basename {b}",
+                         man=mp, pend=live)
             need = [(b, "prds member") for b in h["prds"]] + [(b, "packet member") for b in h["packet"]]
             need += ([(mxm, None)] if mxm and hi == 0 else []) + ([(eb, "edges file")] if eb else [])
             need += [(os.path.basename(cp), f"external {nm} contract copy") for nm, cp in cons]
@@ -980,7 +984,7 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
                 if b not in m["names"]:
                     once("mission-scope-incomplete", f"manifest {m['path']}: lists no {b} ({mxl})" if kind is None else
                          f"manifest {m['path']}: lists no {b} ({kind} of the {label} edges header)",
-                         man=mp, pend=psem and kind is None and mxp)
+                         man=mp, pend=live or (psem and kind is None and mxp))
         # matrix-per-manifest R3: the last manifest's frozen header, and the live header, name the
         # note's adversarial= matrix
         for label, h in (heads if k == last else []):
