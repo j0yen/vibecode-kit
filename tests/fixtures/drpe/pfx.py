@@ -976,6 +976,166 @@ def finish(s):
     return s
 
 
+# ---- reviewer round 3 (db9e3389): cells of the held/fail class the author's table does not exercise
+def rv3_notoken(nolog=False):
+    """Bound m1 (r1 APPROVE, no findings) and bound m2 (r2 APPROVE); PRD-foo.md moved between them; the
+    mission never carried a repairs= token and no repairs file exists. The undeclared change is in both
+    manifests' frozen state (no row declared it when r2 launched): R1 holds it."""
+    s = live_bound("none", nolog)
+    s.files.pop("notes/reviews/r1/verdict.txt.findings.jsonl", None)
+    s.review("notes/reviews/r1", S["R1"], [("foo", "APPROVE"), ("bar", "APPROVE")], "APPROVE")
+    s.entries[0]["lines"]["State"] = "State: foo=linted foo=reviewed:APPROVE bar=linted bar=reviewed:APPROVE"
+    s.rows = []
+    del s.mans["m2"].members[RB]
+    s.pending["lines"]["State"] = ("State: foo=linted foo=reviewed:APPROVE bar=reviewed:APPROVE "
+                                   "foo=reviewed:APPROVE bar=reviewed:APPROVE")
+    setp(s, "Mission", f"Mission: {NAME} scope={s.scope}")
+    return s
+
+
+def rv3_void_row(nolog=False):
+    """ac8 without row 2 (F1, m1 -> m2r): F1's only row names the withdrawn m2 (void, packet-errors R2) in
+    the live file and in the copies beside m2r and m3 alike (live file == m3's copy, byte for byte)."""
+    s = CASES["ac8"](nolog=nolog)
+    del s.rows[1]
+    s.frozen_rows["m2r"] = 1
+    return s
+
+
+def rv3_mx_member_frozen(nolog=False):
+    """live-bound-none with m2's frozen (legacy) header kept: m2 lists no x2 (the matrix the pending
+    adversarial= names) and the live header names x2 as a packet member the frozen header lacks."""
+    s = live_bound("none", nolog)
+    x2 = os.path.basename(s.x2)
+    del s.mans["m2"].members[x2]
+    s.files[EDGES] = edges(None, mutate=lambda h, es: h.update(packet=list(h.get("packet") or []) + [x2]))
+    return s
+
+
+def rv3_clash_need(nolog=False):
+    """m2's frozen header names PRD-baz.md (a prds member m2 lacks); the live header names it too and adds
+    the contract contracts/PRD-baz.md: a live contract/member clash the frozen header lacks (exit), on the
+    basename of a need the frozen header carries (held)."""
+    s = live_bound("none", nolog)
+    s.files["built-prds/PRD-baz.md"] = b"# PRD-baz (fixture v1)\n"
+    s.files["contracts/PRD-baz.md"] = b"# contract named like PRD-baz (fixture)\n"
+    x2 = os.path.basename(s.x2)         # the note's matrix and m2's copy carry a baz section (no slug error)
+    s.files[s.x2] = matrix(slugs=["foo", "bar", "baz"], tag=" x2")
+    s.mans["m2"].members[x2] = s.files[s.x2]
+    frozen_live(s, lambda h, es: h.update(prds=h["prds"] + ["PRD-baz.md"]),
+                lambda h, es: h.update(prds=h["prds"] + ["PRD-baz.md"],
+                                       external=[{"name": "hermes", "contract": "contracts/PRD-baz.md"}]))
+    return s
+
+
+CASES["rv3-notoken-pair"] = (lambda nolog=False: rv3_notoken(nolog))
+CASES["rv3-clash-need"] = (lambda nolog=False: rv3_clash_need(nolog))
+CASES["rv3-void-row"] = (lambda nolog=False: rv3_void_row(nolog))
+CASES["rv3-mx-member-frozen"] = (lambda nolog=False: rv3_mx_member_frozen(nolog))
+
+
+# ---- reviewer round 4 (db9e3389): the repairs-copy arm against the frozen evaluation
+REP2 = "notes/missions/drpe-mission.repairs-v2.jsonl"
+RB2 = os.path.basename(REP2)
+
+
+def rv4_void_row_s3(nolog=False):
+    """ac8 without row 2 (F1, m1 -> m2r), but E2 lists m2 without withdrawing it; only the pending entry
+    withdraws m2 (S3). At r3's launch on m3 the row (F1, m1 -> m2) answered F1 and m2 stood between m1 and
+    m2r, so repair-missing F1 and the PRD-foo.md change between m1 and m2r are new: both exit."""
+    s = CASES["ac8"](nolog=nolog)
+    del s.rows[1]
+    s.frozen_rows["m2r"] = 1
+    e2 = s.entries[-1]
+    e2["lines"]["Mission"] = e2["lines"]["Mission"].replace(" withdrawn=notes/snapshots/m2/m2.sha256", "")
+    s.pending["lines"]["Mission"] += " withdrawn=notes/snapshots/m2/m2.sha256"
+    return s
+
+
+def rv4_rename(nolog=False):
+    """three, but the pending entry starts a new repairs file: repairs= names REP2 (holding only row 2,
+    F2 m2 -> m3), which pending m3 lists instead of the old file. At r2's launch on m2 the token named the
+    old file, whose copy beside m2 holds row 1 (F1, m1 -> m2, changed PRD-foo.md): F1 was answered and the
+    PRD-foo.md change between m1 and m2 declared. Both errors are new (the frozen evaluation lacks them)."""
+    s = build("three", nolog=nolog)
+    r1b, r2b = (json.dumps(r) + "\n" for r in s.rows)
+    m3 = s.mans["m3"]
+    del m3.members[RB]
+    m3.members[RB2] = r2b.encode()
+    s.files[REP2] = r2b.encode()
+    s.raw_rep = (r1b + r2b).encode()            # the old file stays as it was
+    s.pending["lines"]["Mission"] = s.pending["lines"]["Mission"].replace(f"repairs={REP}", f"repairs={REP2}")
+    return s
+
+
+def rv4_relaunch_issuer(nolog=False):
+    """live-bound-none (r2 APPROVE on bound m2), the live repairs file and m2's copy hold one amended row
+    (no row answers F1), and r1's session has a second launch row on m1 after r2's launch (a resume). F1
+    existed when r2 launched (r1 returned before it): the frozen evaluation carries repair-missing F1."""
+    s = live_bound("none", nolog)
+    s.rows = [{"finding": None, "class": None, "author_session": s.route2[0], "before": "notes/snapshots/m1/m1.sha256",
+               "after": "notes/snapshots/m2/m2.sha256", "changed": ["PRD-foo.md"],
+               "sweep": sweep_for(s.files[EDGES], ["PRD-foo.md"]), "disposition": "amended", "reason": "foo re-worded"}]
+    s.drow(at(14, 30), S["R1"], role="review", man=s.mans["m1"])
+    return s
+
+
+def rv4_tier3(nolog=False):
+    """The same repairs state, no resume; r2's launch row on m2 carries m2's scope id with role "reviewer"
+    (not "review"): m2 is bound through r2's Review: line (R3), r2 is no chain review, so F1 of r1 is checked
+    against the review about to launch on m2. F1 existed when r2 launched: carried."""
+    s = rv4_relaunch_issuer(nolog)
+    s.dec = [r for r in s.dec if not (r.get("session") == S["R1"] and r.get("ts") == at(14, 30))]
+    for r in s.dec:
+        if r.get("session") == S["R2"] and r.get("role") == "review":
+            r["role"] = "reviewer"
+    return s
+
+
+CASES["rv4-void-row-s3"] = (lambda nolog=False: rv4_void_row_s3(nolog))
+CASES["rv4-rename"] = (lambda nolog=False: rv4_rename(nolog))
+CASES["rv4-relaunch-issuer"] = (lambda nolog=False: rv4_relaunch_issuer(nolog))
+CASES["rv4-tier3"] = (lambda nolog=False: rv4_tier3(nolog))
+
+
+# ---- reviewer round 4 (db9e3389), second batch: controls for the branches no cell discriminates
+def rv4_rename_rec(nolog=False):
+    """ac8 (E2 recorded with repairs= the old file, r3 on m3 launched after it), but the pending entry names a
+    new repairs file holding only row 1 (F1, m1 -> m2: void). At r3's launch the token named the old file,
+    whose copy beside m3 answers F1 (row 2) and declares PRD-foo.md (m1 -> m2r) and PRD-bar.md (m2r -> m3)."""
+    s = CASES["ac8"](nolog=nolog)
+    s.files[REP2] = (json.dumps(s.rows[0]) + "\n").encode()
+    s.pending["lines"]["Mission"] += f" repairs={REP2}"
+    return s
+
+
+def rv4_rereview_own(nolog=False):
+    """live-bound-none, r2 on m2 returned FIX with F2, then r2b re-reviewed m2 unchanged (launched after r2,
+    APPROVE). F2 existed at m2's latest launch (r2b's) and had no row there or now: repair-missing F2 HELD."""
+    s = live_bound("none", nolog)
+    s.review("notes/reviews/r2", S["R2"], [("foo", "APPROVE"), ("bar", "FIX")], "FIX", findings=[F2])
+    r2b = s.review("notes/reviews/r2b", S["R3"], [("foo", "APPROVE"), ("bar", "APPROVE")], "APPROVE")
+    s.drow(at(14, 30), S["R3"], role="review", man=s.mans["m2"])
+    s.pending["lines"]["Review"] = s.pending["lines"]["Review"] + [r2b]
+    st = s.pending["lines"]["State"]
+    s.pending["lines"]["State"] = (st[:st.rindex(" bar=reviewed:APPROVE")] + " bar=reviewed:FIX"
+                                   + " foo=reviewed:APPROVE bar=reviewed:APPROVE")
+    return s
+
+
+def rv4_pending_early(nolog=False):
+    """rv4-void-row-s3 with the pending entry's own header written before r3's launch (16:00; r3 launched
+    16:30): the withdrawal only the pending entry carries is still not in force at that launch (S3)."""
+    s = rv4_void_row_s3(nolog)
+    s.pending["ts"] = at(16)
+    return s
+
+
+CASES["rv4-rename-rec"] = (lambda nolog=False: rv4_rename_rec(nolog))
+CASES["rv4-rereview-own"] = (lambda nolog=False: rv4_rereview_own(nolog))
+CASES["rv4-pending-early"] = (lambda nolog=False: rv4_pending_early(nolog))
+
+
 def main(argv):
     if argv[:1] == ["--list"]:
         print("\n".join(CASES))
