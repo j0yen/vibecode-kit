@@ -375,6 +375,23 @@ def c_bad_vision(**kw):
     return M
 
 
+def c_matrix_contract(**kw):
+    """The live header's `matrix` is the basename of its own external contract (R1)."""
+    M = rounds(3)
+    M.files["contracts/hermes-contract.md"] = b"# hermes contract (fixture)\n"
+    M.files[M.edges_rel] = M.edges(matrix=None, mutate=lambda h, es: h.update(
+        external=[{"name": "hermes", "contract": "contracts/hermes-contract.md"}], matrix="hermes-contract.md"))
+    return M
+
+
+def c_matrix_edges_file(**kw):
+    """An edges file named with .md (notes/missions/drmx-self-edges.md, checked with --edges) whose header's
+    `matrix` names the file itself (R1: never the edges-file basename)."""
+    M = rounds(3)
+    M.files["notes/missions/drmx-self-edges.md"] = M.edges(matrix="drmx-self-edges.md")
+    return M
+
+
 def c_two(changed_matrix="both"):
     def f(**kw):
         return rounds(2, changed_matrix=changed_matrix)
@@ -507,6 +524,8 @@ CASES = {
     "matrix-prd": c_bad_matrix("PRD-foo.md"),
     "matrix-not-md": c_bad_matrix("2027-03-01T11:00:00-08:00-adversarial.txt"),
     "matrix-vision": c_bad_vision,
+    "matrix-contract": c_matrix_contract,
+    "matrix-edges-file": c_matrix_edges_file,
     "two-both": c_two("both"),
     "two-old": c_two("old"),
     "two-new": c_two("new"),
