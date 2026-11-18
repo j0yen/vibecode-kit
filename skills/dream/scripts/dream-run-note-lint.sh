@@ -6,6 +6,7 @@
 # Usage:
 #   dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] [--json]
 #                          [--prd-dir <dir>] [--decisions <path>]
+#   dream-run-note-lint.sh <dream-log.md> --last --packet-only [--pending <file>] [--json] [...]
 #   dream-run-note-lint.sh --matrix <path> --states <slug=value ...> [--json]
 #   dream-run-note-lint.sh --scope-id <manifest>
 #   dream-run-note-lint.sh --edges <edges.jsonl> [--prds <PRD basename ...>] [--json]
@@ -20,7 +21,8 @@
 #             adversarial=<<path> uncovered=<n>|skipped: <r>>          (one line)
 #   Review: <verdict file> reviewer-session=<id> [result=<json>]   (one per reviewer) | Review: none
 #   State: <slug>=<value> ...   (a slug repeats once per state reached, in order)
-#   Mission: <name> edges=<path> [scope=<p>[,<p>...]] [repairs=<path>]   (optional sixth kind)
+#   Mission: <name> edges=<path> [scope=<p>[,<p>...]] [repairs=<path>] [withdrawn=<p>[,<p>...]]
+#                                                                        (optional sixth kind)
 # Paths are relative to the PRD home (--prd-dir; default: the log's parent's parent)
 # or absolute.
 #
@@ -54,14 +56,14 @@
 #   edge-node-unlisted mission-prd-unlisted
 #   mission-scope-mismatch mission-scope-incomplete mission-review-missing
 #   mission-verdict-missing mission-finding-incomplete mission-snapshot-stale
-#   mission-approval-blocked
+#   mission-approval-blocked mission-withdrawn-bound
 #   repair-grammar mission-repairs-missing repair-duplicate repair-missing repair-class-mismatch
 #   sweep-missing repair-author-mismatch repair-hash-mismatch repair-scope-mismatch
 #   affected-consumer-unreviewed repair-declined-unaccepted
 #
 # Mission (PRD-dream-mission-edge-map): opt-in. A Mission: line names the mission's edge map
 # (notes/missions/<name>.edges.jsonl: a header {mission, outcome, invariants, prds, external,
-# [packet], [single_component]} then one edge per line with id, the eight fields producer
+# [packet], [matrix], [single_component]} then one edge per line with id, the eight fields producer
 # consumer command trigger authority effect_id recovery_owner postcondition, status
 # known|external|unknown and, for unknown, an owner). A later entry of the same Task: inherits
 # the tokens it omits and must carry the line while its State: names a member of the mission
@@ -80,7 +82,8 @@
 #
 # Mission chain review (PRD-dream-mission-chain-review): only on a Mission: line carrying
 # scope=<manifest>[,<manifest>...] (freeze order). Each manifest must canonicalize, hold its
-# own frozen edges copy, matrix and every member its frozen header names (R1); the chain
+# own frozen edges copy, matrix (the one its frozen header's `matrix` names, else the adversarial=
+# matrix of the entry that first lists it: PRD-dream-matrix-per-manifest) and every member its frozen header names (R1); the chain
 # reviews are the Review: lines whose bound review row carries a listed scope id, at least one
 # on a governed host, listed in manifest then launch order (R2); a chain review's file and
 # result= capture carry one `mission=<VERDICT> <own session>` line and a
@@ -105,6 +108,36 @@
 # review's manifest (R6); changed members and their consumers are held until the mission's final
 # APPROVE, an unaccepted decline's until acceptance (R7). JSON: mission.repairs (R8), whose
 # `file` keeps the repairs= path the edge-map JSON carried; null when nothing here applies.
+#
+# Pre-launch packet check (PRD-dream-packet-errors-while-repairable): --packet-only reports only the
+# packet-error ids (PACKET_IDS) over every listed manifest of the last entry, or, with --pending
+# <file>, of the pending entry in the file checked as if appended (a missing, empty or entry-less
+# note is one whose only entry is the pending one). The review about to launch counts as the
+# following review (repair-missing) and as a Review: line (adversarial-missing). An error on a
+# manifest a review launch of the task bound (role review, by scope path or scope id) is held
+# (`HELD <id>:`, held_packet_errors, exit 0) when its own frozen copies, the state when its review
+# launched, carry it: a live edges header error only when the frozen header raises the same defect
+# (the edges file and the matrix: when the manifest lacks them, unless a pending adversarial= names
+# the matrix); a row error only when every row it names is byte-identical at its row number in the
+# digest-matching repairs copy beside the latest bound manifest, and an error a missing row raises
+# only when the copy there of the repairs file in force at that manifest's latest launch (by every
+# row binding it; the latest repairs= recorded before it, else the repairs file the manifest lists, a
+# pending repairs= never being in force at a launch, else the current one), read as at that launch,
+# lacks the row too (a mission with no repairs= token froze none; a copy row naming a manifest whose
+# withdrawal was recorded before that launch answers nothing; a finding counts only if its review first
+# launched on its manifest before the manifest's latest launch by another session, since a resume of
+# that review launches no review; a pair only if no manifest between them was withdrawn later); none
+# on a manifest edited or deleted after its launch. An
+# error naming no manifest, an unbound manifest or a new row, or raised only by a pending token, sets
+# the exit (`FAIL <id>:`, packet_errors). --pending also exits 1 with
+# `PENDING <line|slug|digest>: <detail>` (no id) for a missing Task:/Mission:/Analysis:/State: line,
+# an Analysis: grammar or recency failure, a Review: file slug the State: omits, and (also without
+# --pending) a live edges, repairs or matrix file differing from the unbound last manifest's digest;
+# the matrix rules also read the last manifest's frozen header prds. `OK packet <ts>` otherwise.
+# withdrawn= (inherited when omitted) drops an unbound manifest from every check, voids the repairs
+# rows naming it and is listed under mission.withdrawn {path, scope_id, reason, voided_rows}, the
+# reason recomputed by a packet-only pass over the entry that first withdrew it; a bound manifest is
+# mission-withdrawn-bound and stays. No withdrawn= and no --packet-only: output unchanged.
 #
 # Env seams: SKILL_ROUTING_DECISIONS (default decisions path, as fable-launch.sh),
 #   ANALYSIS_WIKI_DIR (gated wiki root for reused pages; default ~/Notes/wiki, whose
@@ -160,7 +193,8 @@ class Exit2(Exception):
 
 def usage(msg):
     raise Exit2(msg + " (usage: dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] "
-                "[--json] [--prd-dir <dir>] [--decisions <path>] | --matrix <path> --states "
+                "[--json] [--prd-dir <dir>] [--decisions <path>] | <dream-log.md> --last --packet-only "
+                "[--pending <file>] [--json] [--prd-dir <dir>] [--decisions <path>] | --matrix <path> --states "
                 "<slug=value ...> [--json] | --scope-id <manifest> | --edges <path> [--prds <PRD basename ...>] [--json] "
                 "| --selftest)")
 
@@ -272,13 +306,14 @@ EDGE_FIELDS = ("producer", "consumer", "command", "trigger", "authority", "effec
 EDGE_STATUS = ("known", "external", "unknown")
 REQUIRED_BY_STATUS = {"known": EDGE_FIELDS, "external": EDGE_FIELDS, "unknown": ()}
 MISSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
-MISSION_KEYS = ("edges", "scope", "repairs")
+MISSION_KEYS = ("edges", "scope", "repairs", "withdrawn")    # withdrawn=: PRD-dream-packet-errors-while-repairable R2
+LIST_KEYS = ("scope", "withdrawn")
 EDGE_KEYS = ("id", "status", "producer", "consumer")
 
 
 def parse_mission_line(line):
-    """R1 grammar of one `Mission: <name> edges=<p> [scope=<p>[,<p>...]] [repairs=<p>]` line:
-    (name or None, {key: value; scope a list}, [(token, why)])."""
+    """R1 grammar of one `Mission: <name> edges=<p> [scope=<p>[,<p>...]] [repairs=<p>]
+    [withdrawn=<p>[,<p>...]]` line: (name or None, {key: value; scope and withdrawn lists}, [(token, why)])."""
     toks = line[len("Mission:"):].split()
     probs, keys, name = [], {}, None
     if not toks:
@@ -301,10 +336,10 @@ def parse_mission_line(line):
             probs.append((t, f"a second {k}= token"))
         elif not v:
             probs.append((t, "empty value"))
-        elif k == "scope":
+        elif k in LIST_KEYS:
             items = v.split(",")
             if not all(items):
-                probs.append((t, "an empty scope= item"))
+                probs.append((t, f"an empty {k}= item"))
             else:
                 keys[k] = items
         else:
@@ -388,6 +423,28 @@ def read_edges(path, shown, name=None):
             bad(1, "single_component", "not a non-empty reason string")
         elif len(prds) != 1:
             bad(1, "single_component", f"beside {len(prds)} prds members (admitted with one)")
+    # PRD-dream-matrix-per-manifest R1: the optional `matrix`, the basename of the adversarial
+    # matrix current at this freeze; never a PRD, packet, edges-file or contract basename
+    mxv = None
+    if "matrix" in h:
+        mx = h["matrix"]
+        others = [("prds", set(prds)), ("packet", set(y for y in pk if isinstance(y, str)) if isinstance(pk, list) else set()),
+                  ("edges file", {os.path.basename(path)}),
+                  ("external contract", {os.path.basename(y) for x in ext if isinstance(x, dict)
+                                         for y in (x.get("contract") if isinstance(x.get("contract"), list) else [x.get("contract")])
+                                         if isinstance(y, str)})]
+        if not isinstance(mx, str) or not mx.strip():
+            bad(1, "matrix", "not a non-empty basename string")
+        elif "/" in mx or mx != mx.strip() or mx in (".", ".."):
+            bad(1, "matrix", f"'{mx}' is a path, not a basename")
+        elif not mx.endswith(".md"):
+            bad(1, "matrix", f"'{mx}' is not a basename ending .md")
+        elif any(mx in v for _, v in others):
+            kind = next(k for k, v in others if mx in v)
+            bad(1, "matrix", f"'{mx}' is the basename of {'an' if kind[0] in 'aeiou' else 'a'} {kind} member of this "
+                             "header (a PRD or the vision cannot stand in for the matrix)")
+        else:
+            mxv = mx
     prset, exts = set(prds), set(names)
     edges, seen, nlines = [], set(), 0
     for n, ln in enumerate(lines[1:], 2):
@@ -441,7 +498,8 @@ def read_edges(path, shown, name=None):
     if not nlines:
         probs.append(("mission-edges-missing", f"{shown}: no edge line after the header"))
     hd = {"mission": m, "prds": prds, "external": ext, "external_names": names,
-          "packet": pk if isinstance(pk, list) else [], "single_component": sc if nonempty(sc) else None}
+          "packet": pk if isinstance(pk, list) else [], "single_component": sc if nonempty(sc) else None,
+          "matrix": mxv}
     return hd, edges, probs
 
 
@@ -478,6 +536,37 @@ def entry_state_slugs(e):
     return out
 
 
+def entry_matrix(e):
+    """The matrix path of one log entry's last Analysis: line (None for skipped: or no line)."""
+    a = None
+    for ln in e["lines"]:
+        if ln.startswith("Analysis:"):
+            a = ln
+    if a is None:
+        return None
+    v = parse_analysis(a)[0]["adversarial"]
+    return v[1] if v and v[0] == "matrix" else None
+
+
+def manifest_matrix(m, mrec, adv, states, resolve):
+    """PRD-dream-matrix-per-manifest R2: (matrix basename or None, the rule that named it, the State
+    slugs of the entry that first lists the manifest in scope=). The frozen header's `matrix`, else
+    the adversarial= matrix of that entry when it names one, else of the next entry of the mission
+    that does (the linted entry last), else none."""
+    seq = [((x["eff"].get("scope") or ([], None))[0], x.get("adv"), x["slugs"]) for x in mrec["earlier"]]
+    seq.append((mrec["scope"], adv[1] if adv and adv[0] == "matrix" else None, list(states)))
+    n = os.path.normpath(m["full"])
+    first = next((i for i, (sc, _, _) in enumerate(seq) if any(os.path.normpath(resolve(p)) == n for p in sc)), len(seq) - 1)
+    fh = m["frozen"]
+    if fh and fh.get("matrix"):
+        return fh["matrix"], "matrix named by the frozen edges header", seq[first][2], False
+    src = next((i for i, (_, a, _) in enumerate(seq) if i >= first and a), None)
+    mx = seq[src][1] if src is not None else None
+    # the fourth value: the name comes from the linted entry's own adversarial= (a pending token in --pending)
+    return ((os.path.basename(mx) if mx else None), "matrix named by adversarial= (the header names none)", seq[first][2],
+            src == len(seq) - 1)
+
+
 def frozen_edges_copy(manifest_full, edges_base):
     """The edges copy frozen beside a manifest: (copy path, {basename: digest} or None, error
     detail or None). The manifest's line whose basename is edges_base names a copy in the
@@ -500,11 +589,18 @@ def frozen_edges_copy(manifest_full, edges_base):
     return copy, digests, None
 
 
-def mission_record(L, entries, ei, task, states, resolve):
+def mission_record(L, entries, ei, task, states, resolve, opts=None):
     """Edge-map R1-R5 for entry ei: the Mission: line, its inheritance and continuity across
     same-Task entries, the edges file and the State slugs. Returns None when neither this
     entry nor an earlier same-Task entry carries the line, else a dict (`line` False when only
-    the continuity rule applied)."""
+    the continuity rule applied). opts (PRD-dream-packet-errors-while-repairable): `wbound`, a
+    function naming the review launch that binds a manifest path ((session, why) or None; absent
+    on a host with no decisions log), and `passA`, the normalized path of a withdrawn manifest
+    whose reason is being recomputed (scope= cut after it, it is not withdrawn)."""
+    opts = opts or {}
+
+    def norm(p):
+        return os.path.normpath(resolve(p))
     entry = entries[ei]
     mls = [ln.rstrip() for ln in entry["lines"] if ln.startswith("Mission:")]
     earlier = []
@@ -521,15 +617,47 @@ def mission_record(L, entries, ei, task, states, resolve):
             for k, v in toks.items():
                 eff[k] = (v, e["ts"])
             prev = eff
-            earlier.append({"ts": e["ts"], "name": nm, "eff": eff, "slugs": entry_state_slugs(e)})
+            earlier.append({"ts": e["ts"], "name": nm, "eff": eff, "slugs": entry_state_slugs(e), "adv": entry_matrix(e)})
     if not mls and not earlier:
         return None
+    # packet-errors R2/R3: the effective withdrawn= list (this line's, else inherited), a bound
+    # manifest refused (never applied), a present list that drops an inherited path refused; the
+    # applied set is skipped by the continuity pass, scope=, repairs pairing and binding
+    wtok = parse_mission_line(mls[0])[1].get("withdrawn") if len(mls) == 1 else None
+    winh = earlier[-1]["eff"].get("withdrawn") if earlier else None
+    winh_l, winh_ts = (winh[0], winh[1]) if winh else ([], None)
+    present = {norm(p) for p in wtok or []}
+    wlist = list(dict.fromkeys(list(wtok or []) + [p for p in winh_l if norm(p) not in present]))
+    if wtok is not None:
+        for p in winh_l:
+            if norm(p) not in present:
+                L.fail("mission-scope-mismatch", f"token 'withdrawn={','.join(wtok)}': drops {p}, inherited from entry "
+                                                 f"{winh_ts} (a present withdrawn= carries every inherited path)",
+                       man=[p], pend=True)
+    wapplied = []
+    for p in wlist:
+        if opts.get("passA") and norm(p) == opts["passA"]:
+            continue
+        hit = opts["wbound"](p) if opts.get("wbound") else None
+        if hit:
+            L.fail("mission-withdrawn-bound", f"withdrawn={p}: manifest {p} is bound to a review (session {hit[0]}"
+                                              + (f"; {hit[1]}" if hit[1] else "") + "); a manifest is withdrawable only "
+                                              "while no review launch has touched it", man=[p], pend=True)
+        else:
+            wapplied.append(p)
+    wset = {norm(p) for p in wapplied}
+    # packet-errors R1/S3: the timestamp of the entry that first recorded each applied withdrawal; a
+    # withdrawal only the pending entry carries has none
+    wsince = {}
+    for p in wapplied:
+        wsince[norm(p)] = next((x["ts"] for x in earlier if any(norm(q) == norm(p) for q in (x["eff"].get("withdrawn") or ([], None))[0])),
+                               None if opts.get("psem") else entry["ts"])
     reported = set()
 
-    def miss(detail, key):
+    def miss(detail, key, mp=None):
         if key not in reported:
             reported.add(key)
-            L.fail("mission-edges-missing", detail)
+            L.fail("mission-edges-missing", detail, man=[mp] if mp else None)
 
     # continuity set (R1): live headers + frozen copies of every earlier scope= manifest + earlier State slugs
     cont, by_name = set(), {}
@@ -546,14 +674,16 @@ def mission_record(L, entries, ei, task, states, resolve):
                         miss(d, resolve(ep[0]))
         base = os.path.basename(ep[0]) if ep else None
         for mp in (x["eff"].get("scope") or ([], None))[0]:
+            if norm(mp) in wset:
+                continue
             mfull = resolve(mp)
             copy, _, err = frozen_edges_copy(mfull, base)
             if err:
-                miss(f"{copy}: {err} (continuity of entry {x['ts']})", copy)
+                miss(f"{copy}: {err} (continuity of entry {x['ts']})", copy, mp)
                 continue
             hd, _, _ = read_edges(copy, copy)
             if hd is None:
-                miss(f"{copy}: the frozen edges copy has no header (continuity of entry {x['ts']})", copy)
+                miss(f"{copy}: the frozen edges copy has no header (continuity of entry {x['ts']})", copy, mp)
                 continue
             cont |= set(hd["prds"])
         cont |= {f"PRD-{s}.md" for s in x["slugs"]}
@@ -564,7 +694,8 @@ def mission_record(L, entries, ei, task, states, resolve):
     last = earlier[-1] if earlier else None
     members = [s for s in states if f"PRD-{s}.md" in cont]
     rec = {"line": bool(mls), "name": None, "edges": None, "scope": [], "repairs": None, "inherited_from": None,
-           "header": None, "edge_list": [], "earlier": earlier, "cont": cont}
+           "header": None, "edge_list": [], "earlier": earlier, "cont": cont,
+           "withdrawn": wapplied if wlist else None, "wset": wset, "wsince": wsince, "dropset": set(), "opts": opts}
     if not mls:
         if members:
             L.fail("mission-grammar", f"entry {last['ts']} carries 'Mission: {last['name']}'; this entry's State: names "
@@ -599,6 +730,21 @@ def mission_record(L, entries, ei, task, states, resolve):
                                       "extends the list, never shortens or reorders it")
     rec["inherited_from"] = max(src, key=lambda t: [x["ts"] for x in earlier].index(t)) if src else None
     rec["edges"], rec["scope"], rec["repairs"] = eff.get("edges"), eff.get("scope") or [], eff.get("repairs")
+    if opts.get("passA"):           # the reason pass: scope= as it stood when the withdrawn manifest was last
+        cut = next((i for i, p in enumerate(rec["scope"]) if norm(p) == opts["passA"]), None)
+        if cut is not None:
+            rec["dropset"] = {norm(p) for p in rec["scope"][cut + 1:]} - {opts["passA"]}
+            rec["scope"] = rec["scope"][:cut + 1]
+            wapplied = [p for p in wapplied if any(norm(p) == norm(x) for x in rec["scope"])]
+            rec["wset"] = wset = {norm(p) for p in wapplied}
+            rec["withdrawn"] = wapplied if wlist else None
+    for p in wapplied:              # packet-errors R2: an applied path is listed once in scope=
+        n_ = sum(1 for x in rec["scope"] if norm(x) == norm(p))
+        if n_ == 0:
+            L.fail("mission-scope-mismatch", f"token 'withdrawn=': {p} is not a listed scope= manifest", man=[p], pend=True)
+        elif n_ > 1:
+            L.fail("mission-scope-mismatch", f"scope=: {p} is listed again after its withdrawal (a second occurrence "
+                                             "of a withdrawn path)", man=[p], pend=True)
     if not rec["edges"]:
         L.fail("mission-grammar", "token 'edges=': absent and none inherited from an earlier same-Task entry")
         return rec
@@ -624,7 +770,8 @@ def mission_json(rec):
     return {"name": rec["name"], "edges_file": rec["edges"], "scope": list(rec["scope"]), "repairs": rec["repairs"],
             "inherited_from": rec["inherited_from"], "single_component": hd["single_component"] if hd else None,
             "prds": len(hd["prds"]) if hd else 0, "edges": edge_counts(edges),
-            "unknown_edges": [e["id"] for e in edges if e["status"] == "unknown"]}
+            "unknown_edges": [e["id"] for e in edges if e["status"] == "unknown"],
+            **({"withdrawn": rec["wrecs"]} if rec.get("wrecs") is not None else {})}
 
 
 def edges_mode(a):
@@ -662,7 +809,14 @@ MISSION_IDS = ("mission-grammar", "mission-edges-missing", "edge-grammar", "edge
                "edge-unknown-unowned", "edge-node-unlisted", "mission-prd-unlisted",
                "mission-scope-mismatch", "mission-scope-incomplete", "mission-review-missing",
                "mission-verdict-missing", "mission-finding-incomplete", "mission-snapshot-stale",
-               "mission-approval-blocked")
+               "mission-approval-blocked", "mission-withdrawn-bound")
+# PRD-dream-packet-errors-while-repairable R1: the ids --packet-only reports
+PACKET_IDS = ("mission-grammar", "mission-edges-missing", "mission-scope-mismatch", "mission-scope-incomplete",
+              "mission-withdrawn-bound", "edge-grammar", "edge-unexplained", "edge-unknown-unowned", "edge-node-unlisted",
+              "mission-prd-unlisted", "repair-grammar", "mission-repairs-missing", "repair-duplicate", "repair-missing",
+              "repair-class-mismatch", "sweep-missing", "repair-author-mismatch", "repair-hash-mismatch",
+              "repair-scope-mismatch", "adversarial-missing", "adversarial-slug-missing", "adversarial-family-missing",
+              "adversarial-case-missing")
 
 
 def launch_ts(row):
@@ -711,16 +865,29 @@ def mission_scopes(L, mrec, resolve):
     """R1 canonicalization of every listed manifest: [{path, full, id, digests}] (id None when
     unreadable or malformed, reported mission-scope-mismatch)."""
     mans = []
+    wset = mrec.get("wset") or set()
     for p in mrec["scope"]:
         full = resolve(p)
+        if os.path.normpath(full) in wset:      # packet-errors R2: a withdrawn manifest is out of every check
+            continue
         try:
             sid, digests = scope_canon(full)
         except ScopeError as e:
-            L.fail("mission-scope-mismatch", f"manifest {p}: {e}")
+            L.fail("mission-scope-mismatch", f"manifest {p}: {e}", man=[p])
             sid, digests = None, {}
         mans.append({"path": p, "full": full, "id": sid,
                      "names": {k.decode("utf-8", "backslashreplace"): v for k, v in digests.items()},
                      "frozen": None, "frozen_edges": []})
+    for w in mrec.get("withdrawn") or []:       # a replacement with the withdrawn manifest's scope id
+        try:
+            wid = scope_canon(resolve(w))[0]
+        except ScopeError:
+            continue
+        for m in mans:
+            if m["id"] == wid:
+                L.fail("mission-scope-mismatch", f"manifest {m['path']}: canonicalizes to {wid}, the scope id of withdrawn "
+                                                 f"manifest {w} (binding is keyed by scope id; a defective packet is not "
+                                                 "replaced by itself)", man=[m["path"], w], pend=True)
     return mans
 
 
@@ -785,26 +952,45 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
     last = len(mans) - 1
     seen = set()
 
-    def once(fid, detail):
+    psem = bool((mrec.get("opts") or {}).get("psem"))
+
+    def once(fid, detail, **kw):
         if detail not in seen:
             seen.add(detail)
-            L.fail(fid, detail)
+            L.fail(fid, detail, **kw)
 
     # R1 per manifest: its frozen edges copy, completeness against that header (the last also
     # against the live header) and contract basenames
     for k, m in enumerate(mans):
         if m["id"] is None:
             continue
+        mp = [m["path"]]
         copy, _, err = frozen_edges_copy(m["full"], eb)
         if err:
-            once("mission-scope-mismatch", f"manifest {m['path']}: {err}")
+            once("mission-scope-mismatch", f"manifest {m['path']}: {err}", man=mp)
         else:
-            fh, fe, _ = read_edges(copy, copy)
+            fh, fe, fpr = read_edges(copy, copy)
             if fh is None:
-                once("mission-scope-mismatch", f"manifest {m['path']}: frozen edges copy {copy} has no header")
+                once("mission-scope-mismatch", f"manifest {m['path']}: frozen edges copy {copy} has no header", man=mp)
+            for fid, d in fpr:      # matrix-per-manifest R1 on a frozen header (its other fields stay unread here)
+                if fid == "edge-grammar" and ": field matrix: " in d:
+                    once("edge-grammar", f"manifest {m['path']}: {d}", man=mp)
             m["frozen"], m["frozen_edges"] = fh, fe
+        mxm, mxl, mslugs, mxp = manifest_matrix(m, mrec, adv, states, resolve)
+        m["matrix"] = mxm
         heads = ([("frozen", m["frozen"])] if m["frozen"] else []) + ([("live", hd)] if k == last and hd else [])
-        for label, h in heads:
+        # packet-errors R1: the defects the manifest's frozen evaluation carries (its state when its review
+        # launched): those its frozen header raises, and the needs no header supplies (the edges file, and
+        # the matrix unless the pending entry's own adversarial= names it, S3: the pending clause is read
+        # first, so such a frozen line records no key). A live-header error is held only when it states
+        # one of them.
+        carried = {("need", eb)} | ({("need", mxm)} if not (psem and mxp) else set())
+
+        def fresh(label, key):          # True: a live-header defect the frozen evaluation lacks (sets the exit)
+            if label == "frozen":
+                carried.add(key)
+            return label == "live" and key not in carried
+        for hi, (label, h) in enumerate(heads):
             cons = header_contracts(h)
             byb = {}
             for nm, cp in cons:
@@ -812,16 +998,49 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
             for b, cps in byb.items():
                 if len(set(cps)) > 1:
                     once("mission-scope-mismatch", f"manifest {m['path']}: {label} edges header: contract paths "
-                                                   f"{' and '.join(sorted(set(cps)))} share the basename {b}")
+                                                   f"{' and '.join(sorted(set(cps)))} share the basename {b}",
+                         man=mp, pend=fresh(label, ("dup", b)))
                 if b in h["prds"] or b in h["packet"]:
                     once("mission-scope-mismatch", f"manifest {m['path']}: {label} edges header: contract path "
-                                                   f"{cps[0]} and the member {b} share the basename {b}")
+                                                   f"{cps[0]} and the member {b} share the basename {b}",
+                         man=mp, pend=fresh(label, ("clash", b)))
             need = [(b, "prds member") for b in h["prds"]] + [(b, "packet member") for b in h["packet"]]
-            need += ([(mxb, "matrix")] if mxb else []) + ([(eb, "edges file")] if eb else [])
+            need += ([(mxm, None)] if mxm and hi == 0 else []) + ([(eb, "edges file")] if eb else [])
             need += [(os.path.basename(cp), f"external {nm} contract copy") for nm, cp in cons]
             for b, kind in need:
                 if b not in m["names"]:
-                    once("mission-scope-incomplete", f"manifest {m['path']}: lists no {b} ({kind} of the {label} edges header)")
+                    once("mission-scope-incomplete", f"manifest {m['path']}: lists no {b} ({mxl})" if kind is None else
+                         f"manifest {m['path']}: lists no {b} ({kind} of the {label} edges header)",
+                         man=mp, pend=(psem and kind is None and mxp) or fresh(label, ("need", b)))
+        # matrix-per-manifest R3: the last manifest's frozen header, and the live header, name the
+        # note's adversarial= matrix
+        for label, h in (heads if k == last else []):
+            if h.get("matrix") and h["matrix"] != mxb:
+                where = f"manifest {m['path']}: frozen edges header" if label == "frozen" else f"{mrec['edges']}: live edges header"
+                once("mission-scope-mismatch", f"{where} names matrix {h['matrix']}; the note's adversarial= names "
+                                               f"{mxb or 'no matrix (adversarial=skipped:)'}",
+                     man=mp if label == "frozen" else None, pend=psem)
+        # matrix-per-manifest R5b: the matrix a header names is the copy beside the manifest, at its
+        # listed digest, and passes the matrix grammar for the first-listing entry's State slugs
+        # that are prds members of this header (a legacy header keeps the basename-only check)
+        fhd = m["frozen"]
+        if fhd and fhd.get("matrix") and mxm in m["names"]:
+            cp = os.path.join(os.path.dirname(m["full"]), mxm)
+            got = file_sha(cp)
+            if got is None:
+                once("adversarial-missing", f"manifest {m['path']}: matrix copy {cp} absent or unreadable "
+                                            f"(the frozen edges header names {mxm})", man=mp)
+            elif got != m["names"][mxm]:
+                once("adversarial-missing", f"manifest {m['path']}: matrix copy {cp} sha256 {got[:12]} differs from "
+                                            f"the manifest's {m['names'][mxm][:12]}", man=mp)
+            else:
+                sub = Lint()
+                sl = [s for s in dict.fromkeys(mslugs) if f"PRD-{s}.md" in fhd["prds"]]
+                # packet-errors R1 (--pending): the last manifest's review gives every header prds member a verdict
+                hx = [b[len("PRD-"):-len(".md")] for b in fhd["prds"]] if psem and k == last else []
+                lint_matrix(sub, cp, cp, sl, extra=[s for s in hx if s not in sl])
+                for fid, d in sub.findings:
+                    once(fid, f"manifest {m['path']}: {d}", man=mp)
     ids = [m["id"] for m in mans]
     # R2: binding, line order against manifest index, launch order within one index
     if not chain and governed and task is not None:
@@ -1102,6 +1321,19 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
     # R1/R2: a finding is a non-advisory sidecar row naming an id, its issuing review the first
     # sidecar holding the id (chain-review R4 refuses a re-use, and a malformed row on its own)
     need = [(p, f) for p, c in enumerate(chain) if p + 1 < len(chain) for f in c["named"]]
+    opts = mrec.get("opts") or {}
+    pkt = bool(opts.get("pkt"))
+    # packet-errors R1: the review about to launch follows the latest listed review (checked beside need,
+    # never changing which path the full lint takes)
+    ext = [(len(chain) - 1, f) for f in chain[-1]["named"]] if pkt and chain and mans else []
+
+    def fol_of(p):
+        """(detail suffix, the manifest the following review reads) for a finding of chain[p]."""
+        if p + 1 < len(chain):
+            return None, mans[chain[p + 1]["idx"]]["path"]
+        return f"the review about to launch on {mans[-1]['path']} follows it", mans[-1]["path"]
+    wset, dropset, voided = mrec.get("wset") or set(), mrec.get("dropset") or set(), {}
+    mrec["voided"] = voided
 
     def moved():
         for k in range(len(mans) - 1):
@@ -1110,14 +1342,19 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                 if any(n in b["names"] and b["names"][n] != dg for n, dg in a["names"].items() if n != rbase):
                     return True
         return False
+    def no_token(pairs):
+        for p, f in pairs:
+            sfx, fm = fol_of(p)
+            L.fail("repair-missing", f"finding {f['id']} of {chain[p]['rv']['file']}: no repairs= token on the "
+                                     "Mission: line (carried or inherited)" + (f" ({sfx})" if sfx else ""), man=[fm],
+                   absent=("finding", f["id"], chain[p]["row"]))
     if not tok and not need and not moved():
+        no_token(ext)
         return None
     out = {"file": tok, "rows": 0, "repaired": 0, "declined": [], "amended": [], "pending_after": False,
            "changed": [], "swept_edges": 0, "edges_added": [], "edges_removed": []}
     if not tok and need:                 # R2 (r4 F27): the check never waits for the token
-        for p, f in need:
-            L.fail("repair-missing", f"finding {f['id']} of {chain[p]['rv']['file']}: no repairs= token on the "
-                                     "Mission: line (carried or inherited)")
+        no_token(need + ext)
         return out
     issuer = {f["id"]: p for p, c in enumerate(chain) for f in c["named"]}
     fobj = {f["id"]: f for c in chain for f in c["named"]}
@@ -1148,12 +1385,19 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             except ValueError:
                 r = None
             if not isinstance(r, dict):
-                L.fail("repair-grammar", f"{tok}: row {n}: not a JSON object")
+                L.fail("repair-grammar", f"{tok}: row {n}: not a JSON object", rows=[n])
+                continue
+            ends = [os.path.normpath(resolve(r[k])) for k in ("before", "after") if isinstance(r.get(k), str) and r[k].strip()]
+            if any(e in dropset for e in ends):     # the reason pass: a row of a later manifest did not exist yet
+                continue
+            if any(e in wset for e in ends):        # packet-errors R2: a row naming a withdrawn manifest is void
+                for e in dict.fromkeys(x for x in ends if x in wset):
+                    voided.setdefault(e, []).append(n)
                 continue
             ok = True
 
             def bad(field, why, n=n):
-                L.fail("repair-grammar", f"{tok}: row {n}: field {field}: {why}")
+                L.fail("repair-grammar", f"{tok}: row {n}: field {field}: {why}", rows=[n])
             for k in REPAIR_FIELDS:
                 if k not in r:
                     bad(k, "missing")
@@ -1198,11 +1442,12 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                     allowed |= {os.path.basename(cp) for nm, cp in (header_contracts(hd) if hd else []) if nm in names}
                     if not ch:
                         L.fail("repair-grammar", f"{tok}: row {n}: finding {fid}: changed is empty on a repaired {cls} "
-                                                 "row (a repair that changes no bytes is declined with a reason)")
+                                                 "row (a repair that changes no bytes is declined with a reason)", rows=[n])
                         ok = False
                     elif not set(ch) & allowed:
                         L.fail("repair-grammar", f"{tok}: row {n}: finding {fid}: changed names none of "
-                                                 f"{', '.join(sorted(allowed))} (the PRDs and contract the finding names)")
+                                                 f"{', '.join(sorted(allowed))} (the PRDs and contract the finding names)",
+                               rows=[n])
                         ok = False
             recs.append({"n": n, "r": r, "ok": ok, "fid": fid if isinstance(fid, str) else None, "disp": disp,
                          "bi": man_index(r.get("before")), "ai": man_index(r.get("after")),
@@ -1219,14 +1464,14 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         seq = [x["disp"] for x in xs]
         if seq not in (["repaired"], ["declined"], ["declined", "repaired"]):
             L.fail("repair-duplicate", f"finding {fid}: rows {', '.join(str(x['n']) for x in xs)} ({', '.join(seq)}); "
-                                       "one row, or one declined row followed by one repaired row")
+                                       "one row, or one declined row followed by one repaired row", rows=[x["n"] for x in xs])
     ams = [x for x in recs if x["disp"] == "amended"]
     for i, x in enumerate(ams):
         for y in ams[i + 1:]:
             if (x["r"].get("before"), x["r"].get("after")) == (y["r"].get("before"), y["r"].get("after")):
                 for b in sorted(set(x["changed"]) & set(y["changed"])):
                     L.fail("repair-duplicate", f"amended rows {x['n']} and {y['n']} of ({x['r'].get('before')}, "
-                                               f"{x['r'].get('after')}) both name {b}")
+                                               f"{x['r'].get('after')}) both name {b}", rows=[x["n"], y["n"]])
     sup = {fid for fid, xs in byf.items() if [x["disp"] for x in xs] == ["declined", "repaired"]}
     # R1: the repairs file is listed in every manifest later than any row's before
     bis = [x["bi"] for x in recs if x["bi"] is not None]
@@ -1234,13 +1479,18 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         for k in range(min(bis) + 1, len(mans)):
             if mans[k]["id"] is not None and rbase not in mans[k]["names"]:
                 L.fail("mission-scope-incomplete", f"manifest {mans[k]['path']}: lists no {rbase} (the repairs file; "
-                                                   f"a row's before is {mans[min(bis)]['path']})")
+                                                   f"a row's before is {mans[min(bis)]['path']})",
+                       man=[mans[k]["path"]], rows=[x["n"] for x in recs if x["bi"] is not None and x["bi"] < k])
     # R2: rows required, declines accepted
     named = {x["fid"] for x in recs if x["fid"] is not None}     # a malformed row still names its finding
-    for p, f in need:
+    if not tok:
+        no_token([(p, f) for p, f in ext if f["id"] not in named])
+    for p, f in need + (ext if tok else []):
         if f["id"] not in named:
+            sfx, fm = fol_of(p)
             L.fail("repair-missing", f"finding {f['id']} of {chain[p]['rv']['file']}: no row in {tok} "
-                                     f"(its following review {chain[p + 1]['rv']['file']} exists)")
+                                     + (f"({sfx})" if sfx else f"(its following review {chain[p + 1]['rv']['file']} exists)"),
+                   man=[fm], absent=("finding", f["id"], chain[p]["row"]))
     accepted = {}
     for fid, xs in byf.items():
         if xs[0]["disp"] != "declined" or fid in sup or fid not in issuer:
@@ -1279,7 +1529,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                 canon[p] = e
         c = canon[p]
         if isinstance(c, ScopeError):
-            L.fail("repair-hash-mismatch", f"row {x['n']}: {field} {p}: {c}")
+            L.fail("repair-hash-mismatch", f"row {x['n']}: {field} {p}: {c}", rows=[x["n"]])
             return None
         return c[0], {k.decode("utf-8", "backslashreplace"): v for k, v in c[1].items()}
     added, removed, swept, aff_of = set(), set(), set(), {}
@@ -1289,7 +1539,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         a_s = r.get("author_session")      # each check reads only its own fields (refusals stay independent)
         if isinstance(a_s, str) and a_s.strip() and a_s not in admitted:
             L.fail("repair-author-mismatch", f"row {n}: author_session {a_s} is not an author of Task {task} "
-                                             f"(admitted: {', '.join(sorted(s for s in admitted if s)) or 'none'})")
+                                             f"(admitted: {', '.join(sorted(s for s in admitted if s)) or 'none'})", rows=[n])
         bi, ai = x["bi"], x["ai"]
         bcopy = mans[bi]["frozen_edges"] if bi is not None else []
         bhead = (mans[bi]["frozen"] if bi is not None else None) or hd
@@ -1301,7 +1551,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             f = fobj[fid]
             aff, cls = set(names_of(f)), r.get("class")
             if cls != f.get("class"):
-                L.fail("repair-class-mismatch", f"finding {fid}: row {n} class {cls}, the finding's {f.get('class')}")
+                L.fail("repair-class-mismatch", f"finding {fid}: row {n} class {cls}, the finding's {f.get('class')}", rows=[n])
         else:
             aff, cls = None, None
         if aff is not None and cls != "provenance" and bi is not None:
@@ -1309,7 +1559,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             miss = [e for e in want if e not in x["sweep"]]
             if miss:
                 L.fail("sweep-missing", f"{'finding ' + fid if fid else 'amended row'} (row {n}): sweep lacks "
-                                        f"{', '.join(miss)} (incident to {', '.join(sorted(aff))})")
+                                        f"{', '.join(miss)} (incident to {', '.join(sorted(aff))})", rows=[n])
         if bi is not None and ai is not None:
             ea = {e["id"] for e in mans[ai]["frozen_edges"]}
             eb_ = {e["id"] for e in bcopy}
@@ -1328,32 +1578,42 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             anchor, fol = None, None
         cb, ca = canon_of(x, "before"), canon_of(x, "after")
         if bi is None:
-            L.fail("repair-scope-mismatch", f"row {n}: before {r['before']} is not a listed scope= manifest")
+            L.fail("repair-scope-mismatch", f"row {n}: before {r['before']} is not a listed scope= manifest", rows=[n])
         elif anchor is not None and cb is not None:
             iss = chain[anchor]
             okids = ([ids[c["idx"]] for c in chain[anchor + 1:]] if x["disp"] == "repaired" and fid in sup
                      else [ids[iss["idx"]]])
             if cb[0] not in okids:
                 L.fail("repair-scope-mismatch", f"row {n} (finding {fid}): before {r['before']} canonicalizes to {cb[0]}; "
-                                                f"the issuing review {iss['rv']['file']} is bound to {ids[iss['idx']]}")
+                                                f"the issuing review {iss['rv']['file']} is bound to {ids[iss['idx']]}", rows=[n])
         same_ok = x["disp"] == "declined" and ai is not None and ai == bi and fol is not None and fol["idx"] == ai
         if bi is not None and (ai is None or not (ai == bi + 1 or same_ok)):
             L.fail("repair-scope-mismatch", f"row {n}: after {r['after']} is not the listed scope= manifest following "
-                                            f"before {r['before']}")
+                                            f"before {r['before']}", rows=[n])
         elif fol is None:
             out["pending_after"] = True
         elif ai is not None and fol["idx"] < ai:
             L.fail("repair-scope-mismatch", f"row {n}: its following review {fol['rv']['file']} is bound to "
-                                            f"{ids[fol['idx']]}, earlier than after {r['after']} ({ids[ai]})")
+                                            f"{ids[fol['idx']]}, earlier than after {r['after']} ({ids[ai]})", rows=[n])
         if cb is not None and ca is not None and not (same_ok and not x["changed"]):
+            mxo = mans[bi].get("matrix") if bi is not None else None
+            mxn = mans[ai].get("matrix") if ai is not None else None
             for b in x["changed"]:
+                if mxo != mxn and b in (mxo, mxn):     # matrix-per-manifest R4: old against before, new against after
+                    if b == mxo and b not in cb[1]:
+                        L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from before {r['before']}",
+                               rows=[n])
+                    elif b == mxn and b not in ca[1]:
+                        L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from after {r['after']}",
+                               rows=[n])
+                    continue
                 if b not in cb[1]:
-                    L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from before {r['before']}")
+                    L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from before {r['before']}", rows=[n])
                 elif b not in ca[1]:
-                    L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from after {r['after']}")
+                    L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from after {r['after']}", rows=[n])
                 elif cb[1][b] == ca[1][b]:
                     L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, digests equal in {r['before']} "
-                                                   f"and {r['after']}")
+                                                   f"and {r['after']}", rows=[n])
         # R6: affected consumers in a later review's manifest (once the following review exists)
         cons = [(b, e["consumer"], e["id"]) for b in x["changed"] for e in bcopy
                 if e["producer"] == b and e["consumer"] in bprds]
@@ -1396,14 +1656,17 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         for x in recs:
             if x["bi"] == k and x["ai"] == k + 1:
                 decl |= set(x["changed"])
+        mxr = {a.get("matrix"), b.get("matrix")} - {None} if a.get("matrix") != b.get("matrix") else set()
         for nm in sorted(set(a["names"]) & set(b["names"])):
-            if nm != rbase and a["names"][nm] != b["names"][nm] and nm not in decl:
-                L.fail("repair-hash-mismatch", f"{nm}: changed but undeclared between {a['path']} and {b['path']}")
+            if nm != rbase and nm not in mxr and a["names"][nm] != b["names"][nm] and nm not in decl:
+                L.fail("repair-hash-mismatch", f"{nm}: changed but undeclared between {a['path']} and {b['path']}",
+                       man=[a["path"], b["path"]], absent=("pair", a["path"], b["path"], nm))
         # the repairs file is exempt only for a pair whose rows it holds (writing them is what moves it)
         if rbase in a["names"] and rbase in b["names"] and a["names"][rbase] != b["names"][rbase] \
                 and not any(x["bi"] == k and x["ai"] == k + 1 for x in recs):
             L.fail("repair-hash-mismatch", f"{rbase}: changed but undeclared between {a['path']} and {b['path']} "
-                                           "(no row names this pair; the repairs file is exempt only for a pair whose rows it holds)")
+                                           "(no row names this pair; the repairs file is exempt only for a pair whose rows it holds)",
+                   man=[a["path"], b["path"]], absent=("pair", a["path"], b["path"], None))
     # R7: holds, released by the mission's final APPROVE (repaired, amended) or by acceptance (declined)
     pos = {id(c): p for p, c in enumerate(chain)}
 
@@ -1480,9 +1743,14 @@ def parse_iso(s):
 class Lint:
     def __init__(self):
         self.findings = []   # (id, detail)
+        self.meta = []       # per finding: the manifests and repairs rows it names, whether it sets the
+                             # exit whatever binds (a pending token or a defect no frozen copy carries
+                             # introduced it), and the repairs row whose absence raised it (read by
+                             # --packet-only; output never shows it)
 
-    def fail(self, fid, detail):
+    def fail(self, fid, detail, man=None, rows=None, pend=False, absent=None):
         self.findings.append((fid, detail))
+        self.meta.append({"man": list(man or []), "rows": list(rows or []), "pend": bool(pend), "absent": absent})
 
     def ids(self):
         out = []
@@ -1493,9 +1761,10 @@ class Lint:
 
 
 # ---------------------------------------------------------------- matrix (R10)
-def lint_matrix(L, path, shown, slugs):
+def lint_matrix(L, path, shown, slugs, extra=()):
     """Structural checks of the adversarial matrix. Returns the ## Uncovered count
-    (None when that section is absent or the file is missing)."""
+    (None when that section is absent or the file is missing). `extra`: header prds members
+    (slugs) the matrix also covers before a review launches (--packet-only --pending)."""
     if not os.path.isfile(path):
         L.fail("adversarial-missing", f"matrix file {shown} does not exist")
         return None
@@ -1534,6 +1803,10 @@ def lint_matrix(L, path, shown, slugs):
             L.fail("adversarial-slug-missing", f"{shown}: no '## PRD-{slug}' section for State slug {slug}")
             continue
         lint_section(L, shown, slug, sections[slug])
+    for slug in extra:      # R1 names the missing section only; a present section's tables are read at Phase 4
+        if slug not in sections:
+            L.fail("adversarial-slug-missing", f"{shown}: no '## PRD-{slug}' section for header prds member {slug} "
+                                               "(the review about to launch gives it a verdict)")
     if uncovered is None:
         L.fail("adversarial-missing", f"{shown}: no '## Uncovered' section")
         return None
@@ -1610,7 +1883,7 @@ def lint_section(L, shown, slug, body):
 def parse_args(argv):
     a = {"log": None, "mode": "last", "entry": None, "json": False, "prd_dir": None,
          "decisions": None, "matrix": None, "states": None, "selftest": False, "scope_id": None,
-         "edges": None, "prds": None}
+         "edges": None, "prds": None, "packet": False, "pending": None}
     i = 0
     while i < len(argv):
         x = argv[i]
@@ -1620,11 +1893,13 @@ def parse_args(argv):
             a["mode"] = "last"
         elif x == "--selftest":
             a["selftest"] = True
-        elif x in ("--entry", "--prd-dir", "--decisions", "--matrix", "--scope-id", "--edges"):
+        elif x == "--packet-only":
+            a["packet"] = True
+        elif x in ("--entry", "--prd-dir", "--decisions", "--matrix", "--scope-id", "--edges", "--pending"):
             if i + 1 >= len(argv):
                 usage(f"{x} needs a value")
             key = {"--entry": "entry", "--prd-dir": "prd_dir", "--decisions": "decisions", "--matrix": "matrix",
-                   "--scope-id": "scope_id", "--edges": "edges"}[x]
+                   "--scope-id": "scope_id", "--edges": "edges", "--pending": "pending"}[x]
             a[key] = argv[i + 1]
             if x == "--entry":
                 a["mode"] = "entry"
@@ -1758,14 +2033,37 @@ def lint_log(a):
     log = a["log"]
     if log is None:
         usage("no dream-log path given")
-    if not os.path.isfile(log) or not os.access(log, os.R_OK):
-        raise Exit2(f"log missing or unreadable: {log}")
-    text = read_text(log)
-    if not text.strip():
-        raise Exit2(f"log is empty: {log}")
-    entries = find_entries(text)
-    if not entries:
-        raise Exit2(f"no '## <ts>  /dream  vision-' entry in {log}")
+    pkt = bool(a.get("packet") or a.get("_passA"))     # PRD-dream-packet-errors-while-repairable
+    psem = a.get("pending") is not None or bool(a.get("_passA"))
+    if a.get("pending") is not None:
+        # R1: the pending entry is checked as if appended; a missing, empty or entry-less note is a
+        # note whose only entry is the pending one, a path that exists but cannot be read exits 2
+        if not os.path.lexists(log):
+            text = ""
+        elif not os.path.isfile(log) or not os.access(log, os.R_OK):
+            raise Exit2(f"log unreadable: {log}")
+        else:
+            text = read_text(log)
+        entries = find_entries(text) if text.strip() else []
+        pp = a["pending"]
+        if not os.path.isfile(pp) or not os.access(pp, os.R_OK):
+            raise Exit2(f"pending entry file missing or unreadable: {pp}")
+        ptext = read_text(pp)
+        if not ptext.strip():
+            raise Exit2(f"pending entry file is empty: {pp}")
+        pes = find_entries(ptext)
+        if len(pes) > 1:
+            raise Exit2(f"pending entry file {pp} holds {len(pes)} entries; one is allowed")
+        entries.append(pes[0] if pes else {"ts": "pending", "lines": ptext.split("\n")})
+    else:
+        if not os.path.isfile(log) or not os.access(log, os.R_OK):
+            raise Exit2(f"log missing or unreadable: {log}")
+        text = read_text(log)
+        if not text.strip():
+            raise Exit2(f"log is empty: {log}")
+        entries = find_entries(text)
+        if not entries:
+            raise Exit2(f"no '## <ts>  /dream  vision-' entry in {log}")
     if a["mode"] == "entry":
         idx = [i for i, e in enumerate(entries) if e["ts"] == a["entry"]]
         if not idx:
@@ -1773,6 +2071,8 @@ def lint_log(a):
         ei = idx[-1]
     else:
         ei = len(entries) - 1
+    if a.get("_passA_ei") is not None:      # the reason pass lints the entry that first withdrew the manifest
+        ei = a["_passA_ei"]
     entry = entries[ei]
     prev_ts = entries[ei - 1]["ts"] if ei > 0 else None
     home = a["prd_dir"] or os.path.dirname(os.path.dirname(os.path.abspath(log)))
@@ -1906,8 +2206,53 @@ def lint_log(a):
 
     # ---- mission record (PRD-dream-mission-edge-map): after the State parse, before provenance
     mrec = None
+    rrows_all = [r for r in rows or [] if r.get("decision") == "launch" and r.get("task_id") == task
+                 and r.get("role") == "review"] if governed and task is not None else []
+
+    def launch_binds(p, sid, by_path=True):
+        """packet-errors R3: the review launch row of this task that touched a manifest (path, then scope id)."""
+        n = os.path.normpath(resolve(p))
+        for r in rrows_all if by_path else []:
+            sc = r.get("scope")
+            if isinstance(sc, str) and sc and os.path.normpath(resolve(sc)) == n:
+                return r
+        for r in rrows_all if sid else []:
+            if r.get("scope_id") == sid:
+                return r
+        for rv in reviews if sid else []:      # a Review: line's reviewer row carrying the scope id
+            for r in rows or []:
+                if r.get("session") == rv["session"] and r.get("decision") == "launch" and r.get("task_id") == task \
+                        and r.get("scope_id") == sid:
+                    return r
+        return None
+
+    def binding_rows(p, sid):
+        """packet-errors R1: the launch rows of this task that bind a manifest as it stands, by every tier
+        launch_binds accepts: review launch rows carrying its scope id or naming its path on a row with no scope
+        id, and a Review: line's reviewer launch row carrying its scope id."""
+        n = os.path.normpath(resolve(p))
+        out = [r for r in rrows_all if (sid and r.get("scope_id") == sid) or (
+            not (isinstance(r.get("scope_id"), str) and r["scope_id"]) and isinstance(r.get("scope"), str) and r["scope"]
+            and os.path.normpath(resolve(r["scope"])) == n)]
+        sess = {rv["session"] for rv in reviews}
+        return out + [r for r in rows or [] if sid and r.get("session") in sess and r.get("decision") == "launch"
+                      and r.get("task_id") == task and r.get("scope_id") == sid and all(r is not x for x in out)]
+
+    def wbound(p):
+        try:
+            sid = scope_canon(resolve(p))[0]
+            why = None
+        except ScopeError as e:
+            sid, why = None, f"it no longer canonicalizes: {e}"
+        r = launch_binds(p, sid)
+        if r is not None:
+            return str(r.get("session")), why
+        return ("none", why) if why else None
     if any(ln.startswith("Mission:") for e in entries[:ei + 1] for ln in e["lines"]):
-        mrec = mission_record(L, entries, ei, task, list(states), resolve)
+        mopts = {"pkt": pkt, "psem": psem, "wbound": wbound if governed and task is not None else None}
+        if a.get("_passA"):
+            mopts["passA"] = a["_passA"]
+        mrec = mission_record(L, entries, ei, task, list(states), resolve, mopts)
 
     # ---- ungoverned host: claims only a row can check
     if not governed:
@@ -2025,13 +2370,25 @@ def lint_log(a):
     # ---- adversarial matrix (R10)
     adv = an.get("adversarial")
     has_review = bool(reviews) or (bool(reviews_raw) and not review_none)
+    # packet-errors R1 (--pending): the prds members of the last listed, non-withdrawn manifest's frozen
+    # edges header, each of which the review about to launch gives a verdict
+    hx = []
+    if psem and mrec and mrec["line"] and mrec["scope"] and mrec["edges"]:
+        live = [p for p in mrec["scope"] if os.path.normpath(resolve(p)) not in (mrec.get("wset") or set())]
+        if live:
+            copy, _, err = frozen_edges_copy(resolve(live[-1]), os.path.basename(mrec["edges"]))
+            fh0 = None if err else read_edges(copy, copy)[0]
+            hx = [b[len("PRD-"):-len(".md")] for b in fh0["prds"]] if fh0 else []
     if adv:
         if adv[0] == "skipped":
             if has_review:
                 L.fail("adversarial-missing", "adversarial=skipped: beside a Review: line other than none")
+            elif pkt:
+                L.fail("adversarial-missing", "adversarial=skipped: beside the review about to launch (a pre-launch "
+                                              "run counts it as a Review: line other than none)")
         else:
             mpath = resolve(adv[1])
-            n = lint_matrix(L, mpath, adv[1], list(states))
+            n = lint_matrix(L, mpath, adv[1], list(states), extra=[s for s in hx if s not in states])
             if n is not None and n != adv[2]:
                 L.fail("analysis-grammar", f"uncovered={adv[2]} but '## Uncovered' in {adv[1]} lists {n}")
             mm = re.match(r"^(.+)-adversarial\.md$", os.path.basename(adv[1]))
@@ -2197,6 +2554,39 @@ def lint_log(a):
         kind = {"page": "ran"}.get(v[0], v[0])
         return {"kind": kind, "value": v[1]}
 
+    def norm(p):
+        return os.path.normpath(resolve(p))
+
+    # packet-errors R4: each applied withdrawal's record; `reason` is recomputed by a packet-only pass
+    # over the same-Task entry that first withdrew it, with scope= cut after the manifest (rows of later
+    # manifests dropped): the first packet error naming it or a row it voids
+    if mrec and mrec.get("withdrawn") is not None and not a.get("_passA"):
+        wrecs = []
+        for p in mrec["withdrawn"]:
+            first = ei
+            for j, e in enumerate(entries[:ei + 1]):
+                ml = [ln.rstrip() for ln in e["lines"] if ln.startswith("Mission:")]
+                if entry_task(e) == task and len(ml) == 1 and \
+                        any(norm(x) == norm(p) for x in parse_mission_line(ml[0])[1].get("withdrawn") or []):
+                    first = j
+                    break
+            try:
+                wid = scope_canon(resolve(p))[0]
+            except ScopeError:
+                wid = None
+            vn = (mrec.get("voided") or {}).get(norm(p), [])
+            try:
+                LA = lint_log(dict(a, _passA=norm(p), _passA_ei=first))[0]
+            except Exit2:
+                LA = None
+            reason = "none"
+            for (fid, _), mt in zip(LA.findings, LA.meta) if LA else []:
+                if fid in PACKET_IDS and (any(norm(x) == norm(p) for x in mt["man"]) or set(mt["rows"]) & set(vn)):
+                    reason = fid
+                    break
+            wrecs.append({"path": p, "scope_id": wid, "reason": reason, "voided_rows": vn})
+        mrec["wrecs"] = wrecs
+
     obj = {
         "ts": entry["ts"], "task": task, "consumer": consumer,
         "exit": 1 if L.findings else 0, "findings": L.ids(),
@@ -2220,8 +2610,184 @@ def lint_log(a):
         # R8: verified when a chain review binds, the mission verdict is APPROVE and no mission finding fired
         if vr is not None and mfields["verdict"] == "APPROVE" and not any(f in MISSION_IDS + SWEEP_IDS for f, _ in L.findings):
             prov["mission"] = "verified"
+    if a.get("packet") and not a.get("_passA"):
+        return L, packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mrec, mans, adv, psem,
+                                launch_binds, binding_rows, resolve), None
     ok_line = f"OK {entry['ts']}" + (" persisted=shape-only" if prov["persisted"] == "shape-only" else "")
     return L, obj, ok_line
+
+
+def repairs_copy(path):
+    """Whether a file reads as repairs rows: every non-blank line a JSON object carrying before and after."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rs = [json.loads(z) for z in fh.read().splitlines() if z.strip()]
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return bool(rs) and all(isinstance(r, dict) and "before" in r and "after" in r for r in rs)
+
+
+def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mrec, mans, adv, psem, launch_binds,
+                  binding_rows, resolve):
+    """PRD-dream-packet-errors-while-repairable R1: the --packet-only object. Packet-error findings
+    only, each exit-setting (packet_errors) or held (held_packet_errors: on manifests a review launch
+    bound, present in their frozen copies); pending_errors are the --pending exits that carry no id."""
+    def norm(p):
+        return os.path.normpath(resolve(p))
+    pend = []
+    if psem:
+        for k in ("Task", "Mission", "Analysis", "State"):
+            if k not in lines:
+                pend.append({"what": "line", "detail": f"no {k}: line in the pending entry"})
+        for rv in reviews:      # a slug a pending Review: file names: the Phase 4 State: names it, the matrix reads it
+            full = resolve(rv["file"])
+            if os.path.isfile(full) and os.access(full, os.R_OK):
+                for slug in dict.fromkeys(v[0] for v in (verdict_of(x) for x in read_text(full).split("\n")) if v):
+                    if slug not in states:
+                        pend.append({"what": "slug", "detail": f"slug {slug}: {rv['file']} names it; the pending State: "
+                                                               "line does not"})
+    bound = {norm(m["path"]) for m in mans if launch_binds(m["path"], m["id"]) is not None}
+
+    def kept(m):
+        """R1: a bound manifest whose frozen copies record the state when its review launched: not one that
+        no longer canonicalizes, nor one bound by a path row carrying another scope id while no row carries
+        its own (R3: edited or deleted after a launch)."""
+        r = launch_binds(m["path"], m["id"])
+        if r is None or m["id"] is None:
+            return False
+        sid = r.get("scope_id")
+        return launch_binds(m["path"], m["id"], by_path=False) is not None or not (isinstance(sid, str) and sid)
+    held_ok = {norm(m["path"]) for m in mans if norm(m["path"]) in bound and kept(m)}
+    if mans and mrec and mans[-1]["id"] is not None and norm(mans[-1]["path"]) not in bound:
+        lm = mans[-1]           # the unbound last manifest: its reviewer reads the frozen bytes, not the live files
+        for tp in (mrec["edges"], mrec["repairs"], adv[1] if adv and adv[0] == "matrix" else None):
+            want = lm["names"].get(os.path.basename(tp)) if tp else None
+            if want is None:
+                continue
+            got = file_sha(resolve(tp))
+            if got != want:
+                pend.append({"what": "digest", "detail": f"{tp}: live {'sha256 ' + got[:12] if got else 'file absent or unreadable'} "
+                                                         f"differs from manifest {lm['path']}'s {want[:12]} (the reviewer "
+                                                         "reads the frozen bytes)"})
+    bidx = [k for k, m in enumerate(mans) if norm(m["path"]) in held_ok]
+    bm = mans[max(bidx)] if bidx else None          # the latest bound manifest whose launch state is its own
+    # the time its frozen evaluation stands for: its latest launch, by every tier that binds it (R3)
+    bts = max((t for t in (launch_ts(r) for r in binding_rows(bm["path"], bm["id"])) if t), default=None) if bm else None
+    frozen = set()              # repairs rows byte-identical, at the same row number, in the copy beside that manifest
+    crows = None                # the rows of the repairs file in force at that launch, read from its copy beside the
+                                # manifest: [] when it froze none (no repairs= token was ever carried, or the manifest
+                                # lists no such file); None when no copy can be read (listed, but absent, differing
+                                # from the digest or unreadable)
+    # the repairs= token in force at that launch: the value of the latest entry recorded before it; when none
+    # recorded one, the repairs file the manifest lists (the pre-launch check admits a launch only with repairs=
+    # naming a file it lists, and a pending value is never in force at the launch, S3), else the current
+    rep_at, recd = (mrec.get("repairs") if mrec else None), False
+    for x in (mrec.get("earlier") or []) if mrec and bts is not None else []:
+        xt = parse_iso(x["ts"]) if isinstance(x["ts"], str) else None
+        if xt is not None and xt < bts and x["eff"].get("repairs"):
+            rep_at = x["eff"]["repairs"][0]
+            recd = True
+    if bm is not None and rep_at and not recd and os.path.basename(rep_at) not in bm["names"]:
+        alt = [n for n in bm["names"] if n.endswith(".jsonl") and n != os.path.basename(mrec.get("edges") or "")]
+        if len(alt) > 1:        # more than one: the members whose copy reads as repairs rows
+            alt = [n for n in alt if repairs_copy(os.path.join(os.path.dirname(bm["full"]), n))]
+        if len(alt) == 1:
+            rep_at = os.path.join(os.path.dirname(rep_at), alt[0])
+    same = bool(rep_at and mrec.get("repairs") and norm(rep_at) == norm(mrec["repairs"]))
+    rb = os.path.basename(rep_at) if rep_at else None
+    if bm is not None and not mrec.get("repairs"):
+        crows = []
+    elif bm is not None:
+        cp = os.path.join(os.path.dirname(bm["full"]), rb)
+        if bm["names"].get(rb) is None:
+            crows = []
+        elif file_sha(cp) == bm["names"][rb]:
+            try:
+                with open(resolve(mrec["repairs"]), "rb") as fh:
+                    live = fh.read().split(b"\n")
+            except OSError:
+                live = []
+            try:
+                with open(cp, "rb") as fh:
+                    cpl = fh.read().split(b"\n")
+            except OSError:
+                cpl = None
+            if cpl is not None:     # S2: a row of the current file is frozen only in a copy of that file
+                frozen = {i + 1 for i, ln in enumerate(live) if i < len(cpl) and ln == cpl[i] and ln.strip()} if same else set()
+                crows = []
+                for ln in cpl:
+                    try:
+                        r = json.loads(ln)
+                    except ValueError:
+                        continue
+                    if isinstance(r, dict):
+                        crows.append(r)
+    wsince = mrec.get("wsince") or {} if mrec else {}
+
+    def in_force(p):
+        """A withdrawal first recorded before that launch (never one only the pending entry carries, S3)."""
+        t = wsince.get(norm(p))
+        t = parse_iso(t) if isinstance(t, str) else None
+        return t is not None and bts is not None and t < bts
+
+    def carried(ab):
+        """R1: the copy's evaluation at that launch also lacks the row whose absence raised the error: a finding
+        that existed then (its review launched before it) with no copy row other than one a withdrawal in force
+        voids; a pair that was a pair then (no manifest between them withdrawn later) with no declaring row."""
+        if crows is None:
+            return False
+        if ab[0] == "finding":
+            # the issuing review's launch on the manifest it reviewed: the earliest of its session's rows binding it
+            ir = ab[2] if isinstance(ab[2], dict) else None
+            irs = [r for r in binding_rows(ir["scope"], ir.get("scope_id")) if r.get("session") == ir.get("session")] \
+                if ir and isinstance(ir.get("scope"), str) and ir["scope"] else []
+            issued = min((t for t in (launch_ts(r) for r in irs) if t), default=launch_ts(ir) if ir else None)
+            # the manifest's launch for it: its latest binding row from another session (a resume of the issuing
+            # review launches no review and refreezes nothing)
+            bo = max((t for t in (launch_ts(r) for r in binding_rows(bm["path"], bm["id"])
+                                  if not ir or r.get("session") != ir.get("session")) if t), default=None)
+            if issued is None or bo is None or not bo > issued:
+                return False
+            return not any(r.get("finding") == ab[1] and not any(in_force(r[k]) for k in ("before", "after")
+                                                                 if isinstance(r.get(k), str) and r[k].strip()) for r in crows)
+        sc = [norm(p) for p in mrec["scope"]]
+        a, b = norm(ab[1]), norm(ab[2])
+        if a in sc and b in sc[sc.index(a) + 1:] and not all(in_force(p) for p in sc[sc.index(a) + 1:sc.index(b, sc.index(a) + 1)]):
+            return False
+        # the name as that launch saw it: the launch's repairs file is exempt for a pair any row names, the current
+        # one (when another) was a member a row declares
+        nm = ab[3] if same else (None if ab[3] == rb else ab[3] or os.path.basename(mrec["repairs"]))
+        return not any(isinstance(r.get("before"), str) and isinstance(r.get("after"), str) and r["before"].strip()
+                       and r["after"].strip() and norm(r["before"]) == a and norm(r["after"]) == b
+                       and (nm is None or (isinstance(r.get("changed"), list) and nm in r["changed"])) for r in crows)
+
+    def exits(fid, mt):
+        if fid == "mission-withdrawn-bound" or mt["pend"] or (not mt["man"] and not mt["rows"]):
+            return True
+        if any(norm(p) not in held_ok for p in mt["man"]):
+            return True
+        if mt["absent"] is not None and not carried(mt["absent"]):
+            return True
+        return bool(mt["rows"]) and not all(n in frozen for n in mt["rows"])
+    perr, held = [], []
+    for (fid, d), mt in zip(L.findings, L.meta):
+        if psem and fid == "analysis-grammar":
+            pend.append({"what": "line", "detail": f"Analysis: {d}"})
+        elif psem and fid == "line-missing" and d.startswith("Task ("):
+            pend.append({"what": "line", "detail": "Task: " + d[len("Task ("):-1]})
+        elif fid in PACKET_IDS:
+            (perr if exits(fid, mt) else held).append({"id": fid, "detail": d})
+    ex = 1 if perr or pend else 0
+    mj = obj["mission"]
+    out = {"mode": "packet-only", "ts": entry["ts"], "task": task, "exit": ex,
+           "findings": list(dict.fromkeys(e["id"] for e in perr)), "packet_errors": perr, "held_packet_errors": held,
+           "pending_errors": pend, "decisions_malformed": malformed, "trust": "same-uid",
+           "mission": None if mj is None else {"name": mj["name"], "scope": mj["scope"], "scope_ids": mj.get("scope_ids", []),
+                                               "withdrawn": mj.get("withdrawn", [])}}
+    out["_lines"] = ([f"FAIL {e['id']}: {e['detail']}" for e in perr] + [f"HELD {e['id']}: {e['detail']}" for e in held]
+                     + [f"PENDING {e['what']}: {e['detail']}" for e in pend]
+                     + ([f"OK packet {entry['ts']}" + (f" held={len(held)}" if held else "")] if not ex else []))
+    return out
 
 
 def gated_path(full):
@@ -2313,9 +2879,13 @@ def main(argv):
             return selftest()
         if a["scope_id"] is not None:
             if any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "decisions", "matrix", "states", "json",
-                                                       "edges", "prds")):
+                                                       "edges", "prds", "packet", "pending")):
                 usage("--scope-id takes one manifest path and nothing else")
             return scope_id_mode(a["scope_id"])
+        if a["pending"] is not None and not a["packet"]:
+            usage("--pending needs --packet-only")
+        if a["packet"] and any(a[k] is not None for k in ("entry", "matrix", "states", "edges", "prds")):
+            usage("--packet-only lints the last entry (--last) of a log, without --entry, --matrix, --states or --edges")
         if a["edges"] is not None or a["prds"] is not None:
             if a["edges"] is None or any(a[k] not in (None, False) for k in
                                          ("log", "entry", "prd_dir", "decisions", "matrix", "states", "scope_id")):
@@ -2331,6 +2901,13 @@ def main(argv):
     except Exit2 as e:
         print(f"ERROR {e}", file=sys.stderr)
         return 2
+    if a["packet"]:             # PRD-dream-packet-errors-while-repairable R1
+        out = sys.stderr if a["json"] else sys.stdout
+        for t in obj.pop("_lines"):
+            print(t, file=out)
+        if a["json"]:
+            print(json.dumps(obj, separators=(",", ":")))
+        return obj["exit"]
     text = [f"FAIL {fid}: {d}" for fid, d in L.findings] or [ok]
     out = sys.stderr if a["json"] else sys.stdout
     for t in text:
