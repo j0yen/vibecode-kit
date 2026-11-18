@@ -1136,6 +1136,20 @@ CASES["rv4-rereview-own"] = (lambda nolog=False: rv4_rereview_own(nolog))
 CASES["rv4-pending-early"] = (lambda nolog=False: rv4_pending_early(nolog))
 
 
+# F16 (round 4): the repairs file renamed after the latest bound manifest's launch. rename-void: rv4-rename-rec
+# without row 2 (as void-row): F1's only row in the old file names the withdrawn m2 (void at r3's launch too), so
+# F1 had no row and PRD-foo.md (m1, m2r) no declaring row when r3 launched; m3's copy of the old file still declares
+# PRD-bar.md (m2r, m3) and names that pair. The launch-state copy decides: F1 and PRD-foo.md held, the rest exit.
+def rename_void(nolog=False):
+    s = rv4_rename_rec(nolog)
+    del s.rows[1]
+    s.frozen_rows["m2r"] = 1
+    return s
+
+
+CASES["rename-void"] = (lambda nolog=False: rename_void(nolog))
+
+
 def main(argv):
     if argv[:1] == ["--list"]:
         print("\n".join(CASES))

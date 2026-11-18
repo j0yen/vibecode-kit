@@ -2223,12 +2223,16 @@ def lint_log(a):
         return None
 
     def binding_rows(p, sid):
-        """packet-errors R1: the review launch rows of this task carrying a manifest's scope id, or naming its
-        path on a row with no scope id."""
+        """packet-errors R1: the launch rows of this task that bind a manifest as it stands, by every tier
+        launch_binds accepts: review launch rows carrying its scope id or naming its path on a row with no scope
+        id, and a Review: line's reviewer launch row carrying its scope id."""
         n = os.path.normpath(resolve(p))
-        return [r for r in rrows_all if (sid and r.get("scope_id") == sid) or (
+        out = [r for r in rrows_all if (sid and r.get("scope_id") == sid) or (
             not (isinstance(r.get("scope_id"), str) and r["scope_id"]) and isinstance(r.get("scope"), str) and r["scope"]
             and os.path.normpath(resolve(r["scope"])) == n)]
+        sess = {rv["session"] for rv in reviews}
+        return out + [r for r in rows or [] if sid and r.get("session") in sess and r.get("decision") == "launch"
+                      and r.get("task_id") == task and r.get("scope_id") == sid and all(r is not x for x in out)]
 
     def wbound(p):
         try:
@@ -2653,16 +2657,24 @@ def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mre
                                                          "reads the frozen bytes)"})
     bidx = [k for k, m in enumerate(mans) if norm(m["path"]) in held_ok]
     bm = mans[max(bidx)] if bidx else None          # the latest bound manifest whose launch state is its own
-    # the time its frozen evaluation stands for: its latest review launch
+    # the time its frozen evaluation stands for: its latest launch, by every tier that binds it (R3)
     bts = max((t for t in (launch_ts(r) for r in binding_rows(bm["path"], bm["id"])) if t), default=None) if bm else None
     frozen = set()              # repairs rows byte-identical, at the same row number, in the copy beside that manifest
-    crows = None                # that copy's rows: [] when it froze none (no repairs= token was ever carried, or the
-                                # manifest lists no repairs file); None when no copy can be read (listed, but absent,
-                                # differing from the digest or unreadable)
+    crows = None                # the rows of the repairs file in force at that launch, read from its copy beside the
+                                # manifest: [] when it froze none (no repairs= token was ever carried, or the manifest
+                                # lists no such file); None when no copy can be read (listed, but absent, differing
+                                # from the digest or unreadable)
+    # the repairs= token in force at that launch: the value of the latest entry recorded before it, else the current
+    rep_at = mrec.get("repairs") if mrec else None
+    for x in (mrec.get("earlier") or []) if mrec and bts is not None else []:
+        xt = parse_iso(x["ts"]) if isinstance(x["ts"], str) else None
+        if xt is not None and xt < bts and x["eff"].get("repairs"):
+            rep_at = x["eff"]["repairs"][0]
+    same = bool(rep_at and mrec.get("repairs") and norm(rep_at) == norm(mrec["repairs"]))
+    rb = os.path.basename(rep_at) if rep_at else None
     if bm is not None and not mrec.get("repairs"):
         crows = []
     elif bm is not None:
-        rb = os.path.basename(mrec["repairs"])
         cp = os.path.join(os.path.dirname(bm["full"]), rb)
         if bm["names"].get(rb) is None:
             crows = []
@@ -2677,8 +2689,8 @@ def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mre
                     cpl = fh.read().split(b"\n")
             except OSError:
                 cpl = None
-            if cpl is not None:
-                frozen = {i + 1 for i, ln in enumerate(live) if i < len(cpl) and ln == cpl[i] and ln.strip()}
+            if cpl is not None:     # S2: a row of the current file is frozen only in a copy of that file
+                frozen = {i + 1 for i, ln in enumerate(live) if i < len(cpl) and ln == cpl[i] and ln.strip()} if same else set()
                 crows = []
                 for ln in cpl:
                     try:
@@ -2702,7 +2714,11 @@ def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mre
         if crows is None:
             return False
         if ab[0] == "finding":
-            issued = launch_ts(ab[2]) if isinstance(ab[2], dict) else None
+            # the issuing review's launch on the manifest it reviewed: the earliest of its session's rows binding it
+            ir = ab[2] if isinstance(ab[2], dict) else None
+            irs = [r for r in binding_rows(ir["scope"], ir.get("scope_id")) if r.get("session") == ir.get("session")] \
+                if ir and isinstance(ir.get("scope"), str) and ir["scope"] else []
+            issued = min((t for t in (launch_ts(r) for r in irs) if t), default=launch_ts(ir) if ir else None)
             if issued is None or bts is None or not bts > issued:
                 return False
             return not any(r.get("finding") == ab[1] and not any(in_force(r[k]) for k in ("before", "after")
@@ -2711,9 +2727,12 @@ def packet_result(a, L, obj, entry, task, malformed, lines, reviews, states, mre
         a, b = norm(ab[1]), norm(ab[2])
         if a in sc and b in sc[sc.index(a) + 1:] and not all(in_force(p) for p in sc[sc.index(a) + 1:sc.index(b, sc.index(a) + 1)]):
             return False
+        # the name as that launch saw it: the launch's repairs file is exempt for a pair any row names, the current
+        # one (when another) was a member a row declares
+        nm = ab[3] if same else (None if ab[3] == rb else ab[3] or os.path.basename(mrec["repairs"]))
         return not any(isinstance(r.get("before"), str) and isinstance(r.get("after"), str) and r["before"].strip()
                        and r["after"].strip() and norm(r["before"]) == a and norm(r["after"]) == b
-                       and (ab[3] is None or (isinstance(r.get("changed"), list) and ab[3] in r["changed"])) for r in crows)
+                       and (nm is None or (isinstance(r.get("changed"), list) and nm in r["changed"])) for r in crows)
 
     def exits(fid, mt):
         if fid == "mission-withdrawn-bound" or mt["pend"] or (not mt["man"] and not mt["rows"]):

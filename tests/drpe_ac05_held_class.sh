@@ -19,7 +19,13 @@
 #   launch: no repairs= token ever means no row (HELD); a row naming a manifest whose withdrawal was recorded
 #   before that launch is void (HELD), one only the pending entry withdraws is not, and the pair it forms
 #   did not exist (FAIL); a deleted live file does not empty the copy (FAIL); a finding of that manifest's
-#   own latest review did not exist at the launch (FAIL).
+#   own latest review did not exist at the launch (FAIL). The copy read is that of the repairs= in force at that
+#   launch (the latest entry recorded before it, else the current one): renamed after it, the old file's copy
+#   decides (rows it holds answer: FAIL; a defect it carries too: HELD); first named by the pending entry, the
+#   manifest froze no row of it (HELD). A finding is dated by its issuing review's first launch on the manifest it
+#   reviewed (a later relaunch of that session: HELD), and the launch time by every tier that binds (a Review:
+#   line's reviewer row: HELD); that time is the latest launch (a re-review: HELD), a withdrawal counts only when
+#   recorded before it (recorded later, or pending even with an earlier header: FAIL).
 # The full lint on each note with the pending entry appended still exits 1. Each case runs on its own and
 # prints ok or RED, so a known-bad lint (DRREC_LINT) shows every cell.
 set -uo pipefail
@@ -153,11 +159,38 @@ c_own_finding_notoken() { pe own-finding-notoken; pk; rc1
   pfail repair-missing "finding F2 of notes/reviews/r2/verdict.txt: no repairs= token on the Mission: line" "(the review about to launch on $M2 follows it)"
   nofail repair-missing "F1"; noheld "F2"; fullrc1; }
 
+F1R="finding F1 of notes/reviews/r1/verdict.txt"
+REP2=notes/missions/drpe-mission.repairs-v2.jsonl
+c_rename_rec() { pe rv4-rename-rec; pk; rc1        # repairs= renamed by the pending entry; m3's copy of the old file answers all
+  pfail repair-missing "$F1R: no row in $REP2"; pfail repair-hash-mismatch "$FO $M1 and $M2R"
+  pfail repair-hash-mismatch "PRD-bar.md: changed but undeclared between $M2R and $M3"
+  pfail repair-hash-mismatch "$PE_REP: changed but undeclared between $M2R and $M3"; noheld "F1"; noheld "changed but undeclared"; fullrc1; }
+c_rename_void() { pe rename-void; pk; rc1           # the same, F1 unanswered and PRD-foo.md undeclared in the old file too
+  pheld repair-missing "$F1R: no row in $REP2"; pheld repair-hash-mismatch "$FO $M1 and $M2R"
+  pfail repair-hash-mismatch "PRD-bar.md: changed but undeclared between $M2R and $M3"
+  pfail repair-hash-mismatch "$PE_REP: changed but undeclared between $M2R and $M3"; nofail repair-missing "F1"; nofail repair-hash-mismatch "$FO"; fullrc1; }
+c_rename() { pe rv4-rename; pk; held0               # repairs= first named by the pending entry: m2 froze no row of that file
+  pheld repair-missing "$F1R: no row in $REP2"; pheld repair-hash-mismatch "$FO $M1 and $M2"
+  nofail repair-missing "F1"; nofail repair-hash-mismatch "$FO"; fullrc1; }
+c_relaunch_issuer() { pe rv4-relaunch-issuer; pk; held0   # r1's session relaunched on m1 after r2's launch: F1 existed then
+  pheld repair-missing "$F1R: no row in notes/missions/$PE_REP (its following review notes/reviews/r2/verdict.txt exists)"
+  nofail repair-missing "F1"; fullrc1; }
+c_tier3() { pe rv4-tier3; pk; held0                 # m2 bound only by r2's Review: line (role reviewer): launched at 14:00
+  pheld repair-missing "$F1R" "(the review about to launch on $M2 follows it)"; nofail repair-missing "F1"; fullrc1; }
+c_rereview_own() { pe rv4-rereview-own; pk; held0   # r2 FIX F2 on m2, r2b re-reviews m2 later: F2 existed at m2's latest launch
+  pheld repair-missing "finding F2 of notes/reviews/r2/verdict.txt" "(its following review notes/reviews/r2b/verdict.txt exists)"
+  nofail repair-missing "F2"; fullrc1; }
+c_late_withdrawal() { pe rv4-void-row-s3; pkl; rc1  # the withdrawal of m2 recorded by the linted entry, after r3's launch
+  pfail repair-missing "$F1R"; pfail repair-hash-mismatch "$FO $M1 and $M2R"; noheld "F1"; noheld "$FO"; }
+c_pending_early() { pe rv4-pending-early; pk; rc1   # only the pending entry withdraws m2, its header before r3's launch (S3)
+  pfail repair-missing "$F1R"; pfail repair-hash-mismatch "$FO $M1 and $M2R"; noheld "F1"; noheld "$FO"; fullrc1; }
+
 red=0
 for c in f1_packet f1_prds f1_contract f1_clash f1_dupbase frozen_prds frozen_packet frozen_contract frozen_dupbase \
          frozen_clash dupbase_other clash_other edges edges_member noheader_dupbase matrix_noheader matrix_member mx_member_frozen clash_need \
          late_edited late_edited_row late_deleted late_noid_held late_noid_deleted row_dropped row_dropped_badcopy row_dropped_empty row_dropped_unlisted row_dropped_pair \
-         notoken_pair void_row void_row_s3 live_absent own_finding own_finding_notoken; do
+         notoken_pair void_row void_row_s3 live_absent own_finding own_finding_notoken \
+         rename_rec rename_void rename relaunch_issuer tier3 rereview_own late_withdrawal pending_early; do
   if out=$("c_$c" 2>&1); then echo "ok  $c"; else echo "RED $c: $out"; red=1; fi
 done
 [ "$red" = 0 ] || fail "held/fail class: RED cells above"
