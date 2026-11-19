@@ -3,8 +3,11 @@
 # A1723 continuation's carbon read CR6), each re-dated to the cutover: every covered entry whose
 # wwhtbt=skipped is free text exits 1 with analysis-skip-refused, and the same entry rewritten to
 # `wwhtbt=ran <page>`, the page bound to a wwhtbt launch row of the entry's Task (its first lines name
-# the row's session), no longer gives analysis-skip-refused or a wwhtbt provenance finding. Other
-# findings of an entry linted away from its home are not this AC's. Without DATR_REAL_LOGS: exit 2.
+# the row's session), stays covered, reports that page bound (provenance.wwhtbt = boundary) and gives no
+# analysis-skip-refused and no other finding on its wwhtbt value. An entry with Task: none, or with no
+# Task: line of its own, has no launch row of its Task to bind, so it is counted apart (task_none). Other findings of an entry linted away from
+# its home are not this AC's. DATR_REAL_REFUSED, when set, is the number of refused entries the corpus
+# must give. Without DATR_REAL_LOGS: exit 2.
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/datr_lib.sh"
 [ -n "${DATR_REAL_LOGS:-}" ] || { echo "UNDECIDED $(basename "$0"): needs DATR_REAL_LOGS (carbon read CR6)"; exit 2; }
@@ -20,7 +23,7 @@ SID = "dddddddd-0000-4000-8000-000000000001"
 pol = os.path.join(top, "policy.json")
 json.dump({"evidence": {"ref_pattern": "^(ledger|file|pr|run|commit|page):[^\\s]{2,200}$", "placeholders": ["none", "tbd"]}}, open(pol, "w"))
 env = dict(os.environ, HOME=os.path.join(top, "fakehome"), SKILL_ROUTING_POLICY=pol)
-n = cov = bad = refused = cleared = 0
+n = cov = bad = refused = cleared = task_none = 0
 for name in sorted(os.listdir(logs)):
     if not name.endswith(".md"):
         continue
@@ -33,7 +36,8 @@ for name in sorted(os.listdir(logs)):
             continue
         n += 1
         is_cov = False
-        task = (re.search(r"^Task:\s+(\S+)", body, re.M) or re.search(r"^Task:\s+(\S+)", text[:m.start()], re.M) or [None, "none"])[1]
+        tm = re.findall(r"^Task:\s+(\S+)\s+Consumer:", body, re.M)   # as the lint reads it (entry_task): the entry's own last Task: line
+        task = tm[-1] if tm else "none"                                 # none of its own: no launch row of its Task to bind
         for variant in ("as-is", "ran"):
             b = body
             if variant == "ran":
@@ -68,18 +72,28 @@ for name in sorted(os.listdir(logs)):
                     else:
                         bad += 1; print(f"FAIL {name} entry {m.group(1)}: covered ({covered}) free-text skip: rc={p.returncode} findings={fid}")
             elif a and is_cov:    # only a covered free-text skip is rewritten; an entry that already ran a page is not this AC's
-                errs = [l for l in p.stderr.splitlines() if l.startswith(("FAIL analysis-skip-refused", "FAIL analysis-provenance-missing: wwhtbt", "FAIL analysis-page-unbound: wwhtbt"))]
+                # every finding on the wwhtbt value names it ("<id>: wwhtbt..."), whichever check raises it
+                errs = [l for l in p.stderr.splitlines() if l.startswith("FAIL analysis-skip-refused") or re.match(r"FAIL [\w-]+: wwhtbt\b", l)]
+                bound = (d.get("provenance") or {}).get("wwhtbt")
                 if covered in (None, "none"):                   # the rewrite touches no R1 trigger, so the entry stays covered
                     bad += 1; print(f"FAIL {name} entry {m.group(1)} rewritten to ran: covered={covered!r}")
-                elif errs or "analysis-skip-refused" in fid:
-                    bad += 1; print(f"FAIL {name} entry {m.group(1)} rewritten to ran: {errs[:2] or fid}")
+                elif task == "none":                            # no launch row of its Task to bind: only task-none-ran may refuse the value
+                    if [l for l in errs if not l.startswith("FAIL task-none-ran:")] or "analysis-skip-refused" in fid:
+                        bad += 1; print(f"FAIL {name} entry {m.group(1)} (Task: none) rewritten to ran: {errs[:2] or fid}")
+                    else:
+                        task_none += 1
+                elif errs or "analysis-skip-refused" in fid or bound != "boundary":
+                    bad += 1; print(f"FAIL {name} entry {m.group(1)} rewritten to ran: provenance.wwhtbt={bound!r} {errs[:2] or fid}")
                 else:
                     cleared += 1
-if cleared != refused:                                  # AC 1: every refused entry clears once rewritten to ran
-    bad += 1; print(f"FAIL {refused} covered free-text skips refused but {cleared} cleared once rewritten to ran")
+if cleared + task_none != refused:                      # AC 1: every refused entry clears once rewritten to ran
+    bad += 1; print(f"FAIL {refused} covered free-text skips refused but {cleared} cleared (+{task_none} Task: none) once rewritten to ran")
 if not refused:                                         # nothing shown: AC 1 needs at least one covered free-text skip
     bad += 1; print("FAIL no covered entry with a free-text wwhtbt=skipped was refused")
-print(f"entries={n} covered={cov} refused={refused} cleared={cleared} bad={bad}")
+want = os.environ.get("DATR_REAL_REFUSED", "")
+if want and str(refused) != want:
+    bad += 1; print(f"FAIL refused {refused} covered free-text skips, want DATR_REAL_REFUSED={want}")
+print(f"entries={n} covered={cov} refused={refused} cleared={cleared} task_none={task_none} bad={bad}")
 sys.exit(1 if bad else 0)
 PY
 ); rc=$?
