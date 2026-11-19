@@ -4,17 +4,19 @@
 # wwhtbt=skipped is free text exits 1 with analysis-skip-refused, and the same entry rewritten to
 # `wwhtbt=ran <page>`, the page bound to a wwhtbt launch row of the entry's Task (its first lines name
 # the row's session), stays covered, reports that page bound (provenance.wwhtbt = boundary) and gives no
-# analysis-skip-refused and no other finding on its wwhtbt value. An entry with Task: none, or with no
-# Task: line of its own, has no launch row of its Task to bind, so it is counted apart (task_none). Other findings of an entry linted away from
-# its home are not this AC's. DATR_REAL_REFUSED, when set, is the number of refused entries the corpus
-# must give. Without DATR_REAL_LOGS: exit 2.
+# analysis-skip-refused and no other finding on its wwhtbt value: any finding id the rewrite adds counts,
+# whatever its message says. An entry with Task: none, or with no well-formed Task: line of its own
+# (read as the lint reads it), has no launch row of its Task to bind, so it is counted apart
+# (task_none). Other findings of an entry linted away from its home are not this AC's.
+# DATR_REAL_REFUSED, when set, is the number of refused entries the corpus must give.
+# Without DATR_REAL_LOGS: exit 2.
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/datr_lib.sh"
 [ -n "${DATR_REAL_LOGS:-}" ] || { echo "UNDECIDED $(basename "$0"): needs DATR_REAL_LOGS (carbon read CR6)"; exit 2; }
 (cd "$DATR_REAL_LOGS" && sha256sum -c --quiet SHA256SUMS) || fail "DATR_REAL_LOGS copies do not match their SHA256SUMS"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; mkdir -p "$T/fakehome"; export HOME="$T/fakehome"; unset SKILL_ROUTING_DECISIONS
 out=$(python3 -I - "$LINT" "$DATR_REAL_LOGS" "$T" <<'PY'
-import json, os, re, subprocess, sys
+import collections, json, os, re, subprocess, sys
 lint, logs, top = sys.argv[1:4]
 src = open(lint, encoding="utf-8").read()
 cut = re.search(r'^TRIGGER_CUTOVER = "(\d{4}-\d\d-\d\d)"', src, re.M).group(1)
@@ -35,9 +37,10 @@ for name in sorted(os.listdir(logs)):
         if not re.search(r"^Analysis:", body, re.M):
             continue
         n += 1
-        is_cov = False
-        tm = re.findall(r"^Task:\s+(\S+)\s+Consumer:", body, re.M)   # as the lint reads it (entry_task): the entry's own last Task: line
-        task = tm[-1] if tm else "none"                                 # none of its own: no launch row of its Task to bind
+        is_cov, base, base_ids = False, collections.Counter(), set()
+        tl = [l for l in body.splitlines() if l.startswith("Task:")]    # as the lint reads it (entry_task): the entry's own last Task: line,
+        mt = re.match(r"^Task:\s+(\S+)\s+Consumer:", tl[-1]) if tl else None   # none when that line is malformed
+        task = mt.group(1) if mt else "none"                            # none of its own: no launch row of its Task to bind
         for variant in ("as-is", "ran"):
             b = body
             if variant == "ran":
@@ -63,7 +66,10 @@ for name in sorted(os.listdir(logs)):
                 continue
             fid = d.get("findings") or []
             covered = (d.get("analysis") or {}).get("covered")
+            ids = collections.Counter(re.findall(r"^FAIL ([\w-]+):", p.stderr, re.M))
             if variant == "as-is":
+                base = ids - collections.Counter({"analysis-skip-refused": ids["analysis-skip-refused"]})
+                base_ids = set(fid) - {"analysis-skip-refused"}
                 is_cov = covered not in (None, "none")
                 cov += 1 if is_cov else 0
                 if is_cov and a:
@@ -74,6 +80,13 @@ for name in sorted(os.listdir(logs)):
             elif a and is_cov:    # only a covered free-text skip is rewritten; an entry that already ran a page is not this AC's
                 # every finding on the wwhtbt value names it ("<id>: wwhtbt..."), whichever check raises it
                 errs = [l for l in p.stderr.splitlines() if l.startswith("FAIL analysis-skip-refused") or re.match(r"FAIL [\w-]+: wwhtbt\b", l)]
+                # the rewrite changes only the wwhtbt value, so every finding it adds is about that value, whatever its message says
+                added = ids - base
+                added_json = set(fid) - base_ids                # the JSON findings too, in case a finding is not printed
+                if task == "none":
+                    added.pop("task-none-ran", None)
+                    added_json.discard("task-none-ran")
+                errs += [f"added {k} x{v}" for k, v in sorted(added.items())] + [f"added {k} (json)" for k in sorted(added_json - set(added))]
                 bound = (d.get("provenance") or {}).get("wwhtbt")
                 if covered in (None, "none"):                   # the rewrite touches no R1 trigger, so the entry stays covered
                     bad += 1; print(f"FAIL {name} entry {m.group(1)} rewritten to ran: covered={covered!r}")
