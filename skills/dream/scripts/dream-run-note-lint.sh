@@ -162,7 +162,8 @@ TRIGGER_CLASSES = ("recurring-failure", "failed-acceptance", "consequential-obst
 # `policy-missing:` texts (a policy file the caller named) and every other text are no outage. Whether an outage was caller-induced (a malformed policy
 # reached through SKILL_ROUTE_POLICY, --policy or FABLE_LAUNCH_TEST, or `ledger lookup unavailable` through PATH) is not in the row: A1300's producer.
 OUTAGE_TEXTS = ("policy file not found", "policy is malformed")
-OUTAGE_RES = (re.compile(r"malformed policy JSON: [A-Za-z_][A-Za-z0-9_]*"), re.compile(r"ledger lookup unavailable; cannot verify ledger:\S+ \(fail closed\)"))
+OUTAGE_RES = (re.compile(r"malformed policy JSON: [A-Za-z_][A-Za-z0-9_]*"),   # the ledger id grammar is the resolver's own (ID_RE, line 140)
+              re.compile(r"ledger lookup unavailable; cannot verify ledger:[A-Za-z0-9][A-Za-z0-9._-]{0,63} \(fail closed\)"))
 OUTAGE_INFIX = "(policy error, fail closed)"
 
 
@@ -1953,7 +1954,7 @@ def outage_reason(reasons, skill):
     must be a non-empty string (fail closed)`, or the policy-error form `<skill>: policy ... (policy error, fail closed)`, <skill> being the denied
     row's. The infix elsewhere in a reason can be caller text the resolver quotes (`unknown decision_class '...'`), a request the caller can fix
     (security review ddf46516 findings 1-2); the two `policy-missing:` texts name a policy file the caller chose."""
-    r = reasons.strip() if isinstance(reasons, str) else ""
+    r = reasons if isinstance(reasons, str) else ""          # whole: the resolver writes no surrounding white space (review r10 LOW-1)
     if r in OUTAGE_TEXTS or any(p.fullmatch(r) for p in OUTAGE_RES):
         return True
     if r == skill + ": policy require_permission_mode must be a non-empty string (fail closed)":

@@ -4,7 +4,9 @@
 #    H1 sentence aside), so the re-date changed dates and the values derived from them and nothing else.
 # 2. Exactly the drfc and drmr manifests that verified at 43d5b39 (sha256sum -c in their own directory) verify now, renamed paths mapped.
 # 3. The tool refuses, writing nothing: a NEW date the tree already holds, an OLD date it does not hold, and a short digest prefix of a
-#    changed file it cannot regenerate.
+#    changed file it cannot regenerate; after review r10, also a symlinked directory (LOW-3), an --also file that holds the NEW date (LOW-5) or
+#    names a ROOT file by another spelling (LOW-4), and a write that fails part way (LOW-4: nothing is replaced).
+# 4. A manifest with a deliberately stale line keeps each line's state (review r10 LOW-6: lines are checked one by one).
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; repo="$(dirname "$here")"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
@@ -56,4 +58,26 @@ cp "$T/c3/a.md" "$T/c3.a.before"
 "${R[@]}" --map 2027-02-01=2026-11-18 "$T/c3" > "$T/c3.out" 2>&1 && fail "a short digest prefix was not refused"
 grep -q "a prefix of the replaced value" "$T/c3.out" || fail "short-prefix refusal text: $(cat "$T/c3.out")"
 cmp -s "$T/c3/a.md" "$T/c3.a.before" || fail "a refused re-date wrote a file"
-echo "PASS $(basename "$0"): drfc, drmr and drmx re-dated back equal $OLD; $n manifests verify as at $OLD; three refusals write nothing"
+mkdir -p "$T/c4/real" "$T/c5" "$T/c6/sub" "$T/c7/d" "$T/c8"
+printf 'entry 2027-02-01T08:00\n' > "$T/c4/real/a.md"; ln -s real "$T/c4/link"
+"${R[@]}" --map 2027-02-01=2026-11-18 "$T/c4" > "$T/c4.out" 2>&1 && fail "a symlinked directory was not refused"
+grep -q "a symlink" "$T/c4.out" || fail "symlink refusal text: $(cat "$T/c4.out")"
+printf 'entry 2027-02-01T08:00\n' > "$T/c5/a.md"; printf 'already 2026-11-18\n' > "$T/c5.also"
+"${R[@]}" --map 2027-02-01=2026-11-18 --also "$T/c5.also" "$T/c5" > "$T/c5.out" 2>&1 && fail "an --also file holding the NEW date was not refused"
+grep -q "already occurs" "$T/c5.out" || fail "--also NEW-date refusal text: $(cat "$T/c5.out")"
+printf 'entry 2027-02-01T08:00\n' > "$T/c6/sub/a.md"
+(cd "$T" && "${R[@]}" --map 2027-02-01=2026-11-18 --also "$T/c6/sub/a.md" c6) > "$T/c6.out" 2>&1 && fail "an absolute --also spelling of a ROOT file was not refused"
+grep -q "inside a ROOT" "$T/c6.out" || fail "--also inside-ROOT refusal text: $(cat "$T/c6.out")"
+printf 'entry 2027-02-01T08:00\n' > "$T/c7/a.md"; printf 'entry 2027-02-01T09:00\n' > "$T/c7/d/b.md"
+cp "$T/c7/a.md" "$T/c7.a.before"; cp "$T/c7/d/b.md" "$T/c7.b.before"; chmod 555 "$T/c7/d"
+"${R[@]}" --map 2027-02-01=2026-11-18 "$T/c7" > "$T/c7.out" 2>&1; rc=$?; chmod 755 "$T/c7/d"
+[ "$rc" = 2 ] || fail "a write that fails part way exited $rc, not 2: $(cat "$T/c7.out")"
+grep -q "nothing replaced" "$T/c7.out" || fail "write-failure refusal text: $(cat "$T/c7.out")"
+cmp -s "$T/c7/a.md" "$T/c7.a.before" && cmp -s "$T/c7/d/b.md" "$T/c7.b.before" || fail "a failed write changed a file"
+[ -z "$(find "$T/c7" -name '.redate-*')" ] || fail "a failed write left a temporary file"
+printf 'entry 2027-02-01T08:00\n' > "$T/c8/a.md"; printf 'plain\n' > "$T/c8/b.md"
+{ sha256sum "$T/c8/a.md" | sed "s|  $T/c8/|  |"; printf '%064d  b.md\n' 0; } > "$T/c8/m.sha256"
+"${R[@]}" --map 2027-02-01=2026-11-18 "$T/c8" > "$T/c8.out" 2>&1 || fail "a manifest with one stale line was refused: $(cat "$T/c8.out")"
+(cd "$T/c8" && sha256sum -c m.sha256 2>/dev/null) > "$T/c8.check"
+grep -q '^a.md: OK$' "$T/c8.check" && grep -q '^b.md: FAILED$' "$T/c8.check" || fail "per-line manifest state not kept: $(cat "$T/c8.check")"
+echo "PASS $(basename "$0"): drfc, drmr and drmx re-dated back equal $OLD; $n manifests verify as at $OLD; seven refusals write nothing; a partly stale manifest keeps each line's state"

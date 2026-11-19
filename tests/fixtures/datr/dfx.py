@@ -253,8 +253,37 @@ for _n, _r in (("policy-is-malformed", "policy is malformed"), ("malformed-polic
 for _n, _r in (("policy-missing-other", "policy-missing: datr fixture"), ("malformed-request-json", "malformed request JSON: JSONDecodeError"),
                ("malformed-policy-prefix", "malformed policy: expected object"),
                ("ledger-lookup-extra", "ledger lookup unavailable; cannot verify ledger:A1 (fail closed) after a PATH change"),
-               ("require-permission-mode-other-skill", "dream: policy require_permission_mode must be a non-empty string (fail closed)")):
+               ("require-permission-mode-other-skill", "dream: policy require_permission_mode must be a non-empty string (fail closed)"),
+               ("white-space-around", " policy file not found\n"),                                       # review r10 LOW-1: whole, unstripped
+               ("ledger-id-outside-grammar", "ledger lookup unavailable; cannot verify ledger:a(b (fail closed)")):   # LOW-2: the resolver's id grammar
     case("ac02-outage-near-miss-" + _n, 1, ["analysis-skip-refused"], detail="not a route outage")((lambda r: lambda out: skip_fx(out, r))(_r))
+
+
+# R2 as amended for chain review 11 (R11-F5): AC 2 and AC 5 test each R2-accepted text, corroborated and not, and each R2-refused text one by one;
+# AC 2 also lints an uncovered entry skipping on each accepted text (uncovered entries keep today's rules).
+R2_ACCEPTED = (("policy-file-not-found", "policy file not found"), ("malformed-policy-json", "malformed policy JSON: JSONDecodeError"),
+               ("policy-is-malformed", "policy is malformed"), ("policy-error-form", POLICY_ERROR),
+               ("require-permission-mode", "{}: policy require_permission_mode must be a non-empty string (fail closed)"),
+               ("ledger-lookup-unavailable", "ledger lookup unavailable; cannot verify ledger:A1 (fail closed)"))
+R2_REFUSED = (("policy-missing-env", "policy-missing: SKILL_ROUTE_POLICY names no readable file"),
+              ("policy-missing-arg", "policy-missing: --policy names no readable file"),
+              ("unanchored-policy-error", INJECTED), ("malformed-request-json", "malformed request JSON: JSONDecodeError"))
+
+
+def uncovered_skip(out, reasons):
+    fx = earlier(tfx(out, w=f"skipped: blocked decision={OUT_TS}"))
+    fx.rows.append(denied("wwhtbt", reasons))
+    fx.build()
+    policy(out)
+
+
+for _n, _r in R2_ACCEPTED:
+    case("ac02-r2-accepted-%s-corroborated" % _n, 0, [])((lambda r: lambda out: skip_fx(out, r.format("wwhtbt")))(_r))
+    case("ac02-r2-accepted-%s-uncorroborated" % _n, 1, ["analysis-skip-refused"], detail="falls between")(
+        (lambda r: lambda out: skip_fx(out, r.format("wwhtbt"), rows=[later("wwhtbt")]))(_r))
+    case("ac02-r2-accepted-%s-uncovered" % _n, 0, [], "d['analysis'].get('covered') == 'none'")((lambda r: lambda out: uncovered_skip(out, r.format("wwhtbt")))(_r))
+for _n, _r in R2_REFUSED:
+    case("ac02-r2-refused-%s" % _n, 1, ["analysis-skip-refused"], detail="not a route outage")((lambda r: lambda out: skip_fx(out, r.format("wwhtbt")))(_r))
 
 
 @case("ac02-denial-after-header", 1, ["analysis-skip-refused"], detail="is not before the entry header")
@@ -566,6 +595,16 @@ for _c in ("recurring-failure", "failed-acceptance", "consequential-obstacle"):
 case("ac05-transient-inline", 0, [])(lambda out: five_fx(out, "transient", "inline", refs="run:retry-1"))
 case("ac05-transient-skipped-transient", 0, [])(lambda out: five_fx(out, "transient", "skipped: transient", refs="run:retry-1"))
 case("ac05-transient-page", 1, ["analysis-trigger-unmet"])(lambda out: five_fx(out, "transient", PAGE5, refs="run:retry-1"))
+
+
+for _n, _r in R2_ACCEPTED:                       # R11-F5: each R2-accepted text, corroborated and not, and each R2-refused text, on the R5 trigger
+    case("ac05-r2-accepted-%s-corroborated" % _n, 0, [])((lambda r: lambda out: five_fx(out, "failed-acceptance", f"skipped: blocked decision={OUT_TS}",
+                                                                                          [denied("5whysandrhyme", r.format("5whysandrhyme"))]))(_r))
+    case("ac05-r2-accepted-%s-uncorroborated" % _n, 1, ["analysis-trigger-unmet"])((lambda r: lambda out: five_fx(
+        out, "failed-acceptance", f"skipped: blocked decision={OUT_TS}", [denied("5whysandrhyme", r.format("5whysandrhyme")), later("5whysandrhyme")]))(_r))
+for _n, _r in R2_REFUSED:
+    case("ac05-r2-refused-%s" % _n, 1, ["analysis-trigger-unmet"], detail="not a route outage")((lambda r: lambda out: five_fx(
+        out, "failed-acceptance", f"skipped: blocked decision={OUT_TS}", [denied("5whysandrhyme", r.format("5whysandrhyme"))]))(_r))
 
 
 case("ac05-skip-infix-in-caller-text", 1, ["analysis-trigger-unmet"], detail="not a route outage")(

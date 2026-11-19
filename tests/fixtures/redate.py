@@ -14,14 +14,16 @@ Each --also FILE (a test script or generator outside the trees that names fixtur
 replacements but is not hashed. Times of day, the order of every instant, and every other byte stay as they were.
 
 Refused (exit 2, nothing written):
-  - a ROOT that holds a NEW date already (the map must stay one-to-one, so a later re-date of the result is unambiguous);
+  - a ROOT or --also file that holds a NEW date already (the map must stay one-to-one, so a later re-date of the result is unambiguous);
+  - anything under a ROOT that is not a regular file or a directory, a symlinked directory included, and an --also file that is a ROOT file;
   - an OLD date that occurs in no ROOT and no --also file;
   - two paths renamed onto one;
-  - a manifest whose every line verified before the rewrite (sha256sum -c, paths relative to the manifest's directory) and not after;
+  - a manifest line that verified before the rewrite (sha256sum -c, paths relative to the manifest's directory) and does not after;
   - a hex run of 8 or more characters left in the rewritten bytes that is a prefix of a replaced value (a short reference this tool cannot
     regenerate);
   - one old value that would map to two new values.
---check computes and verifies everything and writes nothing. Exit 0: written (or checked).
+--check computes and verifies everything and writes nothing. Exit 0: written (or checked). Every new file is written to a temporary file beside its
+destination first; only when all are written does any replace its target, so a write error (a full disk) leaves the trees as they were (exit 2).
 """
 import argparse
 import hashlib
@@ -72,6 +74,9 @@ def walk(root):
     out = []
     for d, dirs, files in os.walk(root):
         dirs.sort()
+        for dn in dirs:
+            if os.path.islink(os.path.join(d, dn)):                       # os.walk lists a symlinked directory but does not enter it (review r10 LOW-3)
+                raise Refused("not a regular file or directory: %s (a symlink)" % os.path.join(d, dn))
         for f in sorted(files):
             p = os.path.join(d, f)
             if os.path.islink(p) or not os.path.isfile(p):
@@ -87,13 +92,14 @@ def plan(pairs, roots, also):
         for p in walk(r):
             with open(p, "rb") as fh:
                 files[p] = (r, fh.read())
+    real = {os.path.realpath(q) for q in files}
     for p in also:
-        if p in files:
+        if p in files or os.path.realpath(p) in real:                      # review r10 LOW-4: an absolute or linked spelling of a ROOT file
             raise Refused("--also file %s is inside a ROOT" % p)
         with open(p, "rb") as fh:
             files[p] = (None, fh.read())
     for o, n in bpairs:
-        hit = [p for p, (r, b) in files.items() if r is not None and (n in b or n in os.path.relpath(p, r).encode())]
+        hit = [p for p, (r, b) in files.items() if n in b or (r is not None and n in os.path.relpath(p, r).encode())]   # --also too (review r10 LOW-5)
         if hit:
             raise Refused("NEW date %s already occurs in %s" % (n.decode(), hit[0]))
         if not any(o in b or (r is not None and o in os.path.relpath(p, r).encode()) for p, (r, b) in files.items()):
@@ -136,22 +142,21 @@ def plan(pairs, roots, also):
     else:
         raise Refused("derived values did not settle (a reference cycle)")
     final = {p: sub_digests(dated[p], dmap) for p in files}
-    # manifests that verified before must verify after
+    # every manifest line that verified before must verify after (line by line: a manifest with deliberately stale lines is checked too, review r10 LOW-6)
+    by_old = {q: b for q, (_, b) in files.items()}
     by_new = {newpath[p]: final[p] for p in files}
+
+    def verifies(h, rel, base, table):
+        q = os.path.normpath(os.path.join(base, rel.decode()))
+        return q in table and sha(table[q]) == h
     for p, (r, orig) in files.items():
         ml = manifest_lines(orig)
         if r is None or ml is None:
             continue
-        base = os.path.dirname(p)
-
-        def ok(lines, base, table):
-            for h, rel in lines:
-                q = os.path.normpath(os.path.join(base, rel.decode()))
-                if q not in table or sha(table[q]) != h:
-                    return False
-            return True
-        if ok(ml, base, {q: b for q, (_, b) in files.items()}) and not ok(manifest_lines(final[p]), os.path.dirname(newpath[p]), by_new):
-            raise Refused("manifest %s verified before the re-date and not after" % p)
+        after = manifest_lines(final[p])
+        for k, ((h, rel), (h2, rel2)) in enumerate(zip(ml, after)):
+            if verifies(h, rel, os.path.dirname(p), by_old) and not verifies(h2, rel2, os.path.dirname(newpath[p]), by_new):
+                raise Refused("manifest %s line %d verified before the re-date and not after" % (p, k + 1))
     # no short reference to a replaced value may survive
     olds = set(dmap)
     pre = {}
@@ -200,14 +205,39 @@ def main(argv=None):
     changed = [p for p in files if final[p] != files[p][1] or newpath[p] != p]
     moved = [p for p in files if newpath[p] != p]
     if not a.check:
-        for p in changed:
-            q = newpath[p]
-            mode = os.stat(p).st_mode & 0o7777
-            if q != p:
+        tmps, cur, made = [], None, []           # phase 1: every new file beside its target; a failure removes them all and changes nothing
+        try:
+            for p in changed:
+                q = newpath[p]
+                d = os.path.dirname(q)
+                while d and not os.path.isdir(d):          # the directories a rename needs, outermost last, so a failure can remove them
+                    made.append(d)
+                    d = os.path.dirname(d)
                 os.makedirs(os.path.dirname(q), exist_ok=True)
-            with open(q, "wb") as fh:
-                fh.write(final[p])
-            os.chmod(q, mode)
+                cur = os.path.join(os.path.dirname(q), ".redate-%d-%s" % (os.getpid(), os.path.basename(q)))
+                with open(cur, "wb") as fh:
+                    fh.write(final[p])
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.chmod(cur, os.stat(p).st_mode & 0o7777)
+                tmps.append((p, q, cur))
+                cur = None
+        except OSError as e:
+            for t in [x[2] for x in tmps] + ([cur] if cur else []):
+                try:
+                    os.unlink(t)
+                except OSError:
+                    pass
+            for d in sorted(set(made), key=len, reverse=True):
+                try:
+                    os.rmdir(d)
+                except OSError:
+                    pass
+            print("redate: refused: writing failed, nothing replaced: %s" % e, file=sys.stderr)
+            return 2
+        for p, q, t in tmps:                     # phase 2: replace targets, then drop the old paths of renamed files
+            os.replace(t, q)
+        for p, q, t in tmps:
             if q != p:
                 os.unlink(p)
         for r in roots:   # drop directories a rename emptied

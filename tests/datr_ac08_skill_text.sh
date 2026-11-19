@@ -25,12 +25,14 @@ grep -qF 'PRD dream-analysis-trigger-record' "$HI" || fail "history.md does not 
 cases ac08
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; mkdir -p "$T/base"
 git -C "$REPO" archive "$BASE_SHA" | tar -x -C "$T/base" || fail "git archive $BASE_SHA failed"
-broke=""; pre=""; n=0
+broke=""; pre=""; tails=""; n=0
 for t in $(grep -l -E 'SKILL\.md|history\.md' "$here"/*.sh | xargs -n1 basename | grep -v -E '^datr_|_lib\.sh$'); do
   [ -f "$T/base/tests/$t" ] || continue
   n=$((n+1))
   bash "$here/$t" < /dev/null > "$T/h.out" 2>&1 && continue
-  if (cd "$T/base" && bash "tests/$t" < /dev/null > "$T/b.out" 2>&1); then broke="$broke $t"; else pre="$pre $t"; fi
+  if (cd "$T/base" && bash "tests/$t" < /dev/null > "$T/b.out" 2>&1); then broke="$broke $t"; tails="$tails
+--- $t (here) ---
+$(tail -n 15 "$T/h.out")"; else pre="$pre $t"; fi
 done
-[ -z "$broke" ] || fail "landed tests that read the skill text and pass at $BASE_SHA fail here:$broke"
+[ -z "$broke" ] || fail "landed tests that read the skill text and pass at $BASE_SHA fail here:$broke$tails"
 pass "text states R2, R3, R5 and notes/analysis/; $CASES_PASSED ac08 notes lint clean; $n landed text-reading tests still pass${pre:+ (failing at $BASE_SHA too:$pre)}"
