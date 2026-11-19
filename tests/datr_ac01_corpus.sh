@@ -4,9 +4,10 @@
 # wwhtbt=skipped is free text exits 1 with analysis-skip-refused, and the same entry rewritten to
 # `wwhtbt=ran <page>`, the page bound to a wwhtbt launch row of the entry's Task (its first lines name
 # the row's session), stays covered, reports that page bound (provenance.wwhtbt = boundary) and gives no
-# analysis-skip-refused and no other finding on its wwhtbt value: any finding id the rewrite adds counts,
-# whatever its message says. An entry with Task: none, or with no well-formed Task: line of its own
-# (read as the lint reads it), has no launch row of its Task to bind, so it is counted apart
+# analysis-skip-refused and no other finding on its wwhtbt value. The rewritten run is compared with a
+# baseline run of the same entry carrying a value R2 accepts (a corroborated blocked skip): any finding id
+# it adds counts, whatever its message says. An entry with Task: none, or with no well-formed Task: line
+# of its own (read as the lint reads it), has no launch row of its Task to bind, so it is counted apart
 # (task_none). Other findings of an entry linted away from its home are not this AC's.
 # DATR_REAL_REFUSED, when set, is the number of refused entries the corpus must give.
 # Without DATR_REAL_LOGS: exit 2.
@@ -41,10 +42,14 @@ for name in sorted(os.listdir(logs)):
         tl = [l for l in body.splitlines() if l.startswith("Task:")]    # as the lint reads it (entry_task): the entry's own last Task: line,
         mt = re.match(r"^Task:\s+(\S+)\s+Consumer:", tl[-1]) if tl else None   # none when that line is malformed
         task = mt.group(1) if mt else "none"                            # none of its own: no launch row of its Task to bind
-        for variant in ("as-is", "ran"):
+        for variant in ("as-is", "blocked", "ran"):
+            if variant == "blocked" and not (a and is_cov):    # the baseline is needed only for an entry the rewrite is checked on
+                continue
             b = body
             if variant == "ran":
                 b = re.sub(r"wwhtbt=skipped(?::)? .*? 5whys=", "wwhtbt=ran notes/analysis/datr-wwhtbt.md 5whys=", body, count=1, flags=re.M)
+            elif variant == "blocked":                          # the same entry with a value R2 accepts: a corroborated route outage
+                b = re.sub(r"wwhtbt=skipped(?::)? .*? 5whys=", f"wwhtbt=skipped: blocked decision={cut}T00:10:00-08:00 5whys=", body, count=1, flags=re.M)
             home = os.path.join(top, f"{name}-{k}-{variant}")
             os.makedirs(os.path.join(home, "notes", "analysis"), exist_ok=True)
             with open(os.path.join(home, "notes", "dream-log.md"), "w", encoding="utf-8") as fh:
@@ -55,6 +60,10 @@ for name in sorted(os.listdir(logs)):
             with open(dec, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps({"ts": cut + "T00:05:00-08:00", "decision": "launch", "task_id": task, "skill": "wwhtbt", "route": "opus-xhigh",
                                      "model": "claude-opus-5-5", "effort": "xhigh", "account": "x", "session": SID, "resume": False, "reasons": "datr-ac01"}) + "\n")
+                if variant == "blocked":                        # the denial it names; no wwhtbt launch row falls between it and the header
+                    fh.write(json.dumps({"ts": cut + "T00:10:00-08:00", "decision": "denied", "task_id": task, "skill": "wwhtbt", "route": "opus-xhigh",
+                                         "model": "claude-opus-5-5", "effort": "xhigh", "account": "x", "session": None, "resume": False,
+                                         "reasons": "policy-missing: datr-ac01 baseline"}) + "\n")
             p = subprocess.run(["bash", lint, os.path.join(home, "notes", "dream-log.md"), "--entry", ts_new, "--prd-dir", home, "--decisions", dec, "--json"],
                                capture_output=True, text=True, env=env, cwd=top, timeout=300)
             try:
@@ -67,9 +76,10 @@ for name in sorted(os.listdir(logs)):
             fid = d.get("findings") or []
             covered = (d.get("analysis") or {}).get("covered")
             ids = collections.Counter(re.findall(r"^FAIL ([\w-]+):", p.stderr, re.M))
-            if variant == "as-is":
+            if variant == "blocked":                            # the baseline the rewritten run is compared with (nothing is asserted on it)
                 base = ids - collections.Counter({"analysis-skip-refused": ids["analysis-skip-refused"]})
                 base_ids = set(fid) - {"analysis-skip-refused"}
+            elif variant == "as-is":
                 is_cov = covered not in (None, "none")
                 cov += 1 if is_cov else 0
                 if is_cov and a:
@@ -77,10 +87,10 @@ for name in sorted(os.listdir(logs)):
                         refused += 1
                     else:
                         bad += 1; print(f"FAIL {name} entry {m.group(1)}: covered ({covered}) free-text skip: rc={p.returncode} findings={fid}")
-            elif a and is_cov:    # only a covered free-text skip is rewritten; an entry that already ran a page is not this AC's
+            elif a and is_cov:    # variant ran: only a covered free-text skip is rewritten; an entry that already ran a page is not this AC's
                 # every finding on the wwhtbt value names it ("<id>: wwhtbt..."), whichever check raises it
                 errs = [l for l in p.stderr.splitlines() if l.startswith("FAIL analysis-skip-refused") or re.match(r"FAIL [\w-]+: wwhtbt\b", l)]
-                # the rewrite changes only the wwhtbt value, so every finding it adds is about that value, whatever its message says
+                # the two runs differ only in the wwhtbt value, so every finding the rewritten run adds is about that value, whatever its message says
                 added = ids - base
                 added_json = set(fid) - base_ids                # the JSON findings too, in case a finding is not printed
                 if task == "none":
