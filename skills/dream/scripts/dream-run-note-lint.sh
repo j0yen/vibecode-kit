@@ -158,7 +158,11 @@ PAGE_LINES = 40
 TRIGGER_CUTOVER = "2026-11-20"
 FAILURE_CLASSES = ("recurring-failure", "failed-acceptance", "consequential-obstacle", "transient", "other")
 TRIGGER_CLASSES = ("recurring-failure", "failed-acceptance", "consequential-obstacle")
-OUTAGE_PREFIXES = ("policy-missing", "policy file not found", "malformed policy", "ledger lookup unavailable")
+# R2 (amended 2026-11-19, Hermes H2): the resolver's own outage texts (skill-route-resolve.py 007932da...), each a whole `reasons` value. The two
+# `policy-missing:` texts (a policy file the caller named) and every other text are no outage. Whether an outage was caller-induced (a malformed policy
+# reached through SKILL_ROUTE_POLICY, --policy or FABLE_LAUNCH_TEST, or `ledger lookup unavailable` through PATH) is not in the row: A1300's producer.
+OUTAGE_TEXTS = ("policy file not found", "policy is malformed")
+OUTAGE_RES = (re.compile(r"malformed policy JSON: [A-Za-z_][A-Za-z0-9_]*"), re.compile(r"ledger lookup unavailable; cannot verify ledger:\S+ \(fail closed\)"))
 OUTAGE_INFIX = "(policy error, fail closed)"
 
 
@@ -1943,18 +1947,18 @@ def covered_kind(entries, ei, task, states, mrec, rows, home, resolve):
     return "none", None
 
 
-CALLER_POLICY_MISSING = ("policy-missing: SKILL_ROUTE_POLICY", "policy-missing: --policy")
-
-
 def outage_reason(reasons, skill):
-    """R2: a route outage the caller cannot cure, in the resolver's own words: a reason that starts with one of R2's prefixes, except the two
-    `policy-missing:` texts the resolver writes only when the caller itself named the policy file (SKILL_ROUTE_POLICY, --policy), or a reason in the
-    resolver's policy-error form `<skill>: policy ... (policy error, fail closed)`. R2's infix elsewhere in a reason can be caller text the resolver quotes
-    (`unknown decision_class '...'`), a request the caller can fix (security review ddf46516 findings 1-2)."""
+    """R2 (amended, Hermes H2): a route outage in the resolver's own words, the whole reason: `policy file not found`, `policy is malformed`,
+    `malformed policy JSON: <Error>`, `ledger lookup unavailable; cannot verify ledger:<id> (fail closed)`, `<skill>: policy require_permission_mode
+    must be a non-empty string (fail closed)`, or the policy-error form `<skill>: policy ... (policy error, fail closed)`, <skill> being the denied
+    row's. The infix elsewhere in a reason can be caller text the resolver quotes (`unknown decision_class '...'`), a request the caller can fix
+    (security review ddf46516 findings 1-2); the two `policy-missing:` texts name a policy file the caller chose."""
     r = reasons.strip() if isinstance(reasons, str) else ""
-    if r.startswith(CALLER_POLICY_MISSING):
-        return False
-    return r.startswith(OUTAGE_PREFIXES) or (r.startswith(skill + ": policy ") and r.endswith(OUTAGE_INFIX))
+    if r in OUTAGE_TEXTS or any(p.fullmatch(r) for p in OUTAGE_RES):
+        return True
+    if r == skill + ": policy require_permission_mode must be a non-empty string (fail closed)":
+        return True
+    return r.startswith(skill + ": policy ") and r.endswith(OUTAGE_INFIX)
 
 
 def blocked_skip_refusal(value, skill, task, rows, entry_ts):
@@ -3609,11 +3613,14 @@ def selftest():
     fx.rows.append(denied("wwhtbt", "evidence: placeholder ref refused (fixable request)"))
     refuse("datr-skip-fixable", fx, "analysis-skip-refused", ("not a route outage",))
     fx = tfx(w=f"skipped: blocked decision={OUT_TS}")
-    fx.rows += [denied("wwhtbt", "policy-missing: /x/policy.json"), row(LATE_TS, "launch", "A9", "wwhtbt", "opus-xhigh", "claude-opus-5-5", "xhigh", S_F)]
+    fx.rows += [denied("wwhtbt", "policy file not found"), row(LATE_TS, "launch", "A9", "wwhtbt", "opus-xhigh", "claude-opus-5-5", "xhigh", S_F)]
     refuse("datr-skip-uncorroborated", fx, "analysis-skip-refused", ("not corroborated",))
     fx = tfx(w=f"skipped: blocked decision={OUT_TS}")
-    fx.rows.append(denied("wwhtbt", "policy-missing: /x/policy.json"))
+    fx.rows.append(denied("wwhtbt", "policy file not found"))
     passes("datr-skip-corroborated", fx, jcov("new-material"))
+    fx = tfx(w=f"skipped: blocked decision={OUT_TS}")
+    fx.rows.append(denied("wwhtbt", "policy-missing: SKILL_ROUTE_POLICY names no readable file"))
+    refuse("datr-skip-caller-policy", fx, "analysis-skip-refused", ("not a route outage",))
     fx = new()
     fx.prev_entry, fx.prev_lines = "2026-11-15T00:30:00-08:00", ["Task: A1   Consumer: hermes", "Seeds: selftest", "State: foo=linted"]
     fx.ts = T_TS
@@ -3640,7 +3647,7 @@ def selftest():
     refuse("datr-trigger-inline", tfx(f="inline", failure="Failure: failed-acceptance ledger:A1"), "analysis-trigger-unmet")
     passes("datr-trigger-page", tfx(f="page visions/5whys.md", failure="Failure: recurring-failure ledger:A1"))
     fx = tfx(f=f"skipped: blocked decision={OUT_TS}", failure="Failure: consequential-obstacle ledger:A1")
-    fx.rows += [denied("5whysandrhyme", "malformed policy: expected object"), row(LATE_TS, "launch", "A7", "5whysandrhyme", "opus-xhigh", "claude-opus-5-5", "xhigh", S_F)]
+    fx.rows += [denied("5whysandrhyme", "malformed policy JSON: JSONDecodeError"), row(LATE_TS, "launch", "A7", "5whysandrhyme", "opus-xhigh", "claude-opus-5-5", "xhigh", S_F)]
     refuse("datr-trigger-skip-uncorroborated", fx, "analysis-trigger-unmet", ("not corroborated",))
     five = f"# five whys page\nsession: {S_5}\n"
     fx = tfx(f=f"reused visions/5whys.md sha256={hashlib.sha256(five.encode()).hexdigest()}", failure="Failure: recurring-failure ledger:A1")

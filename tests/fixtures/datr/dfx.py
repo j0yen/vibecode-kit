@@ -245,6 +245,16 @@ case("ac02-outage-policy-missing-caller-env", 1, ["analysis-skip-refused"], deta
     lambda out: skip_fx(out, "policy-missing: SKILL_ROUTE_POLICY names no readable file"))
 case("ac02-outage-policy-missing-caller-arg", 1, ["analysis-skip-refused"], detail="not a route outage")(
     lambda out: skip_fx(out, "policy-missing: --policy names no readable file"))
+# R2 as amended (Hermes H2, 2026-11-19): each of the resolver's own outage texts, whole, is accepted; near misses are not.
+for _n, _r in (("policy-is-malformed", "policy is malformed"), ("malformed-policy-json", "malformed policy JSON: JSONDecodeError"),
+               ("ledger-lookup-unavailable", "ledger lookup unavailable; cannot verify ledger:A1 (fail closed)"),
+               ("require-permission-mode", "wwhtbt: policy require_permission_mode must be a non-empty string (fail closed)")):
+    case("ac02-outage-text-" + _n, 0, [])((lambda r: lambda out: skip_fx(out, r))(_r))
+for _n, _r in (("policy-missing-other", "policy-missing: datr fixture"), ("malformed-request-json", "malformed request JSON: JSONDecodeError"),
+               ("malformed-policy-prefix", "malformed policy: expected object"),
+               ("ledger-lookup-extra", "ledger lookup unavailable; cannot verify ledger:A1 (fail closed) after a PATH change"),
+               ("require-permission-mode-other-skill", "dream: policy require_permission_mode must be a non-empty string (fail closed)")):
+    case("ac02-outage-near-miss-" + _n, 1, ["analysis-skip-refused"], detail="not a route outage")((lambda r: lambda out: skip_fx(out, r))(_r))
 
 
 @case("ac02-denial-after-header", 1, ["analysis-skip-refused"], detail="is not before the entry header")

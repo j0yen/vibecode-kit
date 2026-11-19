@@ -65,7 +65,7 @@ for name in sorted(os.listdir(logs)):
                 if variant == "blocked":                        # the denial it names; no wwhtbt launch row falls between it and the header
                     fh.write(json.dumps({"ts": cut + "T00:10:00-08:00", "decision": "denied", "task_id": task, "skill": "wwhtbt", "route": "opus-xhigh",
                                          "model": "claude-opus-5-5", "effort": "xhigh", "account": "x", "session": None, "resume": False,
-                                         "reasons": "policy-missing: datr-ac01 baseline"}) + "\n")
+                                         "reasons": "policy file not found"}) + "\n")
             p = subprocess.run(["bash", lint, os.path.join(home, "notes", "dream-log.md"), "--entry", ts_new, "--prd-dir", home, "--decisions", dec, "--json"],
                                capture_output=True, text=True, env=env, cwd=top, timeout=300)
             try:
