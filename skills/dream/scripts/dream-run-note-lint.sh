@@ -9,6 +9,8 @@
 #   dream-run-note-lint.sh --matrix <path> --states <slug=value ...> [--json]
 #   dream-run-note-lint.sh --scope-id <manifest>
 #   dream-run-note-lint.sh --edges <edges.jsonl> [--prds <PRD basename ...>] [--json]
+#   dream-run-note-lint.sh --consumption <record> --task <T> [--page <page>] [--prd-home <dir>] [--reviews <dir>]
+#                          [--decisions <path>] [--require-closed] [--json]      (PRD-dream-finding-consumption R8)
 #   dream-run-note-lint.sh --selftest
 #
 # The entry is the last `## <ts>  /dream  vision-...` block (--last, the default) or
@@ -170,7 +172,8 @@ def usage(msg):
     raise Exit2(msg + " (usage: dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] "
                 "[--json] [--prd-dir <dir>] [--decisions <path>] | --matrix <path> --states "
                 "<slug=value ...> [--json] | --scope-id <manifest> | --edges <path> [--prds <PRD basename ...>] [--json] "
-                "| --selftest)")
+                "| --consumption <record> --task <T> [--page <page>] [--prd-home <dir>] [--reviews <dir>] [--decisions <path>] "
+                "[--require-closed] [--json] | --selftest)")
 
 
 class ScopeError(Exception):
@@ -1711,7 +1714,8 @@ def lint_section(L, shown, slug, body):
 def parse_args(argv):
     a = {"log": None, "mode": "last", "entry": None, "json": False, "prd_dir": None,
          "decisions": None, "matrix": None, "states": None, "selftest": False, "scope_id": None,
-         "edges": None, "prds": None}
+         "edges": None, "prds": None, "consumption": None, "task": None, "page": None, "prd_home": None, "reviews": None,
+         "require_closed": False}
     i = 0
     while i < len(argv):
         x = argv[i]
@@ -1721,6 +1725,13 @@ def parse_args(argv):
             a["mode"] = "last"
         elif x == "--selftest":
             a["selftest"] = True
+        elif x == "--require-closed":
+            a["require_closed"] = True
+        elif x in ("--consumption", "--task", "--page", "--prd-home", "--reviews"):
+            if i + 1 >= len(argv):
+                usage(f"{x} needs a value")
+            a[x[2:].replace("-", "_")] = argv[i + 1]
+            i += 1
         elif x in ("--entry", "--prd-dir", "--decisions", "--matrix", "--scope-id", "--edges"):
             if i + 1 >= len(argv):
                 usage(f"{x} needs a value")
@@ -2819,11 +2830,361 @@ def scope_id_mode(path):
     return 0
 
 
+# ---------------------------------------------------------------- finding consumption (PRD-dream-finding-consumption R2-R5, R8)
+CONS_SCHEMA = "analysis-consumption.v1"
+CONS_COMMON = ("id", "page", "page_sha256", "finding", "binding", "author_session")
+CONS_KEYS = {   # binding -> (required keys, optional keys)                                                                     (R2, R3)
+    "requirement": (("prd", "ac"), ("kill", "reexpression", "control")),
+    "test": (("repo", "commit", "path"), ()),
+    "repair": (("ask", "owner", "successor"), ()),
+    "residual": (("owner", "evidence", "accepted_by"), ("prd", "part")),
+    "pending": (("owner", "due", "ask", "successor"), ("prd",)),
+}
+CONS_RECEIPT_KEYS = ("session", "run", "run_id", "rc", "report", "receipt", "result", "launch")                              # R4
+CONS_FINDING_RE = re.compile(r"falsifier|mechanism:[1-9][0-9]*")
+CONS_ASK_RE = re.compile(r"A[0-9]+")
+CONS_HEX64 = re.compile(r"[0-9a-f]{64}")
+CONS_HEX40 = re.compile(r"[0-9a-f]{40}")
+
+
+def cons_page_findings(text):
+    """R5: the findings of a bound page that need a row, or (None, why) when the page has no parseable falsifier section or `# Mechanisms` heading.
+    Falsifier: a `# Weakest link` heading (wwhtbt) or a line beginning `WWHTBT (the weakest link):` (5whysandrhyme). Mechanisms: the top-level lines
+    beginning `- ` or `<n>. ` under `# Mechanisms`, up to the next `#` heading; an item whose state word (the text after its last ` state `, up to a
+    parenthesis) is exactly LIVE or MERGED needs no row."""
+    lines = text.split("\n")
+    fals = any(re.match(r"^#\s+Weakest link\s*$", l) for l in lines) or any(l.startswith("WWHTBT (the weakest link):") for l in lines)
+    start = next((i for i, l in enumerate(lines) if re.match(r"^#\s+Mechanisms\s*$", l)), None)
+    if not fals:
+        return None, "no falsifier section (`# Weakest link` or `WWHTBT (the weakest link):`)"
+    if start is None:
+        return None, "no `# Mechanisms` heading"
+    need, n = ["falsifier"], 0
+    for l in lines[start + 1:]:
+        if l.startswith("#"):
+            break
+        if re.match(r"^(- |[0-9]+\. )", l):
+            n += 1
+            st = l.rsplit(" state ", 1)[1].split("(", 1)[0].strip() if " state " in l else ""
+            if st not in ("LIVE", "MERGED"):
+                need.append(f"mechanism:{n}")
+    return need, None
+
+
+def cons_page_falsifier(text):
+    """R3: the falsifier script the page itself names: its frontmatter `falsifier: <path> sha256=<64 hex>` (path and digest), else the first `.sh` or
+    `.py` path in a backticked command of its `# Weakest link` section (path only). -> (path, sha256 or None) or (None, None)."""
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    if m:
+        for l in m.group(1).split("\n"):
+            fm = re.match(r"^falsifier:\s*(\S+)(?:\s+sha256=([0-9a-f]{64}))?\s*$", l)
+            if fm:
+                return fm.group(1), fm.group(2)
+    sec = re.search(r"^#\s+Weakest link\s*$(.*?)(?=^#\s|\Z)", text, re.S | re.M)
+    for cmd in re.findall(r"`([^`]+)`", sec.group(1) if sec else ""):
+        for tok in cmd.split():
+            if re.search(r"\.(sh|py)$", tok):
+                return tok, None
+    return None, None
+
+
+def cons_names(text, base, finding):
+    """True when text names `<page basename>#<finding>` (several findings of one page comma-separated after one basename, R3)."""
+    for m in re.finditer(re.escape(base) + r"#((?:falsifier|mechanism:[1-9][0-9]*)(?:,(?:falsifier|mechanism:[1-9][0-9]*))*)", text):
+        if finding in m.group(1).split(","):
+            return True
+    return False
+
+
+def cons_ac_line(prd_text, ac):
+    body = re.search(r"^## Acceptance criteria\s*$(.*?)(?=^## |\Z)", prd_text, re.S | re.M)
+    for l in (body.group(1) if body else "").split("\n"):
+        if re.match(r"^%d\. " % ac, l):
+            return l
+    return None
+
+
+def cons_wm_asks(args):
+    """The canonical ledger, read only: `wm-asks asks ...` -> parsed JSON, or None when wm-asks is not installed here (canonical-unavailable)."""
+    exe = shutil.which("wm-asks")
+    if not exe:
+        return None
+    p = subprocess.run([exe, "asks"] + args, capture_output=True, text=True, timeout=60)
+    if p.returncode != 0:
+        raise Exit2(f"wm-asks asks {' '.join(args)} exited {p.returncode}: {(p.stderr or p.stdout).strip()[:200]}")
+    try:
+        return json.loads(p.stdout)
+    except ValueError as e:
+        raise Exit2(f"wm-asks asks {' '.join(args)} printed no JSON ({e})")
+
+
+def cons_check(a):
+    """--consumption <record> --task <T> [--page <page>] [--prd-home <dir>] [--reviews <dir>] [--require-closed] [--json] (R8): R2-R5 for the record's
+    pages. Exit 0 when every finding is consumed, 1 when any is not, 2 when it cannot tell (Exit2: unreadable record, no wm-asks for a repair or pending
+    row, a canonical read that fails)."""
+    L = Lint()
+    rec, task = a["consumption"], a["task"]
+    if not task:
+        usage("--consumption needs --task <T>")
+    try:
+        raw = read_text(rec)
+    except OSError as e:
+        raise Exit2(f"cannot read the consumption record {rec}: {e}")
+    base_dir = a["prd_home"] or os.path.dirname(os.path.abspath(rec))
+
+    def resolve(p):
+        return p if os.path.isabs(p) else os.path.join(base_dir, p)
+    rows, seen = [], set()
+    for n, ln in enumerate(raw.split("\n"), 1):
+        if not ln.strip():
+            continue
+        try:
+            r = json.loads(ln)
+        except ValueError:
+            L.fail("consumption-grammar", f"line {n} is not one JSON object")
+            continue
+        if not isinstance(r, dict):
+            L.fail("consumption-grammar", f"line {n} is not one JSON object")
+            continue
+        rid = r.get("id")
+        b = r.get("binding")
+        if b not in CONS_KEYS:                                                                                                  # R4
+            L.fail("consumption-receipt-only", f"row {rid!r}: binding {b!r} is none of {', '.join(CONS_KEYS)}; a receipt binds nothing")
+            continue
+        req, opt = CONS_KEYS[b]
+        if any(k in r for k in CONS_RECEIPT_KEYS) and not all(r.get(k) not in (None, "", []) for k in req):
+            L.fail("consumption-receipt-only", f"row {rid!r}: its only target is a receipt ({', '.join(k for k in CONS_RECEIPT_KEYS if k in r)})")
+            continue
+        probs = []
+        if not isinstance(rid, str) or not rid.strip():
+            probs.append("id is not a non-empty string")
+        elif rid in seen:
+            probs.append(f"id {rid} repeats")
+        if not isinstance(r.get("page"), str) or not r.get("page", "").strip():
+            probs.append("page is not a path")
+        if not isinstance(r.get("page_sha256"), str) or not CONS_HEX64.fullmatch(r.get("page_sha256", "")):
+            probs.append("page_sha256 is not 64 lowercase hex")
+        if not isinstance(r.get("finding"), str) or not CONS_FINDING_RE.fullmatch(r.get("finding", "")):
+            probs.append("finding is not `falsifier` or `mechanism:<n>`")
+        if not isinstance(r.get("author_session"), str) or not r.get("author_session", "").strip():
+            probs.append("author_session is missing")
+        extra = sorted(k for k in r if k not in CONS_COMMON + req + opt + ("note",))
+        if extra:
+            probs.append("keys outside analysis-consumption.v1: " + ", ".join(extra))
+        if "note" in r and not isinstance(r["note"], str):
+            probs.append("note is not text")
+        if probs:
+            L.fail("consumption-grammar", f"row {rid!r}: " + "; ".join(probs))
+            continue
+        seen.add(rid)
+        rows.append(r)
+    authors = {r["author_session"] for r in rows}
+    by_page = {}
+    for r in rows:
+        by_page.setdefault(r["page"], []).append(r)
+    if a["page"] and a["page"] not in by_page:
+        by_page[a["page"]] = []                  # R8 --page: the record must bind that page's findings; each one it does not is named
+    pages = list(by_page)
+    consumed = {}                                                                                                               # (page, finding) -> bool
+    page_info = {}
+    for pg in pages:
+        prs = by_page[pg]
+        pth = resolve(pg)
+        try:
+            text = read_text(pth)
+        except OSError:
+            L.fail("consumption-page-unparsed", f"page {pg}: cannot be read")
+            page_info[pg] = None
+            continue
+        dig = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        stale = sorted({r["id"] for r in prs if r["page_sha256"] != dig})
+        need, why = cons_page_findings(text)
+        if stale:
+            L.fail("consumption-page-stale", f"page {pg} hashes to {dig[:12]}…; rows {','.join(stale)} pin other bytes")
+        if need is None:
+            L.fail("consumption-page-unparsed", f"page {pg}: {why}")
+        page_info[pg] = None if (stale or need is None) else (text, need)
+    for pg in pages:
+        info = page_info.get(pg)
+        if info is None:
+            continue                                                                                                            # R5: every finding unconsumed
+        text, need = info
+        base = os.path.basename(pg)
+        for r in by_page[pg]:
+            if r["finding"] not in need:
+                L.fail("consumption-grammar", f"row {r['id']}: {base}#{r['finding']} is no finding of the page that needs a row")
+        for f in need:
+            fr = [r for r in by_page[pg] if r["finding"] == f]
+            main_rows = [r for r in fr if not (r["binding"] == "residual" and isinstance(r.get("part"), str) and r["part"].strip())]
+            if not main_rows:
+                L.fail("consumption-finding-unbound", f"{base}#{f}: no binding row")
+                consumed[(pg, f)] = False
+                continue
+            if len(main_rows) > 1:
+                L.fail("consumption-grammar", f"{base}#{f}: rows {','.join(r['id'] for r in main_rows)} bind it; one row, plus residual rows with `part`")
+                consumed[(pg, f)] = False
+                continue
+            ok = True
+            for r in fr:
+                ok = cons_binding(L, a, r, f, base, text, task, authors, resolve) and ok
+            consumed[(pg, f)] = ok
+    obj = {"schema": "dream-finding-consumption-check.v1", "record": rec, "task": task, "trust": "same-uid",
+           "rows": len(rows), "pages": pages, "unconsumed": sorted(f"{os.path.basename(p)}#{f}" for (p, f), ok in consumed.items() if not ok),
+           "findings": L.ids()}
+    return L, obj, f"OK consumption {rec} task={task} rows={len(rows)}"
+
+
+def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
+    """R3 for one row; False (with a finding) when it does not bind."""
+    rid, b = r["id"], r["binding"]
+
+    def bad(fid, why):
+        L.fail(fid, f"row {rid} ({base}#{f}): {why}")
+        return False
+    req = CONS_KEYS[b][0]
+    missing = [k for k in req if r.get(k) in (None, "", [])]
+    if missing:
+        return bad("consumption-binding-invalid", "missing " + ", ".join(missing))
+    if b == "requirement":
+        if not a["prd_home"]:
+            return bad("consumption-context-missing", "a requirement row needs --prd-home")
+        prd, ac = r["prd"], r["ac"]
+        if not (isinstance(prd, str) and re.fullmatch(r"PRD-[A-Za-z0-9._-]+\.md", prd)) or not isinstance(ac, int) or ac < 1:
+            return bad("consumption-binding-invalid", "prd is not a PRD basename or ac is not a positive integer")
+        pp = next((os.path.join(a["prd_home"], d, prd) for d in ("build-queue", "") if os.path.isfile(os.path.join(a["prd_home"], d, prd))), None)
+        if not pp:
+            return bad("consumption-binding-invalid", f"key prd: {prd} is not in this home")
+        line = cons_ac_line(read_text(pp), ac)
+        if line is None:
+            return bad("consumption-binding-invalid", f"key ac: {prd} has no AC {ac}")
+        if not cons_names(line, base, f):
+            return bad("consumption-binding-invalid", f"key ac: AC {ac} of {prd} does not name {base}#{f}")
+        if not (re.search(r"`[^`]+`", line) or "tests/" in line):
+            return bad("consumption-binding-invalid", f"key ac: AC {ac} of {prd} carries no backticked command and no tests/ path")
+        if f == "falsifier":
+            k = r.get("kill")
+            if not (isinstance(k, dict) and all(isinstance(k.get(x), str) and k[x] for x in ("script", "sha256", "string"))):
+                return bad("consumption-binding-not-discriminating", "a falsifier row needs kill = {script, sha256, string}")
+            want, want_sha = cons_page_falsifier(page_text)
+            if want is None:
+                return bad("consumption-binding-not-discriminating", "key kill: the page names no falsifier script")
+            if k["script"] != want or (want_sha and k["sha256"] != want_sha):
+                return bad("consumption-binding-invalid", f"key kill: {k['script']} is not the page's own falsifier {want}")
+            if file_sha(resolve(k["script"])) != k["sha256"]:
+                return bad("consumption-binding-invalid", f"key kill: {k['script']} does not hash to its sha256")
+            if os.path.basename(k["script"]) not in line or k["string"] not in line:
+                return bad("consumption-binding-not-discriminating", f"key kill: AC {ac} of {prd} does not carry the script's basename and the kill string")
+            rx = r.get("reexpression")
+            if rx is not None:
+                if not (isinstance(rx, dict) and isinstance(rx.get("script"), str) and isinstance(rx.get("sha256"), str) and not os.path.isabs(rx["script"])):
+                    return bad("consumption-binding-invalid", "key reexpression: not {script, sha256} with a path under the PRD home")
+                if file_sha(os.path.join(a["prd_home"], rx["script"])) != rx["sha256"] or os.path.basename(rx["script"]) not in line:
+                    return bad("consumption-binding-invalid", "key reexpression: the script does not hash to its sha256 or AC does not carry its basename")
+        elif not (isinstance(r.get("control"), str) and r["control"].strip()):
+            return bad("consumption-binding-not-discriminating", "a mechanism row needs the control its AC's test runs")
+        return True
+    if b == "test":
+        if not (isinstance(r["commit"], str) and CONS_HEX40.fullmatch(r["commit"])):
+            return bad("consumption-binding-invalid", "key commit: not 40 hex")
+        try:
+            p = subprocess.run(["git", "-C", resolve(r["repo"]), "show", f"{r['commit']}:{r['path']}"], capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            return bad("consumption-binding-invalid", f"key path: git show failed ({e})")
+        if p.returncode != 0:
+            return bad("consumption-binding-invalid", f"key path: {r['path']} is not in {r['repo']} at {r['commit'][:12]}")
+        if not cons_names(p.stdout, base, f):
+            return bad("consumption-binding-invalid", f"key path: {r['path']} does not name {base}#{f}")
+        return True
+    if b == "residual":
+        rx, ph = routing_evidence_rules()
+        ev = r["evidence"]
+        if not isinstance(ev, list) or not ev or not all(isinstance(e, str) and rx.match(e) and e.split(":", 1)[-1].lower() not in ph for e in ev):
+            return bad("consumption-binding-invalid", "key evidence: refs must match the routing policy's ref_pattern and name no placeholder")
+        if "part" in r and not (isinstance(r["part"], str) and r["part"].strip()):
+            return bad("consumption-binding-invalid", "key part: empty")
+        if not a["reviews"]:
+            return bad("consumption-context-missing", "a residual row needs --reviews")
+        acc = r["accepted_by"]
+        dec = a["decisions"] or default_decisions()
+        if not os.path.isfile(dec):
+            return bad("consumption-context-missing", f"no decisions log at {dec} to find {acc}'s review launch row")
+        drows, _ = load_decisions(dec)
+        rv = [x for x in drows if x.get("session") == acc and x.get("decision") == "launch" and x.get("role") == "review" and x.get("task_id") == task]
+        if not rv or acc in authors:
+            return bad("consumption-residual-unaccepted", f"accepted_by {acc}: no review launch row under {task} outside the author lineage")
+        if not cons_accepts_line(a["reviews"], acc, rid):
+            return bad("consumption-residual-unaccepted", f"accepted_by {acc}: no verdict file under {a['reviews']} naming it holds `accepts {rid}`")
+        return True
+    # repair, pending: the canonical ledger (R3)
+    if not (isinstance(r["ask"], str) and CONS_ASK_RE.fullmatch(r["ask"])) or not (isinstance(r["successor"], str) and CONS_ASK_RE.fullmatch(r["successor"])):
+        return bad("consumption-binding-invalid", "ask and successor are canonical ids A<digits>")
+    if b == "pending":
+        due = parse_iso(r["due"]) if isinstance(r["due"], str) else None
+        if due is None:
+            return bad("consumption-binding-invalid", "key due: not an ISO timestamp")
+        if due < datetime.datetime.now(datetime.timezone.utc):
+            return bad("consumption-pending-overdue", f"due {r['due']} has passed")
+    got = cons_wm_asks(["query", "--ids", f"{r['ask']},{r['successor']}", "--status", "all", "--json"])
+    if got is None:
+        raise Exit2(f"canonical-unavailable: wm-asks is not installed here; row {rid} ({b}) needs the canonical ledger")
+    byid = {x.get("ask_id") or x.get("id"): x for x in got if isinstance(x, dict)}
+    ask, succ = byid.get(r["ask"]), byid.get(r["successor"])
+    if not ask or not succ or (ask.get("owner") != r["owner"]) or not cons_names(ask.get("what") or "", base, f) \
+            or f"closes-after=row:{r['ask']}" not in (succ.get("what") or ""):
+        return bad("consumption-repair-unbound", f"ask {r['ask']} (owner {r['owner']}, naming {base}#{f}) and successor {r['successor']} "
+                                                 f"(closes-after=row:{r['ask']}) are not both in the canonical ledger as bound")
+    if not a["require_closed"] or r["successor"] != task:
+        return True
+    if b == "pending":
+        return bad("consumption-repair-open", f"pending row for successor {task}: unconsumed until a revision replaces it")
+    if (ask.get("status") or ask.get("section")) not in ("closed", "done"):
+        return bad("consumption-repair-open", f"repair ask {r['ask']} is still open")
+    ev = cons_wm_asks(["events", r["ask"], "--json"]) or []
+    acc = []
+    for e in ev:
+        if isinstance(e, dict) and e.get("op") == "accept":
+            d = e.get("detail")
+            try:
+                d = json.loads(d) if isinstance(d, str) else d
+            except ValueError:
+                d = {}
+            acc.append(d if isinstance(d, dict) else {})
+    proved = any(x.get("result") == "FAIL" and any(y.get("result") == "PASS" and y.get("sha") == x.get("sha") and y.get("mode") == "run"
+                                                  for y in acc[i + 1:]) for i, x in enumerate(acc))
+    if not proved:
+        return bad("consumption-repair-unproven", f"closed repair ask {r['ask']} shows no accept FAIL followed by a run PASS at one sha")
+    return True
+
+
+def cons_accepts_line(reviews, session, rid):
+    """A verdict file under --reviews that names the session and holds the line `accepts <rid>` (the accepted-decline read, R3 residual)."""
+    for d, _, files in os.walk(reviews):
+        for fn in sorted(files):
+            try:
+                t = read_text(os.path.join(d, fn))
+            except (OSError, UnicodeDecodeError):
+                continue
+            if session in t and any(l.strip() == f"accepts {rid}" for l in t.split("\n")):
+                return True
+    return False
+
+
 def main(argv):
     try:
         a = parse_args(argv)
         if a["selftest"]:
             return selftest()
+        if a["consumption"] is not None or any(a[k] not in (None, False) for k in ("task", "page", "prd_home", "reviews", "require_closed")):
+            if a["consumption"] is None or any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "matrix", "states", "scope_id", "edges", "prds")):
+                usage("--consumption <record> --task <T> goes with --page, --prd-home, --reviews, --decisions, --require-closed and --json only")
+            L, obj, ok = cons_check(a)
+            text = [f"FAIL {fid}: {d}" for fid, d in L.findings] or [ok]
+            out = sys.stderr if a["json"] else sys.stdout
+            for t in text:
+                print(t, file=out)
+            if a["json"]:
+                print(json.dumps(obj, separators=(",", ":")))
+            return 1 if L.findings else 0
         if a["scope_id"] is not None:
             if any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "decisions", "matrix", "states", "json",
                                                        "edges", "prds")):
