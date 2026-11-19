@@ -270,9 +270,9 @@ R2_REFUSED = (("policy-missing-env", "policy-missing: SKILL_ROUTE_POLICY names n
               ("unanchored-policy-error", INJECTED), ("malformed-request-json", "malformed request JSON: JSONDecodeError"))
 
 
-def uncovered_skip(out, reasons):
+def uncovered_skip(out, reasons, rows=()):
     fx = earlier(tfx(out, w=f"skipped: blocked decision={OUT_TS}"))
-    fx.rows.append(denied("wwhtbt", reasons))
+    fx.rows += [denied("wwhtbt", reasons)] + list(rows)
     fx.build()
     policy(out)
 
@@ -282,8 +282,11 @@ for _n, _r in R2_ACCEPTED:
     case("ac02-r2-accepted-%s-uncorroborated" % _n, 1, ["analysis-skip-refused"], detail="falls between")(
         (lambda r: lambda out: skip_fx(out, r.format("wwhtbt"), rows=[later("wwhtbt")]))(_r))
     case("ac02-r2-accepted-%s-uncovered" % _n, 0, [], "d['analysis'].get('covered') == 'none'")((lambda r: lambda out: uncovered_skip(out, r.format("wwhtbt")))(_r))
+    case("ac02-r2-accepted-%s-uncovered-uncorroborated" % _n, 0, [], "d['analysis'].get('covered') == 'none'")(       # review r13 MEDIUM-1
+        (lambda r: lambda out: uncovered_skip(out, r.format("wwhtbt"), rows=[later("wwhtbt")]))(_r))
 for _n, _r in R2_REFUSED:
     case("ac02-r2-refused-%s" % _n, 1, ["analysis-skip-refused"], detail="not a route outage")((lambda r: lambda out: skip_fx(out, r.format("wwhtbt")))(_r))
+    case("ac02-r2-refused-%s-uncovered" % _n, 0, [], "d['analysis'].get('covered') == 'none'")((lambda r: lambda out: uncovered_skip(out, r.format("wwhtbt")))(_r))
 
 
 @case("ac02-denial-after-header", 1, ["analysis-skip-refused"], detail="is not before the entry header")
@@ -600,7 +603,7 @@ case("ac05-transient-page", 1, ["analysis-trigger-unmet"])(lambda out: five_fx(o
 for _n, _r in R2_ACCEPTED:                       # R11-F5: each R2-accepted text, corroborated and not, and each R2-refused text, on the R5 trigger
     case("ac05-r2-accepted-%s-corroborated" % _n, 0, [])((lambda r: lambda out: five_fx(out, "failed-acceptance", f"skipped: blocked decision={OUT_TS}",
                                                                                           [denied("5whysandrhyme", r.format("5whysandrhyme"))]))(_r))
-    case("ac05-r2-accepted-%s-uncorroborated" % _n, 1, ["analysis-trigger-unmet"])((lambda r: lambda out: five_fx(
+    case("ac05-r2-accepted-%s-uncorroborated" % _n, 1, ["analysis-trigger-unmet"], detail="falls between")((lambda r: lambda out: five_fx(
         out, "failed-acceptance", f"skipped: blocked decision={OUT_TS}", [denied("5whysandrhyme", r.format("5whysandrhyme")), later("5whysandrhyme")]))(_r))
 for _n, _r in R2_REFUSED:
     case("ac05-r2-refused-%s" % _n, 1, ["analysis-trigger-unmet"], detail="not a route outage")((lambda r: lambda out: five_fx(

@@ -15,9 +15,10 @@ replacements but is not hashed. Times of day, the order of every instant, and ev
 
 Refused (exit 2, nothing written):
   - a ROOT or --also file that holds a NEW date already (the map must stay one-to-one, so a later re-date of the result is unambiguous);
-  - anything under a ROOT that is not a regular file or a directory, a symlinked directory included, and an --also file that is a ROOT file;
+  - anything under a ROOT that is not a regular file or a directory, a symlinked directory included, and an --also file that is a ROOT file
+    or a symlink;
   - an OLD date that occurs in no ROOT and no --also file;
-  - two paths renamed onto one;
+  - two paths renamed onto one, or a rename onto a path that exists and is not a file being rewritten;
   - a manifest line that verified before the rewrite (sha256sum -c, paths relative to the manifest's directory) and does not after;
   - a hex run of 8 or more characters left in the rewritten bytes that is a prefix of a replaced value (a short reference this tool cannot
     regenerate);
@@ -94,6 +95,8 @@ def plan(pairs, roots, also):
                 files[p] = (r, fh.read())
     real = {os.path.realpath(q) for q in files}
     for p in also:
+        if os.path.islink(p):                                              # review r13 LOW-4: a link would be replaced by a regular file
+            raise Refused("--also file %s is a symlink" % p)
         if p in files or os.path.realpath(p) in real:                      # review r10 LOW-4: an absolute or linked spelling of a ROOT file
             raise Refused("--also file %s is inside a ROOT" % p)
         with open(p, "rb") as fh:
@@ -112,6 +115,8 @@ def plan(pairs, roots, also):
         if q in seen:
             raise Refused("two paths renamed onto %s: %s and %s" % (q, seen[q], p))
         seen[q] = p
+        if q != p and os.path.lexists(q) and q not in files:               # review r13 LOW-3: a rename onto something that is not a planned file
+            raise Refused("rename target %s already exists" % q)
     dated = {p: sub_dates(b, bpairs) for p, (r, b) in files.items()}
     hashed = [p for p, (r, _) in files.items() if r is not None]
     # Fixed point: each round recomputes every derived value from the previous round's map. References form no cycle (a file cannot hold
@@ -213,7 +218,7 @@ def main(argv=None):
                 while d and not os.path.isdir(d):          # the directories a rename needs, outermost last, so a failure can remove them
                     made.append(d)
                     d = os.path.dirname(d)
-                os.makedirs(os.path.dirname(q), exist_ok=True)
+                os.makedirs(os.path.dirname(q) or ".", exist_ok=True)              # an --also file in the working directory (review r13 LOW-1)
                 cur = os.path.join(os.path.dirname(q), ".redate-%d-%s" % (os.getpid(), os.path.basename(q)))
                 with open(cur, "wb") as fh:
                     fh.write(final[p])

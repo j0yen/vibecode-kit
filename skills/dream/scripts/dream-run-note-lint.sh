@@ -162,7 +162,9 @@ TRIGGER_CLASSES = ("recurring-failure", "failed-acceptance", "consequential-obst
 # `policy-missing:` texts (a policy file the caller named) and every other text are no outage. Whether an outage was caller-induced (a malformed policy
 # reached through SKILL_ROUTE_POLICY, --policy or FABLE_LAUNCH_TEST, or `ledger lookup unavailable` through PATH) is not in the row: A1300's producer.
 OUTAGE_TEXTS = ("policy file not found", "policy is malformed")
-OUTAGE_RES = (re.compile(r"malformed policy JSON: [A-Za-z_][A-Za-z0-9_]*"),   # the ledger id grammar is the resolver's own (ID_RE, line 140)
+OUTAGE_RES = (re.compile(r"malformed policy JSON: [A-Za-z_][A-Za-z0-9_]*"),   # the ledger id grammar is the resolver's own (line 140); its `$`
+              # also matches before a trailing newline, so a caller-written `ledger:A1\n` reaches the outage text with a newline, which this refuses
+              # (fail closed; R2 refuses caller-induced texts anyway, review r13 LOW-6)
               re.compile(r"ledger lookup unavailable; cannot verify ledger:[A-Za-z0-9][A-Za-z0-9._-]{0,63} \(fail closed\)"))
 OUTAGE_INFIX = "(policy error, fail closed)"
 
