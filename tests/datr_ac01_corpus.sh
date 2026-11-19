@@ -63,7 +63,7 @@ for name in sorted(os.listdir(logs)):
                         refused += 1
                     else:
                         bad += 1; print(f"FAIL {name} entry {m.group(1)}: covered ({covered}) free-text skip: rc={p.returncode} findings={fid}")
-            elif covered not in (None, "none"):
+            elif a and covered not in (None, "none"):    # only a free-text skip is rewritten; an entry that already ran a page is not this AC's
                 errs = [l for l in p.stderr.splitlines() if l.startswith(("FAIL analysis-skip-refused", "FAIL analysis-provenance-missing: wwhtbt", "FAIL analysis-page-unbound: wwhtbt"))]
                 if errs:
                     bad += 1; print(f"FAIL {name} entry {m.group(1)} rewritten to ran: {errs[:2]}")
