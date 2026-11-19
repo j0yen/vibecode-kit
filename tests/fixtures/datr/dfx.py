@@ -286,6 +286,23 @@ def _(out):
     policy(out)
 
 
+@case("ac02-header-date-not-zero-padded", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
+def _(out):
+    fx = tfx(out, w=FREE)
+    fx.ts = "2026-1-25T02:00:00-08:00"            # no zero-padded date: R7 cannot place it before the cutover (date never writes this form)
+    fx.build()
+    policy(out)
+
+
+@case("ac02-snapshot-row-without-scope-id", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
+def _(out):
+    fx = trig_snapshot(out, FREE)                # the row has no scope_id, and the file now pins today's bytes
+    fx.rows[-1] = {k: v for k, v in fx.rows[-1].items() if k != "scope_id"}
+    fx.files["notes/snapshots/s0/s0.sha256"] = f"{sha('# foo stub' + chr(10))}  PRD-foo.md\n"
+    fx.build()
+    policy(out)
+
+
 @case("ac02-sloppy-earlier-header-keeps-today", 0, [], "d['analysis'] is not None and 'covered' not in d['analysis']")
 def _(out):
     fx = tfx(out, w=FREE)
@@ -461,6 +478,23 @@ def _(out):
     fx.tail = ["Failure: none"]
     fx.build()
     policy(out)
+
+
+S_X = "bbbbbbbb-0000-4000-8000-000000000077"
+REJ_NAMES_A9 = REJ[1].replace("\n", f"\nsee also the parallel review of A9, session {S_X}\n", 1)   # the REJECT file also names a later review of A9
+
+
+def reject_names_other_task(out, covered):
+    fx = tfx(out, failure="Failure: none") if covered else earlier(tfx(out, w=FREE, failure=None))
+    fx.files[REJ[0]] = REJ_NAMES_A9
+    fx.rows += [review_row(CUT + "T01:10:00-08:00", S_F), review_row(CUT + "T01:15:00-08:00", S_X, task="A9")]
+    fx.build()
+    policy(out)
+
+
+case("ac04-reject-file-also-names-another-task-review", 1, ["failure-class-mismatch"])(lambda out: reject_names_other_task(out, True))
+case("ac04-uncovered-reject-file-also-names-another-task-review", 1, ["line-missing"], detail="set the floor failed-acceptance")(
+    lambda out: reject_names_other_task(out, False))
 
 
 def uncovered_floor(out, failure, f="skipped: not a failure seed"):

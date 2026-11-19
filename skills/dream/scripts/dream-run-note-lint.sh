@@ -1865,9 +1865,9 @@ def first_lines(path, n=PAGE_LINES):
 # Applies to entries whose header date is on or after TRIGGER_CUTOVER (R7). A covered entry (R1) records a WWHTBT it ran, an exact reuse (R3) or a skip
 # bound to a recorded route denial (R2), and a typed Failure: line (R4) whose trigger classes need a bound 5whysandrhyme page (R5).
 def header_date(ts):
-    """R7: the ISO date (YYYY-MM-DD) an entry header starts with, month and day zero-padded, or None when it starts with no valid date followed by the
-    end, `T` or a space."""
-    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?=$|[T ])", ts or "")
+    """R7: the ISO date (YYYY-MM-DD, zero-padded) an entry header starts with, or None when it starts with no valid such date followed by the end, `T` or
+    a space (such a header counts as after the cutover; targeted review abb2e978 H1)."""
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})(?=$|[T ])", ts or "")
     if not m:
         return None
     try:
@@ -1913,7 +1913,7 @@ def newest_review_snapshot(same, task, rows, resolve):
         sid, digests = scope_canon(resolve(found["scope"]))
     except ScopeError:
         return found["scope"], None
-    return (found["scope"], digests) if found.get("scope_id") in (None, sid) else (found["scope"], None)
+    return (found["scope"], digests) if found.get("scope_id") == sid else (found["scope"], None)   # a row without scope_id proves nothing (abb2e978 L1)
 
 
 def covered_kind(entries, ei, task, states, mrec, rows, home, resolve):
@@ -2123,7 +2123,9 @@ def failure_floor(entries, ei, task, states, rows, home):
         if not named:
             continue
         # one file, one session: a re-review cites earlier review sessions, never later ones, so the latest-launched session it names is its own
-        # (code review 88ec4f26 F2, behaviour review 96397ae0 M1)
+        # (code review 88ec4f26 F2, behaviour review 96397ae0 M1); a file that also names another task's review (a parallel one) stays with this Task's
+        # session (targeted review abb2e978 M2)
+        named = [r for r in named if r.get("task_id") == task] or named
         r = max(named, key=lambda r: (not launched(r)[0], launched(r)[1], r["session"]))
         x = by_sess.setdefault(r["session"], {"row": r, "files": [], "v": set()})
         x["files"].append(os.path.relpath(p, home))
