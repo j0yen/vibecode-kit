@@ -2101,7 +2101,8 @@ def failure_floor(entries, ei, task, states, rows, home):
     .jsonl excluded) whose first lines name the session of a dream `review` launch row. A session's verdicts are the union of its files' verdict lines, so a
     result.json and the verdict file it captures count once. Sessions of the Task launched after the Task's previous entry set the floor: a REJECT of a slug the
     State: names makes it failed-acceptance; a FIX or REJECT of such a slug after an earlier session's (by launch time) FIX or REJECT of that slug in this home
-    makes it recurring-failure. A file whose first lines name several review sessions counts for the latest-launched one only.
+    makes it recurring-failure. A file whose first lines name several review sessions counts for one session only: the latest-launched session of this
+    Task it names, else of any task.
     -> (None | "failed-acceptance" | "recurring-failure", [why])."""
     if not rows or task is None:
         return None, []
