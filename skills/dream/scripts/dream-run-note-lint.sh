@@ -1864,6 +1864,18 @@ def first_lines(path, n=PAGE_LINES):
 # ---------------------------------------------------------------- trigger record (PRD-dream-analysis-trigger-record, A1723)
 # Applies to entries whose header date is on or after TRIGGER_CUTOVER (R7). A covered entry (R1) records a WWHTBT it ran, an exact reuse (R3) or a skip
 # bound to a recorded route denial (R2), and a typed Failure: line (R4) whose trigger classes need a bound 5whysandrhyme page (R5).
+def header_date(ts):
+    """R7: the ISO date (YYYY-MM-DD) an entry header starts with, month and day zero-padded, or None when it starts with no valid date followed by the
+    end, `T` or a space."""
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?=$|[T ])", ts or "")
+    if not m:
+        return None
+    try:
+        return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+    except ValueError:
+        return None
+
+
 def entry_seed_tokens(e):
     """R1: the tokens of one entry's last Seeds: line; `file:<path> sha256=<hex>` (a file seed) is one token."""
     s = None
@@ -2313,9 +2325,11 @@ def lint_log(a):
 
     # Analysis
     an = {"wwhtbt": None, "fivewhys": None, "adversarial": None}
-    # trigger-record R7: the header date, which the author writes, or the launcher's own date: a header that is no ISO timestamp, or a Route: bound to a
-    # dream launch row on or after the cutover, puts the entry under R1-R5 too (security review ddf46516 finding 5)
-    post = (entry["ts"][:10] >= TRIGGER_CUTOVER or parse_iso(entry["ts"]) is None
+    # trigger-record R7: the header date, which the author writes, or the launcher's own date: a header with no readable leading date, or a Route: bound
+    # to a dream launch row on or after the cutover, puts the entry under R1-R5 too (security review ddf46516 finding 5). Real headers carry sloppy
+    # times ('2026-09-13T16:2xZ', '2026-09-29T14:55', '2026-11-12'): only the date is read, so every earlier entry keeps 43d5b39's output.
+    hdate = header_date(entry["ts"])
+    post = (hdate is None or hdate >= TRIGGER_CUTOVER
             or bool(route and route.get("decision") and any(r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("session") == route["session"]
                                                           and r.get("ts") == route["decision"] and str(r.get("ts"))[:10] >= TRIGGER_CUTOVER for r in rows or [])))
     failure_lines = [ln.rstrip() for ln in entry["lines"] if ln.startswith("Failure:")] if post else []

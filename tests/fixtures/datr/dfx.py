@@ -278,10 +278,18 @@ def _(out):
     policy(out)
 
 
-@case("ac02-header-not-iso", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
+@case("ac02-header-without-a-readable-date", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
 def _(out):
     fx = tfx(out, w=FREE)
-    fx.ts = "2026-1-25T02:00:00-08:00"
+    fx.ts = "2026-0x-25T02:00:00-08:00"          # sorts before the cutover as text, yet names no date: R7 cannot place it before the cutover
+    fx.build()
+    policy(out)
+
+
+@case("ac02-sloppy-earlier-header-keeps-today", 0, [], "d['analysis'] is not None and 'covered' not in d['analysis']")
+def _(out):
+    fx = tfx(out, w=FREE)
+    fx.ts = "2026-11-12T03:4x-0800"              # a real header form: its date is before the cutover, so today's rules apply
     fx.build()
     policy(out)
 
