@@ -6,7 +6,8 @@ A case is one PRD home, a private decisions log and a routing policy under <outd
 (Fx, row, mx_file), loaded from skills/dream/scripts/dream-run-note-lint.sh as
 tests/fixtures/drmx/mfx.py does, and date the entry under test on the lint's TRIGGER_CUTOVER (R7).
 Mission cases copy the checked-in drfc fixture (the base or one variant, as tests/drfc_lib.sh `use`
-does), whose entries are dated after the cutover, and edit its last entry.
+does), re-date the copy from the fixture's day (2026-11-18, before the cutover) onto the cutover day with
+tests/fixtures/redate.py, so its entries are dated after the cutover, and edit its last entry.
 
 Every case states its expected exit, its exact finding-id set and, where the AC asks for more, a
 predicate on the --json object. `--run` lints each case's last entry with the lint under test (a
@@ -18,6 +19,7 @@ Usage: dfx.py --list [<prefix>]                 case names and expectations
        dfx.py <case> <outdir>                   build one case
        dfx.py --run <prefix> <lint> [<report>]  build and lint every case of <prefix> (ac02, ac03, ...)
 """
+import datetime
 import hashlib
 import json
 import os
@@ -30,6 +32,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 LINT = os.path.join(REPO, "skills", "dream", "scripts", "dream-run-note-lint.sh")
 DRFC = os.path.join(REPO, "tests", "fixtures", "drfc")
+DRFC_DAY = "2026-11-18"                                  # the checked-in drfc fixture's one day (re-dated before the cutover, H1)
+REDATE = os.path.join(REPO, "tests", "fixtures", "redate.py")
 
 
 def lint_helpers(path=LINT):
@@ -45,6 +49,7 @@ H = lint_helpers()
 Fx, row, CUT = H["Fx"], H["row"], H["TRIGGER_CUTOVER"]
 S_W, S_5, M_REL = H["S_W"], H["S_5"], H["M_REL"]
 T_TS, OUT_TS, LATE_TS = CUT + "T02:00:00-08:00", CUT + "T00:30:00-08:00", CUT + "T01:00:00-08:00"
+DAY_BEFORE_CUT = (datetime.date.fromisoformat(CUT) - datetime.timedelta(days=1)).isoformat()
 S_F, S_G, S_R0 = ("bbbbbbbb-0000-4000-8000-0000000000%02d" % i for i in (9, 10, 11))
 AN = "Analysis: wwhtbt={w} 5whys={f} adversarial=" + M_REL + " uncovered=1"
 POLICY = {"evidence": {"ref_pattern": "^(ledger|file|pr|run|commit|page):[^\\s]{2,200}$", "placeholders": ["none", "n/a", "tbd", "todo", "x"]}}
@@ -130,7 +135,8 @@ def trig_snapshot(out, w):
 
 
 def drfc_mission(out, variant, w):
-    """The checked-in drfc mission (Task FC-1, entries dated 2027-02-01, after the cutover): its last entry with the wwhtbt value `w` and a Failure: line."""
+    """The checked-in drfc mission (Task FC-1), its copy re-dated from DRFC_DAY onto the cutover day (so after the cutover, R7): its last
+    entry with the wwhtbt value `w` and a Failure: line."""
     home = os.path.join(out, "home")
     shutil.copytree(os.path.join(DRFC, "home"), home)
     dec = os.path.join(DRFC, "decisions.jsonl")
@@ -138,6 +144,10 @@ def drfc_mission(out, variant, w):
         shutil.copytree(os.path.join(DRFC, "variants", variant, "home"), home, dirs_exist_ok=True)
         dec = os.path.join(DRFC, "variants", variant, "decisions.jsonl")
     shutil.copy(dec, os.path.join(out, "decisions.jsonl"))
+    p = subprocess.run([sys.executable, "-I", REDATE, "--map", f"{DRFC_DAY}={CUT}", "--also", os.path.join(out, "decisions.jsonl"), home],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        raise SystemExit("drfc fixture: re-date onto the cutover day failed: " + (p.stderr or p.stdout).strip())
     log = os.path.join(home, "notes", "dream-log.md")
     lines = open(log, encoding="utf-8").read().split("\n")
     last = max(i for i, ln in enumerate(lines) if ln.startswith("## "))
@@ -154,7 +164,7 @@ def drfc_mission(out, variant, w):
     return None
 
 
-M_OUT, M_LATE = "2027-02-01T12:00:00-08:00", "2027-02-01T12:30:00-08:00"
+M_OUT, M_LATE = CUT + "T12:00:00-08:00", CUT + "T12:30:00-08:00"      # after every row of the re-dated mission copy
 
 
 def add_rows(out, rows):
@@ -270,7 +280,7 @@ def _(out):
 @case("ac02-backdated-header-route-after-cutover", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
 def _(out):
     fx = tfx(out, w=FREE)
-    fx.ts = "2026-11-19T23:59:00-08:00"
+    fx.ts = DAY_BEFORE_CUT + "T23:59:00-08:00"                # the last minute before the cutover day
     dts = CUT + "T00:10:00-08:00"
     fx.entry["Route"] = f"Route: fable-xhigh claude-fable-5-1 xhigh session={H['S_D']} decision={dts}"
     fx.rows.append(row(dts, "launch", "A1", "dream", "fable-xhigh", "claude-fable-5-1", "xhigh", H["S_D"]))

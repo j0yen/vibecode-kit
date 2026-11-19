@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # AC6 (R7) — every fixture checked in at 43d5b39 (through tests/fixtures/drmx/compat.py: drrec home and
-# verified, drei, drsp, and drmr and drfc with every variant; every entry and --last, text and --json)
-# and the 21 real Dream-log entries at their own dates lint byte-identically (stdout, stderr, exit) with
+# verified, drei, drsp, and drmr and drfc with every variant; every entry and --last, text and --json; drmr, drfc
+# and the drmx generator as re-dated before the cutover by tests/fixtures/redate.py, PRD amendment H1)
+# and the 20 real Dream-log entries (CR6, 2026-11-19) at their own dates lint byte-identically (stdout, stderr, exit) with
 # the Cited-tree lint and this one. The real entries come from DATR_REAL_LOGS: a directory of read-only
 # copies of the four Dream logs with their SHA256SUMS (the A1723 continuation's carbon read CR6); without
 # it the test cannot decide the real-entry half and exits 2 after the fixture half. Both lints read the
@@ -41,6 +42,6 @@ for m in re.finditer(r"^## (\S+)  /dream  vision-[^\n]*\n((?:(?!## ).*\n?)*)", t
 PY
 )
 done
-[ "$n" = "${DATR_REAL_ENTRIES:-21}" ] || fail "linted $n governed real entries, want ${DATR_REAL_ENTRIES:-21}"
+[ "$n" = "${DATR_REAL_ENTRIES:-20}" ] || fail "linted $n governed real entries, want ${DATR_REAL_ENTRIES:-20}"
 [ "$reached" -gt 0 ] || fail "every real-entry run exited 2 before the entry checks; the comparison decided nothing"
 pass "fixtures byte-identical; $n real entries byte-identical at their own dates ($reached of $((2*n)) lint pairs past the decisions step; decisions: $dec)"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# AC1 (R1, R2) — read-only copies of the 21 governed entries of the four Dream logs (DATR_REAL_LOGS, the
-# A1723 continuation's carbon read CR6), each re-dated to the cutover: every covered entry whose
+# AC1 (R1, R2) — read-only copies of the 20 governed entries of carbon's four Dream logs (DATR_REAL_LOGS, the
+# A1723 continuation's carbon read CR6 of 2026-11-19, pinned by its SHA256SUMS), each re-dated to the cutover: every covered entry whose
 # wwhtbt=skipped is free text exits 1 with analysis-skip-refused, and the same entry rewritten to
 # `wwhtbt=ran <page>`, the page bound to a wwhtbt launch row of the entry's Task (its first lines name
 # the row's session), stays covered, reports that page bound (provenance.wwhtbt = boundary) and gives no
@@ -9,7 +9,9 @@
 # it adds counts, whatever its message says. An entry with Task: none, or with no well-formed Task: line
 # of its own (read as the lint reads it), has no launch row of its Task to bind, so it is counted apart
 # (task_none). Other findings of an entry linted away from its home are not this AC's.
-# DATR_REAL_REFUSED, when set, is the number of refused entries the corpus must give.
+# DATR_REAL_ENTRIES (default 20) and DATR_REAL_REFUSED (default 18) are the governed entries and the covered
+# free-text skips the corpus must give, both counted on CR6 independently of the lint (the other 2 entries already
+# ran a WWHTBT page and are outside the skip population); set both for another corpus.
 # Without DATR_REAL_LOGS: exit 2.
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/datr_lib.sh"
@@ -113,8 +115,8 @@ if cleared + task_none != refused:                      # AC 1: every refused en
     bad += 1; print(f"FAIL {refused} covered free-text skips refused but {cleared} cleared (+{task_none} Task: none) once rewritten to ran")
 if not refused:                                         # nothing shown: AC 1 needs at least one covered free-text skip
     bad += 1; print("FAIL no covered entry with a free-text wwhtbt=skipped was refused")
-want = os.environ.get("DATR_REAL_REFUSED", "")
-if want and str(refused) != want:
+want = os.environ.get("DATR_REAL_REFUSED", "18")
+if str(refused) != want:
     bad += 1; print(f"FAIL refused {refused} covered free-text skips, want DATR_REAL_REFUSED={want}")
 print(f"entries={n} covered={cov} refused={refused} cleared={cleared} task_none={task_none} bad={bad}")
 sys.exit(1 if bad else 0)
@@ -122,5 +124,5 @@ PY
 ); rc=$?
 printf '%s\n' "$out" | tail -1
 [ "$rc" = 0 ] || fail "$(printf '%s\n' "$out" | head -10)"
-[ "$(printf '%s\n' "$out" | tail -1 | sed -n 's/^entries=\([0-9]*\).*/\1/p')" = "${DATR_REAL_ENTRIES:-21}" ] || fail "want ${DATR_REAL_ENTRIES:-21} governed entries: $(printf '%s\n' "$out" | tail -1)"
+[ "$(printf '%s\n' "$out" | tail -1 | sed -n 's/^entries=\([0-9]*\).*/\1/p')" = "${DATR_REAL_ENTRIES:-20}" ] || fail "want ${DATR_REAL_ENTRIES:-20} governed entries: $(printf '%s\n' "$out" | tail -1)"
 pass "$(printf '%s\n' "$out" | tail -1)"
