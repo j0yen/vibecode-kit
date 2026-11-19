@@ -117,7 +117,11 @@ Verdict files the author does not write set a floor: a REJECT of a slug the entr
 names, in any verdict file under the home's `notes/reviews/` bound to a review launch row of
 the Task since its previous entry (named on a `Review:` line or not), makes the class at least
 `failed-acceptance`; a FIX or REJECT of that slug after its earlier FIX or REJECT in this home
-makes it `recurring-failure` (a first FIX is answered by the repairs file).
+makes it `recurring-failure` (a first FIX is answered by the repairs file). A verdict file whose
+first lines name several review sessions counts for the latest-launched one (a re-review cites
+earlier sessions). An entry that is not covered (Phase 2) keeps today's rules and its `Failure:`
+line is not read, unless verdict files set a floor for it: then it carries the line at the
+floor, and the trigger classes' `/5whysandrhyme` rule applies to it.
 
 **Five whys (failure seeds).** Ask why up to five levels, each answered by an
 observation, stopping at a level outside the system's control. PRDs target the deepest
@@ -156,12 +160,19 @@ line (Phase 4):
 an entry is covered when it carries or inherits a `Mission:` line, its `State:` names a slug no
 earlier entry of its `Task:` names or carries `drafted`, its `Seeds:` line carries a token the
 Task's previous entry did not, or a PRD its `State:` names differs from that slug's digest in the
-newest manifest an earlier entry of the Task binds. A covered entry records a page it ran, an
-exact reuse as above, or `skipped: blocked decision=<ts>`: the decisions log holds a `denied` row
-of that skill and Task at that `ts` whose reasons name a route outage the caller cannot cure (they
-start `policy-missing`, `policy file not found`, `malformed policy` or `ledger lookup unavailable`,
-or contain `(policy error, fail closed)`), and no launch row of that skill, for any task, falls
-between that row and the entry's header. A request the caller can fix, a live-worker denial (the
+newest manifest an earlier entry of the Task binds (a manifest that cannot be read, or is not
+its review row's `scope_id`, counts as changed). The entry's date is its header's, or its dream
+launch row's when that is later. A covered entry records a page it ran, an exact reuse as above
+(the manifest is written with the page and reused unchanged: one regenerated at reuse proves
+nothing), or `skipped: blocked decision=<ts>`: the decisions log holds a `denied` row of that
+skill and Task at that `ts`, before the entry's header, whose reasons name a route outage the
+caller cannot cure in the resolver's own words (they start `policy-missing`, `policy file not
+found`, `malformed policy` or `ledger lookup unavailable`, or are its policy-error form
+`<skill>: policy ... (policy error, fail closed)`; the `policy-missing:` texts for a policy file
+the caller named, `SKILL_ROUTE_POLICY` or `--policy`, and that infix inside caller text the
+resolver quotes are the caller's to cure), and no launch row of that skill, for any task, falls
+between that row and the entry's header, both ends included (a launch row without a readable
+timestamp counts). A request the caller can fix, a live-worker denial (the
 analysis is running; reuse its page when it lands) or an uncorroborated outage is refused, and so
 is any other skip text. When the run has no wiki-write scope, write the page under the PRD home's
 `notes/analysis/`: it binds there by its launch row as anywhere else.

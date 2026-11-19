@@ -48,7 +48,9 @@ T_TS, OUT_TS, LATE_TS = CUT + "T02:00:00-08:00", CUT + "T00:30:00-08:00", CUT + 
 S_F, S_G, S_R0 = ("bbbbbbbb-0000-4000-8000-0000000000%02d" % i for i in (9, 10, 11))
 AN = "Analysis: wwhtbt={w} 5whys={f} adversarial=" + M_REL + " uncovered=1"
 POLICY = {"evidence": {"ref_pattern": "^(ledger|file|pr|run|commit|page):[^\\s]{2,200}$", "placeholders": ["none", "n/a", "tbd", "todo", "x"]}}
-OUTAGE = "policy-missing: /home/x/.config/skill-routing/policy.json"
+OUTAGE = "policy file not found"                       # the resolver's own text when the default policy file is missing (skill-route-resolve.py)
+POLICY_ERROR = "{}: policy alternates entry 0 names no model (policy error, fail closed)"   # the resolver's policy-error form, per skill
+INJECTED = "unknown decision_class '(policy error, fail closed)' for {} (known: plan)"     # R2's infix inside caller text the resolver quotes
 FIXABLE = "evidence: placeholder ref refused (fixable request)"
 LIVE = "live worker: session 0000 holds task A1 (one analysis per task)"
 
@@ -122,7 +124,8 @@ def trig_snapshot(out, w):
     fx = earlier(tfx(out, w=w), extra=[f"Review: notes/reviews/r0.txt reviewer-session={S_R0}"])
     fx.files["notes/reviews/r0.txt"] = f"reviewer session {S_R0}\nfoo APPROVE opus\n"
     fx.files["notes/snapshots/s0/s0.sha256"] = f"{sha('# foo stub, as reviewed\n')}  PRD-foo.md\n"
-    fx.rows.append(dict(review_row(CUT + "T00:05:00-08:00", S_R0), scope="notes/snapshots/s0/s0.sha256"))
+    fx.rows.append(dict(review_row(CUT + "T00:05:00-08:00", S_R0), scope="notes/snapshots/s0/s0.sha256",
+                        scope_id=scope_id(fx.files["notes/snapshots/s0/s0.sha256"])))
     return fx
 
 
@@ -217,6 +220,83 @@ def _(out):
     policy(out)
 
 
+# Follow-up cases from the independent reviews of c2525a2 (code 88ec4f26, security ddf46516, behaviour 96397ae0); each fails at c2525a2
+def skip_fx(out, reasons, w=f"skipped: blocked decision={OUT_TS}", rows=()):
+    fx = tfx(out, w=w)
+    fx.rows += [denied("wwhtbt", reasons)] + list(rows)
+    fx.build()
+    policy(out)
+
+
+FREE = "skipped: a wiki page would be outside this task's scope"
+case("ac02-outage-resolver-policy-error-form", 0, [])(lambda out: skip_fx(out, POLICY_ERROR.format("wwhtbt")))
+case("ac02-outage-infix-in-caller-text", 1, ["analysis-skip-refused"], detail="not a route outage")(lambda out: skip_fx(out, INJECTED.format("wwhtbt")))
+case("ac02-outage-policy-missing-caller-env", 1, ["analysis-skip-refused"], detail="not a route outage")(
+    lambda out: skip_fx(out, "policy-missing: SKILL_ROUTE_POLICY names no readable file"))
+case("ac02-outage-policy-missing-caller-arg", 1, ["analysis-skip-refused"], detail="not a route outage")(
+    lambda out: skip_fx(out, "policy-missing: --policy names no readable file"))
+
+
+@case("ac02-denial-after-header", 1, ["analysis-skip-refused"], detail="is not before the entry header")
+def _(out):
+    t = CUT + "T03:00:00-08:00"
+    fx = tfx(out, w=f"skipped: blocked decision={t}")
+    fx.rows += [denied("wwhtbt", OUTAGE, ts=t)]
+    fx.build()
+    policy(out)
+
+
+case("ac02-launch-in-the-denial-second", 1, ["analysis-skip-refused"], detail="falls between")(lambda out: skip_fx(out, OUTAGE, rows=[later("wwhtbt", ts=OUT_TS)]))
+case("ac02-launch-ts-unreadable", 1, ["analysis-skip-refused"], detail="has no ISO timestamp")(
+    lambda out: skip_fx(out, OUTAGE, rows=[later("wwhtbt", ts=CUT + "T01:00:00")]))
+
+
+@case("ac02-snapshot-unreadable", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
+def _(out):
+    fx = trig_snapshot(out, FREE)
+    fx.files["notes/snapshots/s0/s0.sha256"] = None
+    fx.build()
+    policy(out)
+
+
+@case("ac02-snapshot-not-its-scope-id", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
+def _(out):
+    fx = trig_snapshot(out, FREE)          # the row keeps the reviewed manifest's scope_id; the file now pins today's bytes
+    fx.files["notes/snapshots/s0/s0.sha256"] = f"{sha('# foo stub' + chr(10))}  PRD-foo.md\n"
+    fx.build()
+    policy(out)
+
+
+@case("ac02-backdated-header-route-after-cutover", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
+def _(out):
+    fx = tfx(out, w=FREE)
+    fx.ts = "2026-11-19T23:59:00-08:00"
+    dts = CUT + "T00:10:00-08:00"
+    fx.entry["Route"] = f"Route: fable-xhigh claude-fable-5-1 xhigh session={H['S_D']} decision={dts}"
+    fx.rows.append(row(dts, "launch", "A1", "dream", "fable-xhigh", "claude-fable-5-1", "xhigh", H["S_D"]))
+    fx.build()
+    policy(out)
+
+
+@case("ac02-header-not-iso", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
+def _(out):
+    fx = tfx(out, w=FREE)
+    fx.ts = "2026-1-25T02:00:00-08:00"
+    fx.build()
+    policy(out)
+
+
+Z64 = "0" * 64
+case("ac02-uncovered-wwhtbt-reused-extended", 1, ["analysis-grammar"], "d['analysis'].get('covered') == 'none'", detail="wwhtbt value 'reused")(
+    lambda out: (lambda fx: (fx.files.__setitem__("visions/wwhtbt.md", f"# wwhtbt page\ntask: A1\nsession: {S_W}\n"),
+                             fx.entry.__setitem__("Analysis", AN.format(w=f"reused visions/wwhtbt.md sha256={Z64} inputs=notes/none.sha256", f="skipped: x")),
+                             fx.build(), policy(out)))(earlier(tfx(out, failure=None))))
+case("ac02-uncovered-5whys-reused", 1, ["analysis-grammar"], "d['analysis'].get('covered') == 'none'", detail="5whys value 'reused")(
+    lambda out: (lambda fx: (fx.build(), policy(out)))(earlier(tfx(out, w="skipped: nothing new to plan", f=f"reused visions/nope.md sha256={Z64}", failure=None))))
+case("ac02-uncovered-failure-line-not-read", 0, [], "d['analysis'].get('covered') == 'none' and d['analysis'].get('failure') is None")(
+    lambda out: (lambda fx: (fx.build(), policy(out)))(earlier(tfx(out, w="skipped: nothing new to plan", failure="Failure: flaky"))))
+
+
 # ---------------------------------------------------------------- AC 3: R3 exact reuse
 def reuse(out, page_sha=None, edit_page=None, edit_input=None, manifest="ok", seed=False, bound=True, inputs="notes/inputs/manifest.sha256"):
     fx = tfx(out)
@@ -261,7 +341,7 @@ case("ac03-omits-seed", 1, ["analysis-reuse-incomplete"], detail="notes/seed.md"
 case("ac03-manifest-absent", 1, ["analysis-grammar"], detail="absent or empty")(lambda out: reuse(out, manifest="absent"))
 case("ac03-manifest-empty", 1, ["analysis-grammar"], detail="absent or empty")(lambda out: reuse(out, manifest="empty"))
 case("ac03-manifest-outside-home", 1, ["analysis-grammar"], detail="is not under the PRD home")(lambda out: reuse(out, inputs="../elsewhere.sha256"))
-case("ac03-page-unbound", 1, ["analysis-provenance-missing"])(lambda out: reuse(out, bound=False))
+case("ac03-page-unbound", 1, ["analysis-provenance-missing"], "d['analysis']['reuse']['verified'] is False")(lambda out: reuse(out, bound=False))
 
 
 @case("ac03-no-inputs", 1, ["analysis-grammar"], detail="reused <page> sha256=<64 hex> inputs=<manifest>")
@@ -274,6 +354,24 @@ def _(out):
     i = t.index(" sha256=", t.index("wwhtbt=reused"))
     t = t[:i] + t[i + len(" sha256=") + 64:]
     open(log, "w", encoding="utf-8").write(t)
+
+
+def reuse_cites(out, extra):
+    """An exact reuse whose page also cites `extra`, which the manifest does not list."""
+    reuse(out)
+    p = os.path.join(out, "home", "visions", "wwhtbt.md")
+    page = open(p, encoding="utf-8").read() + extra + "\n"
+    open(p, "w", encoding="utf-8").write(page)
+    log = os.path.join(out, "home", "notes", "dream-log.md")
+    t = open(log, encoding="utf-8").read()
+    i = t.index("sha256=", t.index("wwhtbt=reused")) + len("sha256=")
+    open(log, "w", encoding="utf-8").write(t[:i] + sha(page) + t[i + 64:])
+
+
+case("ac03-omits-home-relative-citations", 1, ["analysis-reuse-incomplete"], detail="Notes/wiki/goal.md")(
+    lambda out: reuse_cites(out, "it also reads ~/Notes/wiki/goal.md and $HOME/inputs/b.md"))
+case("ac03-cites-a-path-not-on-this-host", 1, ["analysis-reuse-incomplete"], detail="not files on this host")(
+    lambda out: reuse_cites(out, "it also reads /var/lib/datr-nowhere/state.db on another host"))
 
 
 # ---------------------------------------------------------------- AC 4: R4 Failure: line and its floor
@@ -339,6 +437,39 @@ case("ac04-unbound-reject-is-no-floor", 0, [])(lambda out: fail_fx(out, "Failure
     ("notes/reviews/author-draft.txt", "foo REJECT opus\n", "cccccccc-0000-4000-8000-000000000099")], named=False))
 
 
+@case("ac04-re-review-names-the-earlier-session", 0, [], "d['analysis']['failure'] == {'class': 'none', 'refs': []}")
+def _(out):
+    fx = tfx(out, failure="Failure: none")        # S_G's first FIX of foo; its file also names S_F (whose APPROVE it re-reviews)
+    fx.files["notes/reviews/r1.txt"] = f"reviewer session {S_F}\nfoo APPROVE opus\n"
+    fx.files["notes/reviews/r2.txt"] = f"reviewer session {S_G}\nre-review of notes/reviews/r1.txt (reviewer-session {S_F})\nfoo FIX opus\n"
+    fx.rows += [review_row(CUT + "T01:10:00-08:00", S_F), review_row(CUT + "T01:20:00-08:00", S_G)]
+    fx.build()
+    policy(out)
+
+
+@case("ac04-two-failure-lines", 1, ["failure-grammar"], detail="2 Failure: lines")
+def _(out):
+    fx = tfx(out, f=PAGE5, failure="Failure: recurring-failure ledger:A1")
+    fx.tail = ["Failure: none"]
+    fx.build()
+    policy(out)
+
+
+def uncovered_floor(out, failure, f="skipped: not a failure seed"):
+    fx = earlier(tfx(out, w=FREE, f=f, failure=failure))
+    fx.files[REJ[0]] = REJ[1]
+    fx.rows.append(review_row(CUT + "T01:10:00-08:00", S_F))
+    fx.build()
+    policy(out)
+
+
+case("ac04-uncovered-floor-needs-the-line", 1, ["line-missing"], "d['analysis'].get('covered') == 'none'", detail="set the floor failed-acceptance")(
+    lambda out: uncovered_floor(out, None))
+case("ac04-uncovered-floor-none", 1, ["failure-class-mismatch"], "d['analysis'].get('covered') == 'none'")(lambda out: uncovered_floor(out, "Failure: none"))
+case("ac04-uncovered-floor-met", 0, [], "d['analysis']['failure']['class'] == 'failed-acceptance'")(
+    lambda out: uncovered_floor(out, "Failure: failed-acceptance ledger:A1", f=PAGE5))
+
+
 # ---------------------------------------------------------------- AC 5: R5 5whysandrhyme trigger
 FIVE = f"# five whys page\nsession: {S_5}\n"
 
@@ -359,9 +490,9 @@ for _c in ("recurring-failure", "failed-acceptance", "consequential-obstacle"):
     case(f"ac05-{k}-bound-page", 0, [])((lambda c: lambda out: five_fx(out, c, PAGE5))(_c))
     case(f"ac05-{k}-inline", 1, ["analysis-trigger-unmet"])((lambda c: lambda out: five_fx(out, c, "inline"))(_c))
     case(f"ac05-{k}-skip-corroborated", 0, [])((lambda c: lambda out: five_fx(out, c, f"skipped: blocked decision={OUT_TS}",
-                                                                                 [denied("5whysandrhyme", "malformed policy: expected object")]))(_c))
+                                                                                 [denied("5whysandrhyme", POLICY_ERROR.format("5whysandrhyme"))]))(_c))
     case(f"ac05-{k}-skip-later-launch", 1, ["analysis-trigger-unmet"])((lambda c: lambda out: five_fx(out, c, f"skipped: blocked decision={OUT_TS}",
-                                                                                                      [denied("5whysandrhyme", "malformed policy: expected object"),
+                                                                                                      [denied("5whysandrhyme", POLICY_ERROR.format("5whysandrhyme")),
                                                                                                        later("5whysandrhyme")]))(_c))
     case(f"ac05-{k}-skip-fixable", 1, ["analysis-trigger-unmet"])((lambda c: lambda out: five_fx(out, c, f"skipped: blocked decision={OUT_TS}",
                                                                                                  [denied("5whysandrhyme", FIXABLE)]))(_c))
@@ -373,6 +504,22 @@ for _c in ("recurring-failure", "failed-acceptance", "consequential-obstacle"):
 case("ac05-transient-inline", 0, [])(lambda out: five_fx(out, "transient", "inline", refs="run:retry-1"))
 case("ac05-transient-skipped-transient", 0, [])(lambda out: five_fx(out, "transient", "skipped: transient", refs="run:retry-1"))
 case("ac05-transient-page", 1, ["analysis-trigger-unmet"])(lambda out: five_fx(out, "transient", PAGE5, refs="run:retry-1"))
+
+
+case("ac05-skip-infix-in-caller-text", 1, ["analysis-trigger-unmet"], detail="not a route outage")(
+    lambda out: five_fx(out, "failed-acceptance", f"skipped: blocked decision={OUT_TS}", [denied("5whysandrhyme", INJECTED.format("5whysandrhyme"))]))
+
+
+def five_reused_below_trigger(out, failure):
+    fx = tfx(out, f=REUSED7, failure=failure)
+    fx.files["visions/5whys-a7.md"] = f"# five whys page of A7\nsession: {S_G}\n"
+    fx.rows.append(row(CUT + "T00:20:00-08:00", "launch", "A7", "5whysandrhyme", "opus-xhigh", "claude-opus-5-5", "xhigh", S_G))
+    fx.build()
+    policy(out)
+
+
+case("ac05-none-takes-today-5whys", 1, ["analysis-grammar"], detail="5whys value 'reused")(lambda out: five_reused_below_trigger(out, "Failure: none"))
+case("ac05-other-takes-today-5whys", 1, ["analysis-grammar"], detail="5whys value 'reused")(lambda out: five_reused_below_trigger(out, "Failure: other ledger:A1"))
 
 
 # ---------------------------------------------------------------- AC 8: notes written as SKILL.md Phases 1-2 say lint clean

@@ -1800,7 +1800,7 @@ def parse_analysis(s, extended=False):
     mm = re.match(r"^(ran|reused)\s+(\S+)$", w)
     mr = re.match(r"^reused\s+(\S+)\s+sha256=([0-9a-f]{64})\s+inputs=(\S+)$", w) if extended else None
     if mr:
-        out["wwhtbt"] = ("reused", mr.group(1), {"sha256": mr.group(2), "inputs": mr.group(3)})
+        out["wwhtbt"] = ("reused", mr.group(1), {"sha256": mr.group(2), "inputs": mr.group(3), "raw": w})
     elif mm:
         out["wwhtbt"] = (mm.group(1), mm.group(2))
     elif re.match(r"^skipped:\s*\S", w):
@@ -1810,7 +1810,7 @@ def parse_analysis(s, extended=False):
     mm = re.match(r"^page\s+(\S+)$", f)
     mr = re.match(r"^reused\s+(\S+)\s+sha256=([0-9a-f]{64})$", f) if extended else None
     if mr:
-        out["fivewhys"] = ("reused", mr.group(1), {"sha256": mr.group(2)})
+        out["fivewhys"] = ("reused", mr.group(1), {"sha256": mr.group(2), "raw": f})
     elif mm:
         out["fivewhys"] = ("page", mm.group(1))
     elif f == "inline":
@@ -1894,13 +1894,14 @@ def newest_review_snapshot(same, task, rows, resolve):
             m4 = [r for r in rows or [] if r.get("session") == m.group(1) and r.get("decision") == "launch" and r.get("skill") == "dream"
                   and r.get("task_id") == task and r.get("role") == "review"]
             if m4 and isinstance(m4[-1].get("scope"), str) and m4[-1]["scope"]:
-                found = m4[-1]["scope"]
+                found = m4[-1]
     if found is None:
         return None
-    try:
-        return found, scope_canon(resolve(found))[1]
+    try:          # fail closed: an unreadable snapshot, or one whose canonical id is not the row's scope_id, is no proof of unchanged bytes (security ddf46516 finding 4)
+        sid, digests = scope_canon(resolve(found["scope"]))
     except ScopeError:
-        return None
+        return found["scope"], None
+    return (found["scope"], digests) if found.get("scope_id") in (None, sid) else (found["scope"], None)
 
 
 def covered_kind(entries, ei, task, states, mrec, rows, home, resolve):
@@ -1919,6 +1920,8 @@ def covered_kind(entries, ei, task, states, mrec, rows, home, resolve):
     if new:
         return "new-material", f"Seeds: carries {new[0]}, which Task {task}'s previous entry did not"
     snap = newest_review_snapshot(same, task, rows, resolve)
+    if snap is not None and snap[1] is None:
+        return "new-material", f"the review snapshot {snap[0]} an earlier entry of Task {task} binds is unreadable or is not its review row's scope_id"
     if snap is not None:
         for slug in states:
             want = snap[1].get(f"PRD-{slug}.md".encode())
@@ -1928,10 +1931,18 @@ def covered_kind(entries, ei, task, states, mrec, rows, home, resolve):
     return "none", None
 
 
-def outage_reason(reasons):
-    """R2: a route outage the caller cannot cure."""
-    r = reasons if isinstance(reasons, str) else ""
-    return r.startswith(OUTAGE_PREFIXES) or OUTAGE_INFIX in r
+CALLER_POLICY_MISSING = ("policy-missing: SKILL_ROUTE_POLICY", "policy-missing: --policy")
+
+
+def outage_reason(reasons, skill):
+    """R2: a route outage the caller cannot cure, in the resolver's own words: a reason that starts with one of R2's prefixes, except the two
+    `policy-missing:` texts the resolver writes only when the caller itself named the policy file (SKILL_ROUTE_POLICY, --policy), or a reason in the
+    resolver's policy-error form `<skill>: policy ... (policy error, fail closed)`. R2's infix elsewhere in a reason can be caller text the resolver quotes
+    (`unknown decision_class '...'`), a request the caller can fix (security review ddf46516 findings 1-2)."""
+    r = reasons.strip() if isinstance(reasons, str) else ""
+    if r.startswith(CALLER_POLICY_MISSING):
+        return False
+    return r.startswith(OUTAGE_PREFIXES) or (r.startswith(skill + ": policy ") and r.endswith(OUTAGE_INFIX))
 
 
 def blocked_skip_refusal(value, skill, task, rows, entry_ts):
@@ -1945,27 +1956,38 @@ def blocked_skip_refusal(value, skill, task, rows, entry_ts):
     hits = [r for r in rows if r.get("ts") == m.group(1) and r.get("decision") == "denied" and r.get("skill") == skill and r.get("task_id") == task]
     if len(hits) != 1:
         return f"{len(hits)} denied {skill} rows of task {task} at ts={m.group(1)} (want exactly one)"
-    if not outage_reason(hits[0].get("reasons")):
+    if not outage_reason(hits[0].get("reasons"), skill):
         return f"the denied row's reasons are not a route outage the caller cannot cure: {str(hits[0].get('reasons'))[:160]}"
     t0, t1 = parse_iso(m.group(1)), parse_iso(entry_ts)
     if t0 is None or t1 is None:
         return f"decision={m.group(1)} or the entry header {entry_ts} is not an ISO timestamp with an offset"
-    for r in rows:
-        t = parse_iso(r.get("ts") or "") if r.get("decision") == "launch" and r.get("skill") == skill else None
-        if t is not None and t0 < t < t1:
-            return f"the outage is not corroborated: a {skill} launch row at {r.get('ts')} (task {r.get('task_id')}) falls after the denied row"
+    if not t0 < t1:      # the window the launcher log must leave empty runs from the denial to the header (code 88ec4f26 L1, behaviour 96397ae0 M2)
+        return f"the denied row decision={m.group(1)} is not before the entry header {entry_ts}"
+    for r in rows:       # both ends count, and a launch row without a readable ts could fall anywhere (security ddf46516 finding 6)
+        if r.get("decision") != "launch" or r.get("skill") != skill:
+            continue
+        t = parse_iso(r.get("ts") or "")
+        if t is None or t0 <= t <= t1:
+            return (f"the outage is not corroborated: a {skill} launch row at {r.get('ts')} (task {r.get('task_id')}) "
+                    + ("has no ISO timestamp with an offset, so it may fall after the denied row" if t is None else "falls between the denied row and the entry header"))
     return None
 
 
-CITED_ABS_RE = re.compile(r"(?<![\w./~-])(/(?:[\w.@+-]+/)+[\w.@+-]+)")
+CITED_ABS_RE = re.compile(r"(?<![\w./~$}-])(/(?:[\w.@+-]+/)+[\w.@+-]+)")
+CITED_HOME_RE = re.compile(r"(?<![\w./~$-])(?:~|\$HOME|\$\{HOME\})(/(?:[\w.@+-]+/)*[\w.@+-]+)")
 FILE_REF_RE = re.compile(r"\bfile:([^\s`'\")\]>]+)")
 
 
 def page_citations(text, home):
-    """R3: the absolute paths (two segments or more) and `file:` refs a page cites, trailing punctuation dropped, `file:` refs resolved against the home."""
+    """R3: the absolute paths (two segments or more) and `file:` refs a page cites, trailing punctuation dropped, `file:` refs resolved against the home;
+    `~/`, `$HOME/` and `${HOME}/` paths count as absolute paths under the lint's HOME (security review ddf46516 finding 7)."""
     out = []
     for m in CITED_ABS_RE.finditer(text):
         p = m.group(1).rstrip(".,;:")
+        if p not in out:
+            out.append(p)
+    for m in CITED_HOME_RE.finditer(text):
+        p = os.path.expanduser("~") + m.group(1).rstrip(".,;:")
         if p not in out:
             out.append(p)
     for m in FILE_REF_RE.finditer(text):
@@ -2013,11 +2035,20 @@ def reuse_check(L, label, page, sha, inputs, entry, home, resolve):
             s = t.split()[0][len("file:"):]
             want.append(s if os.path.isabs(s) else os.path.join(home, s))
     missing = [p for p in dict.fromkeys(want) if not os.path.isdir(p) and os.path.realpath(p) not in listed]
-    if missing:
-        L.fail("analysis-reuse-incomplete", f"{label}: inputs manifest {inputs} omits {', '.join(missing[:5])}" + (f" (+{len(missing) - 5} more)" if len(missing) > 5 else ""))
+    if missing:   # a cited path that is no file on this host can never be listed: the page cannot be reused here (behaviour review 96397ae0 M3, L5)
+        absent = [p for p in missing if not os.path.exists(p)]
+        unlisted = [p for p in missing if p not in absent]
+
+        def few(ps):
+            return ", ".join(ps[:5]) + (f" (+{len(ps) - 5} more)" if len(ps) > 5 else "")
+        L.fail("analysis-reuse-incomplete", f"{label}: inputs manifest {inputs}"
+               + (f" omits {few(unlisted)} (its paths resolve against its own directory {mdir})" if unlisted else "")
+               + ("; and" if unlisted and absent else "")
+               + (f" cannot list {few(absent)}, which the page cites and which are not files on this host; re-run the analysis" if absent else ""))
         return out
     try:
-        p = subprocess.run(["sha256sum", "-c", "--quiet", "--", os.path.basename(mfull)], cwd=mdir, capture_output=True, text=True, timeout=300)
+        p = subprocess.run(["sha256sum", "-c", "--quiet", "--", os.path.basename(mfull)], cwd=mdir, capture_output=True, text=True, timeout=300,
+                           stdin=subprocess.DEVNULL)
         rc, msg = p.returncode, (p.stdout + p.stderr).strip()
     except (OSError, subprocess.SubprocessError) as e:
         rc, msg = 1, str(e)
@@ -2058,7 +2089,8 @@ def failure_floor(entries, ei, task, states, rows, home):
     .jsonl excluded) whose first lines name the session of a dream `review` launch row. A session's verdicts are the union of its files' verdict lines, so a
     result.json and the verdict file it captures count once. Sessions of the Task launched after the Task's previous entry set the floor: a REJECT of a slug the
     State: names makes it failed-acceptance; a FIX or REJECT of such a slug after an earlier session's (by launch time) FIX or REJECT of that slug in this home
-    makes it recurring-failure. -> (None | "failed-acceptance" | "recurring-failure", [why])."""
+    makes it recurring-failure. A file whose first lines name several review sessions counts for the latest-launched one only.
+    -> (None | "failed-acceptance" | "recurring-failure", [why])."""
     if not rows or task is None:
         return None, []
     same = [e for e in entries[:ei] if entry_task(e) == task]
@@ -2069,18 +2101,24 @@ def failure_floor(entries, ei, task, states, rows, home):
     for d, ds, fs in os.walk(rdir):
         ds.sort()
         files += [os.path.join(d, f) for f in sorted(fs) if not f.endswith(".jsonl")]
+    def launched(r):
+        t = parse_iso(r.get("ts") or "")
+        return (t is None, t.timestamp() if t else 0.0, r["session"])
     by_sess = {}
     for p in files:
         head = first_lines(p)
-        for r in revs:
-            if r["session"] in head:
-                x = by_sess.setdefault(r["session"], {"row": r, "files": [], "v": set()})
-                x["files"].append(os.path.relpath(p, home))
-                x["v"] |= {(s, v) for s, v, _ in review_file_verdicts(p)}
+        named = [r for r in revs if r["session"] in head]
+        if not named:
+            continue
+        # one file, one session: a re-review cites earlier review sessions, never later ones, so the latest-launched session it names is its own
+        # (code review 88ec4f26 F2, behaviour review 96397ae0 M1)
+        r = max(named, key=lambda r: (not launched(r)[0], launched(r)[1], r["session"]))
+        x = by_sess.setdefault(r["session"], {"row": r, "files": [], "v": set()})
+        x["files"].append(os.path.relpath(p, home))
+        x["v"] |= {(s, v) for s, v, _ in review_file_verdicts(p)}
 
     def when(x):
-        t = parse_iso(x["row"].get("ts") or "")
-        return (t is None, t.timestamp() if t else 0.0, x["row"]["session"])
+        return launched(x["row"])
     floor, why, earlier = None, [], set()
     for x in sorted(by_sess.values(), key=when):
         t = parse_iso(x["row"].get("ts") or "")
@@ -2121,25 +2159,42 @@ def fivewhys_refusal(f, prov5, refs, rows, task, entry_ts, resolve):
     return f"5whys={f[0]}"
 
 
-def trigger_record(L, entries, ei, an, prov, task, states, mrec, rows, home, resolve, failure_lines):
-    """R1-R5 for one entry on or after the cutover. -> the R6 JSON additions to `analysis`."""
+def trigger_record(L, entries, ei, an, prov, task, states, mrec, rows, home, resolve, failure_lines, coverage=None, floor_info=None):
+    """R1-R5 for one entry on or after the cutover. -> the R6 JSON additions to `analysis`. `coverage` and `floor_info` are covered_kind's and
+    failure_floor's results when the caller already has them."""
     entry = entries[ei]
-    covered, why = covered_kind(entries, ei, task, states, mrec, rows, home, resolve)
+    covered, why = coverage or covered_kind(entries, ei, task, states, mrec, rows, home, resolve)
     out = {"covered": covered, "failure": None}
-    if covered != "none":
+    floor, fwhy = floor_info or failure_floor(entries, ei, task, states, rows, home)
+    f = an.get("fivewhys")
+    if covered == "none":
+        # R1: an uncovered entry keeps today's rules, so its Failure: line is not read (code review 88ec4f26 L3, behaviour review 96397ae0 L2), unless
+        # verdict files bound since the Task's previous entry set an R4 floor: the next entry reads only later reviews, so an entry without the line would
+        # drop the floor (security review ddf46516 finding 3). Such an entry carries the line at the floor, and R5 applies to it.
+        if floor is None:
+            return out
+        if not failure_lines:
+            L.fail("line-missing", f"Failure (verdict files set the floor {floor} for this entry: {'; '.join(fwhy)}; the Task's next entry reads only later reviews)")
+            return out
+    else:
         w = an.get("wwhtbt")
         if w and w[0] == "reused":
             if len(w) < 3 or not w[2]:
                 L.fail("analysis-grammar", f"wwhtbt: a covered entry ({why}) reuses as 'reused <page> sha256=<64 hex> inputs=<manifest>'")
             else:
                 out["reuse"] = reuse_check(L, "wwhtbt", w[1], w[2]["sha256"], w[2]["inputs"], entry, home, resolve)
+                out["reuse"]["verified"] = out["reuse"]["verified"] and prov.get("wwhtbt") in ("gated", "boundary")   # and bound (code review 88ec4f26 L4)
         elif w and w[0] == "skipped":
             bad = blocked_skip_refusal(w[1], "wwhtbt", task, rows, entry["ts"])
             if bad:
                 L.fail("analysis-skip-refused", f"wwhtbt: a covered entry ({why}): {bad}")
         if not failure_lines:
             L.fail("line-missing", f"Failure (a covered entry: {why})")
-    if not failure_lines:
+            if f and f[0] == "reused":
+                L.fail("analysis-grammar", f"5whys value '{f[2]['raw']}' (R5: `reused` is the form of the three trigger classes, which a Failure: line names)")
+            return out
+    if len(failure_lines) > 1:
+        L.fail("failure-grammar", f"{len(failure_lines)} Failure: lines (an entry carries one; code review 88ec4f26 L2)")
         return out
     toks = failure_lines[-1][len("Failure:"):].split()
     if toks == ["none"]:
@@ -2155,16 +2210,16 @@ def trigger_record(L, entries, ei, an, prov, task, states, mrec, rows, home, res
             L.fail("failure-grammar", f"ref {', '.join(bad)} does not match the routing policy's evidence.ref_pattern or names a placeholder")
             return out
     out["failure"] = {"class": cls, "refs": refs}
-    floor, fwhy = failure_floor(entries, ei, task, states, rows, home)
     if floor == "failed-acceptance" and cls not in ("failed-acceptance", "recurring-failure") or floor == "recurring-failure" and cls != "recurring-failure":
         L.fail("failure-class-mismatch", f"Failure: {cls} is below the floor {floor} ({'; '.join(fwhy)})")
-    f = an.get("fivewhys")
     if cls in TRIGGER_CLASSES:
         bad = fivewhys_refusal(f, prov.get("fivewhys"), refs, rows, task, entry["ts"], resolve)
         if bad:
             L.fail("analysis-trigger-unmet", f"Failure: {cls} needs a bound 5whysandrhyme page: {bad}")
     elif cls == "transient" and not (f and (f[0] == "inline" or f[0] == "skipped" and f[1].strip() == "transient")):
         L.fail("analysis-trigger-unmet", "Failure: transient takes 5whys=inline or 5whys=skipped: transient (bounded recovery, no analysis stack)")
+    elif f and f[0] == "reused":     # R5: `other` and `none` keep today's values (code review 88ec4f26 F1)
+        L.fail("analysis-grammar", f"5whys value '{f[2]['raw']}' (R5: for Failure: {cls}, today's values; `reused` is the form of the three trigger classes)")
     return out
 
 
@@ -2258,7 +2313,11 @@ def lint_log(a):
 
     # Analysis
     an = {"wwhtbt": None, "fivewhys": None, "adversarial": None}
-    post = entry["ts"][:10] >= TRIGGER_CUTOVER          # trigger-record R7
+    # trigger-record R7: the header date, which the author writes, or the launcher's own date: a header that is no ISO timestamp, or a Route: bound to a
+    # dream launch row on or after the cutover, puts the entry under R1-R5 too (security review ddf46516 finding 5)
+    post = (entry["ts"][:10] >= TRIGGER_CUTOVER or parse_iso(entry["ts"]) is None
+            or bool(route and route.get("decision") and any(r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("session") == route["session"]
+                                                          and r.get("ts") == route["decision"] and str(r.get("ts"))[:10] >= TRIGGER_CUTOVER for r in rows or [])))
     failure_lines = [ln.rstrip() for ln in entry["lines"] if ln.startswith("Failure:")] if post else []
     if "Analysis" in lines:
         an, probs = parse_analysis(lines["Analysis"], extended=post)
@@ -2325,6 +2384,21 @@ def lint_log(a):
     mrec = None
     if any(ln.startswith("Mission:") for e in entries[:ei + 1] for ln in e["lines"]):
         mrec = mission_record(L, entries, ei, task, list(states), resolve)
+
+    # ---- trigger record R1 (PRD-dream-analysis-trigger-record): coverage, before provenance reads the Analysis values
+    coverage, floor_info = None, None
+    if post:
+        coverage = covered_kind(entries, ei, task, states, mrec, rows, home, resolve)
+        floor_info = failure_floor(entries, ei, task, states, rows, home)
+        if coverage[0] == "none" and "Analysis" in lines:
+            # an uncovered entry keeps today's Analysis grammar (code review 88ec4f26 F1): the extended `reused` forms are grammar problems there, as at
+            # 43d5b39, except R5's `5whys=reused` when verdict files set a floor for the entry (R4 and R5 apply to it; see trigger_record)
+            keep5 = floor_info[0] is not None
+            an0, probs0 = parse_analysis(lines["Analysis"], extended=False)
+            for p in probs0:
+                if p not in probs and not (keep5 and p.startswith("5whys value ")):
+                    L.fail("analysis-grammar", p)
+            an = dict(an0, fivewhys=an["fivewhys"]) if keep5 else an0
 
     # ---- ungoverned host: claims only a row can check
     if not governed:
@@ -2440,7 +2514,7 @@ def lint_log(a):
         prov["fivewhys"] = check_ran("5whys", "5whysandrhyme", f[1]) if f[0] == "page" else "self"
 
     # ---- trigger record (PRD-dream-analysis-trigger-record R1-R6), entries on or after the cutover only
-    trig = trigger_record(L, entries, ei, an, prov, task, states, mrec, rows, home, resolve, failure_lines) if post else None
+    trig = trigger_record(L, entries, ei, an, prov, task, states, mrec, rows, home, resolve, failure_lines, coverage, floor_info) if post else None
 
     # ---- adversarial matrix (R10)
     adv = an.get("adversarial")
