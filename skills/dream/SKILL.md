@@ -109,7 +109,15 @@ Ground every claim; cite file, PR, issue, or URL.
 
 **Failure check (every seed, one line):** `Failure under this seed: yes — <what broke,
 with the observation> | no — <why this is an opportunity>`. It goes in the vision and
-the run log.
+the run log. The run note (Phase 4) also carries it typed: `Failure: none` or
+`Failure: <class> <ref> [<ref> ...]`, the class one of `recurring-failure`,
+`failed-acceptance`, `consequential-obstacle`, `transient` or `other`, each ref matching the
+routing policy's `evidence.ref_pattern` and naming none of its `evidence.placeholders`.
+Verdict files the author does not write set a floor: a REJECT of a slug the entry's `State:`
+names, in any verdict file under the home's `notes/reviews/` bound to a review launch row of
+the Task since its previous entry (named on a `Review:` line or not), makes the class at least
+`failed-acceptance`; a FIX or REJECT of that slug after its earlier FIX or REJECT in this home
+makes it `recurring-failure` (a first FIX is answered by the repairs file).
 
 **Five whys (failure seeds).** Ask why up to five levels, each answered by an
 observation, stopping at a level outside the system's control. PRDs target the deepest
@@ -141,8 +149,22 @@ line (Phase 4):
 
 | skill | run | reuse | skip |
 |---|---|---|---|
-| `/wwhtbt` | `ran <page>`: its subject is in scope and no valid page covers the seed | `reused <page>`: an existing page's end-state names the seed's subject and no input it cites has changed; the vision records the path and the reason | `skipped: <reason>` (an amendment of an approved vision, say) |
-| `/5whysandrhyme` | `page <page>`: a failure within the fleet's incident scope | — | `inline`: a failure outside that scope keeps the Phase 1 why-chain; `skipped: <reason>`: not a failure seed |
+| `/wwhtbt` | `ran <page>`: its subject is in scope and no valid page covers the seed | `reused <page>`: an existing page's end-state names the seed's subject and no input it cites has changed; the vision records the path and the reason. A covered entry (below) writes `reused <page> sha256=<64 hex> inputs=<manifest>`: `sha256=` is the page's current digest and `inputs=` a `sha256sum` manifest under the PRD home listing every absolute path and `file:` ref the page cites plus the entry's seed file, which the lint checks with `sha256sum -c` in the manifest's own directory | `skipped: <reason>` (an amendment of an approved vision, say); a covered entry skips only as `skipped: blocked decision=<ts>` (below) |
+| `/5whysandrhyme` | `page <page>`: a failure within the fleet's incident scope, and always for the `Failure:` classes `recurring-failure`, `failed-acceptance` and `consequential-obstacle`, the page bound to a 5whysandrhyme launch row of the entry's Task | `reused <page> sha256=<64 hex>`: one analysis per incident across runs, the page bound to a 5whysandrhyme launch row of any task and cited on the `Failure:` line as `page:<path>` | `inline`: a failure outside that scope keeps the Phase 1 why-chain, and a `transient` failure takes `inline` or `skipped: transient`; `skipped: <reason>`: not a failure seed; for the three trigger classes only `skipped: blocked decision=<ts>` |
+
+**Covered entries and recorded skips.** From the cutover date written in the run-note lint,
+an entry is covered when it carries or inherits a `Mission:` line, its `State:` names a slug no
+earlier entry of its `Task:` names or carries `drafted`, its `Seeds:` line carries a token the
+Task's previous entry did not, or a PRD its `State:` names differs from that slug's digest in the
+newest manifest an earlier entry of the Task binds. A covered entry records a page it ran, an
+exact reuse as above, or `skipped: blocked decision=<ts>`: the decisions log holds a `denied` row
+of that skill and Task at that `ts` whose reasons name a route outage the caller cannot cure (they
+start `policy-missing`, `policy file not found`, `malformed policy` or `ledger lookup unavailable`,
+or contain `(policy error, fail closed)`), and no launch row of that skill, for any task, falls
+between that row and the entry's header. A request the caller can fix, a live-worker denial (the
+analysis is running; reuse its page when it lands) or an uncorroborated outage is refused, and so
+is any other skip text. When the run has no wiki-write scope, write the page under the PRD home's
+`notes/analysis/`: it binds there by its launch row as anywhere else.
 
 A run with `Task: none` records `reused` or `skipped:`, never `ran`. Launch a governed
 analysis with a session id drawn first, so its page binds to its launch row before the

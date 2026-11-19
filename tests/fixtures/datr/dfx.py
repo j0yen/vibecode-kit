@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+"""Fixture builder and driver for the datr tests (PRD-dream-analysis-trigger-record).
+
+A case is one PRD home, a private decisions log and a routing policy under <outdir> (<outdir>/home,
+<outdir>/decisions.jsonl, <outdir>/policy.json). Fx-based cases use the lint's own selftest helpers
+(Fx, row, mx_file), loaded from skills/dream/scripts/dream-run-note-lint.sh as
+tests/fixtures/drmx/mfx.py does, and date the entry under test on the lint's TRIGGER_CUTOVER (R7).
+Mission cases copy the checked-in drfc fixture (the base or one variant, as tests/drfc_lib.sh `use`
+does), whose entries are dated after the cutover, and edit its last entry.
+
+Every case states its expected exit, its exact finding-id set and, where the AC asks for more, a
+predicate on the --json object. `--run` lints each case's last entry with the lint under test (a
+subprocess of the real script: `bash <lint> <log> --last --prd-dir <home> [--decisions <log>] --json`,
+private HOME, SKILL_ROUTING_POLICY at the case's policy, working directory a fresh directory that is
+neither the home nor the manifest's), and prints one PASS/FAIL line per case.
+
+Usage: dfx.py --list [<prefix>]                 case names and expectations
+       dfx.py <case> <outdir>                   build one case
+       dfx.py --run <prefix> <lint> [<report>]  build and lint every case of <prefix> (ac02, ac03, ...)
+"""
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+LINT = os.path.join(REPO, "skills", "dream", "scripts", "dream-run-note-lint.sh")
+DRFC = os.path.join(REPO, "tests", "fixtures", "drfc")
+
+
+def lint_helpers(path=LINT):
+    src = open(path, encoding="utf-8").read()
+    code = src.split("\n#__PYTHON__\n", 1)[1].split("\n#__PYTHON_END__", 1)[0]
+    code = code.rsplit("\nsys.exit(main(sys.argv[1:]))", 1)[0]
+    ns = {"__name__": "dream_lint_helpers"}
+    exec(compile(code, path + ":python", "exec"), ns)
+    return ns
+
+
+H = lint_helpers()
+Fx, row, CUT = H["Fx"], H["row"], H["TRIGGER_CUTOVER"]
+S_W, S_5, M_REL = H["S_W"], H["S_5"], H["M_REL"]
+T_TS, OUT_TS, LATE_TS = CUT + "T02:00:00-08:00", CUT + "T00:30:00-08:00", CUT + "T01:00:00-08:00"
+S_F, S_G, S_R0 = ("bbbbbbbb-0000-4000-8000-0000000000%02d" % i for i in (9, 10, 11))
+AN = "Analysis: wwhtbt={w} 5whys={f} adversarial=" + M_REL + " uncovered=1"
+POLICY = {"evidence": {"ref_pattern": "^(ledger|file|pr|run|commit|page):[^\\s]{2,200}$", "placeholders": ["none", "n/a", "tbd", "todo", "x"]}}
+OUTAGE = "policy-missing: /home/x/.config/skill-routing/policy.json"
+FIXABLE = "evidence: placeholder ref refused (fixable request)"
+LIVE = "live worker: session 0000 holds task A1 (one analysis per task)"
+
+
+def sha(b):
+    return hashlib.sha256(b if isinstance(b, bytes) else b.encode()).hexdigest()
+
+
+CASES = {}
+
+
+def case(name, rc, findings, check=None, ungov=False, detail=None):
+    """detail: a substring one `FAIL <finding>` stderr line must carry (so a case cannot pass for another reason with the same id)."""
+    def deco(fn):
+        CASES[name] = {"fn": fn, "rc": rc, "findings": findings, "check": check, "ungov": ungov, "detail": detail}
+        return fn
+    return deco
+
+
+def policy(out):
+    with open(os.path.join(out, "policy.json"), "w", encoding="utf-8") as fh:
+        json.dump(POLICY, fh)
+
+
+def tfx(out, w="ran visions/wwhtbt.md", f="skipped: not a failure seed", failure="Failure: none"):
+    """A covered (new-material) entry on the cutover: Task A1's first entry, so State: names foo for the first time."""
+    fx = Fx(out)
+    fx.ts, fx.failure = T_TS, failure
+    fx.entry["Analysis"] = AN.format(w=w, f=f)
+    return fx
+
+
+def earlier(fx, seeds="Seeds: selftest", extra=()):
+    """Give the entry an earlier entry of Task A1 that names foo with the same seeds (no new slug, no new seed)."""
+    fx.prev_entry = "2026-11-15T00:30:00-08:00"            # before the fixture matrix (M_REL, 01:00), as the selftest's uncovered case
+    fx.prev_lines = ["Task: A1   Consumer: hermes", seeds, "State: foo=linted"] + list(extra)
+    return fx
+
+
+def denied(skill, reasons, ts=OUT_TS, task="A1"):
+    return row(ts, "denied", task, skill, "opus-xhigh", "claude-opus-5-5", "xhigh", "", reasons=reasons)
+
+
+def later(skill, ts=LATE_TS, task="A9", session=S_F):
+    return row(ts, "launch", task, skill, "opus-xhigh", "claude-opus-5-5", "xhigh", session)
+
+
+def review_row(ts, session, task="A1"):
+    return row(ts, "launch", task, "dream", "opus-xhigh", "claude-opus-5-5", "xhigh", session, role="review")
+
+
+# ---------------------------------------------------------------- AC 2: R1 triggers x R2 skips
+def trig_new_slug(out, w):
+    return tfx(out, w=w)
+
+
+def trig_drafted(out, w):
+    fx = earlier(tfx(out, w=w))
+    fx.entry["State"] = "State: foo=drafted foo=linted foo=reviewed:APPROVE"
+    return fx
+
+
+def trig_seed(out, w):
+    fx = earlier(tfx(out, w=w))
+    fx.seeds = "Seeds: selftest ticket:A1-follow-up"
+    return fx
+
+
+def trig_snapshot(out, w):
+    """The newest manifest an earlier entry of the Task binds through its reviewer's review.snapshot pins PRD-foo.md at other bytes."""
+    fx = earlier(tfx(out, w=w), extra=[f"Review: notes/reviews/r0.txt reviewer-session={S_R0}"])
+    fx.files["notes/reviews/r0.txt"] = f"reviewer session {S_R0}\nfoo APPROVE opus\n"
+    fx.files["notes/snapshots/s0/s0.sha256"] = f"{sha('# foo stub, as reviewed\n')}  PRD-foo.md\n"
+    fx.rows.append(dict(review_row(CUT + "T00:05:00-08:00", S_R0), scope="notes/snapshots/s0/s0.sha256"))
+    return fx
+
+
+def drfc_mission(out, variant, w):
+    """The checked-in drfc mission (Task FC-1, entries dated 2027-02-01, after the cutover): its last entry with the wwhtbt value `w` and a Failure: line."""
+    home = os.path.join(out, "home")
+    shutil.copytree(os.path.join(DRFC, "home"), home)
+    dec = os.path.join(DRFC, "decisions.jsonl")
+    if variant != "base":
+        shutil.copytree(os.path.join(DRFC, "variants", variant, "home"), home, dirs_exist_ok=True)
+        dec = os.path.join(DRFC, "variants", variant, "decisions.jsonl")
+    shutil.copy(dec, os.path.join(out, "decisions.jsonl"))
+    log = os.path.join(home, "notes", "dream-log.md")
+    lines = open(log, encoding="utf-8").read().split("\n")
+    last = max(i for i, ln in enumerate(lines) if ln.startswith("## "))
+    for i in range(last, len(lines)):
+        if lines[i].startswith("Analysis: wwhtbt="):
+            rest = lines[i].split(" 5whys=", 1)[1]
+            lines[i] = f"Analysis: wwhtbt={w} 5whys={rest}"
+            lines.insert(i + 1, "Failure: none")
+            break
+    else:
+        raise SystemExit("drfc fixture: no Analysis: line in the last entry")
+    with open(log, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return None
+
+
+M_OUT, M_LATE = "2027-02-01T12:00:00-08:00", "2027-02-01T12:30:00-08:00"
+
+
+def add_rows(out, rows):
+    with open(os.path.join(out, "decisions.jsonl"), "a", encoding="utf-8") as fh:
+        fh.write("".join(json.dumps(r) + "\n" for r in rows))
+
+
+SKIPS = {  # skip kind -> (wwhtbt value, rows to add (Fx cases), rows to add (mission cases), refused?, ungoverned?)
+    "outage": (f"skipped: blocked decision={OUT_TS}", [denied("wwhtbt", OUTAGE)], [denied("wwhtbt", OUTAGE, M_OUT, "FC-1")], False, False),
+    "outage-later-launch": (f"skipped: blocked decision={OUT_TS}", [denied("wwhtbt", OUTAGE), later("wwhtbt")],
+                            [denied("wwhtbt", OUTAGE, M_OUT, "FC-1"), later("wwhtbt", M_LATE)], True, False),
+    "fixable": (f"skipped: blocked decision={OUT_TS}", [denied("wwhtbt", FIXABLE)], [denied("wwhtbt", FIXABLE, M_OUT, "FC-1")], True, False),
+    "live-worker": (f"skipped: blocked decision={OUT_TS}", [denied("wwhtbt", LIVE)], [denied("wwhtbt", LIVE, M_OUT, "FC-1")], True, False),
+    "other-task": (f"skipped: blocked decision={OUT_TS}", [denied("wwhtbt", OUTAGE, task="A9")], [denied("wwhtbt", OUTAGE, M_OUT, "A9")], True, False),
+    "free-text": ("skipped: a wiki page would be outside this task's scope", [], [], True, False),
+    "no-log": (f"skipped: blocked decision={OUT_TS}", [denied("wwhtbt", OUTAGE)], [denied("wwhtbt", OUTAGE, M_OUT, "FC-1")], True, True),
+}
+TRIGGERS = {"new-slug": ("new-material", trig_new_slug), "drafted": ("new-material", trig_drafted), "seed": ("new-material", trig_seed),
+            "snapshot": ("new-material", trig_snapshot), "mission": ("mission", "base"), "mission-amended": ("mission", "amended")}
+
+
+def _ac02(trig, skip):
+    kind, how = TRIGGERS[trig]
+    w, rows_fx, rows_m, refused, ungov = SKIPS[skip]
+    if kind == "mission":
+        w = w.replace(OUT_TS, M_OUT)
+
+    def build(out):
+        if kind == "mission":
+            drfc_mission(out, how, w)
+            add_rows(out, rows_m)
+        else:
+            fx = how(out, w)
+            fx.rows += rows_fx
+            if ungov:
+                fx.entry["Route"] = "Route: ungoverned session=%s host=datr-fixture" % H["S_D"]   # today's grammar; a governed Route: with no log exits 2
+            fx.build()
+        policy(out)
+    want = ["analysis-skip-refused"] if refused else []
+    chk = f"d['analysis'].get('covered') == {kind!r}"
+    return build, (1 if refused else 0), want, chk, ungov
+
+
+for _t in TRIGGERS:
+    for _s in SKIPS:
+        if _s == "no-log" and _t in ("mission", "mission-amended", "snapshot"):
+            continue          # without a decisions log no review launch row binds a snapshot or a mission chain; the other triggers carry the no-log case
+        b, rc, want, chk, ug = _ac02(_t, _s)
+        case(f"ac02-{_t}-{_s}", rc, want, chk, ug)(b)
+
+
+@case("ac02-uncovered-free-text", 0, [], "d['analysis'].get('covered') == 'none'")
+def _(out):
+    fx = earlier(tfx(out, w="skipped: nothing new to plan"))
+    fx.build()
+    policy(out)
+
+
+@case("ac02-uncovered-no-failure-line", 0, [], "d['analysis'].get('covered') == 'none' and d['analysis'].get('failure') is None")
+def _(out):
+    fx = earlier(tfx(out, w="skipped: nothing new to plan", failure=None))
+    fx.build()
+    policy(out)
+
+
+# ---------------------------------------------------------------- AC 3: R3 exact reuse
+def reuse(out, page_sha=None, edit_page=None, edit_input=None, manifest="ok", seed=False, bound=True, inputs="notes/inputs/manifest.sha256"):
+    fx = tfx(out)
+    ext = os.path.join(out, "external", "cited.txt")             # an absolute path the page cites, outside the home
+    os.makedirs(os.path.dirname(ext), exist_ok=True)
+    with open(ext, "w", encoding="utf-8") as fh:
+        fh.write("external input\n")
+    page = (f"# wwhtbt page\ntask: A1\nsession: {S_W if bound else S_G}\n"
+            f"cites file:notes/inputs/a.txt and {ext}, and the directory {out}/external/\n")
+    fx.files["visions/wwhtbt.md"] = page
+    fx.files["notes/inputs/a.txt"] = "input a\n"
+    lines = [f"{sha('input a' + chr(10))}  a.txt", f"{sha('external input' + chr(10))}  {ext}"]
+    if seed:
+        fx.files["notes/seed.md"] = "seed text\n"
+        fx.seeds = f"Seeds: file:notes/seed.md sha256={sha('seed text' + chr(10))}"
+        if seed == "listed":
+            lines.append(f"{sha('seed text' + chr(10))}  ../seed.md")
+    if manifest == "omit-cited":
+        lines = lines[1:]
+    fx.files["notes/inputs/manifest.sha256"] = {"ok": "\n".join(lines) + "\n", "omit-cited": "\n".join(lines) + "\n", "empty": "", "absent": None}[manifest]
+    fx.entry["Analysis"] = AN.format(w=f"reused visions/wwhtbt.md sha256={page_sha or sha(page)} inputs={inputs}", f="skipped: not a failure seed")
+    fx.build()
+    if edit_page:
+        with open(os.path.join(fx.home, "visions", "wwhtbt.md"), "a", encoding="utf-8") as fh:
+            fh.write("one byte more\n")
+    if edit_input == "home":
+        with open(os.path.join(fx.home, "notes", "inputs", "a.txt"), "a", encoding="utf-8") as fh:
+            fh.write("moved\n")
+    if edit_input == "absolute":
+        with open(ext, "a", encoding="utf-8") as fh:
+            fh.write("moved\n")
+    policy(out)
+
+
+case("ac03-verified", 0, [], "d['analysis']['reuse']['verified'] is True and d['analysis']['covered'] == 'new-material'")(lambda out: reuse(out))
+case("ac03-verified-with-seed", 0, [], "d['analysis']['reuse']['verified'] is True")(lambda out: reuse(out, seed="listed"))
+case("ac03-page-byte-moved", 1, ["analysis-reuse-stale"], detail="differs from the recorded sha256=")(lambda out: reuse(out, edit_page=True))
+case("ac03-home-input-moved", 1, ["analysis-reuse-stale"], detail="sha256sum -c")(lambda out: reuse(out, edit_input="home"))
+case("ac03-absolute-input-moved", 1, ["analysis-reuse-stale"], detail="sha256sum -c")(lambda out: reuse(out, edit_input="absolute"))
+case("ac03-omits-cited-path", 1, ["analysis-reuse-incomplete"], detail="notes/inputs/a.txt")(lambda out: reuse(out, manifest="omit-cited"))
+case("ac03-omits-seed", 1, ["analysis-reuse-incomplete"], detail="notes/seed.md")(lambda out: reuse(out, seed="unlisted"))
+case("ac03-manifest-absent", 1, ["analysis-grammar"], detail="absent or empty")(lambda out: reuse(out, manifest="absent"))
+case("ac03-manifest-empty", 1, ["analysis-grammar"], detail="absent or empty")(lambda out: reuse(out, manifest="empty"))
+case("ac03-manifest-outside-home", 1, ["analysis-grammar"], detail="is not under the PRD home")(lambda out: reuse(out, inputs="../elsewhere.sha256"))
+case("ac03-page-unbound", 1, ["analysis-provenance-missing"])(lambda out: reuse(out, bound=False))
+
+
+@case("ac03-no-inputs", 1, ["analysis-grammar"], detail="reused <page> sha256=<64 hex> inputs=<manifest>")
+def _(out):
+    reuse(out)
+    log = os.path.join(out, "home", "notes", "dream-log.md")
+    t = open(log, encoding="utf-8").read()
+    i = t.index(" inputs=notes/inputs/manifest.sha256")
+    t = t[:i] + t[i + len(" inputs=notes/inputs/manifest.sha256"):]
+    i = t.index(" sha256=", t.index("wwhtbt=reused"))
+    t = t[:i] + t[i + len(" sha256=") + 64:]
+    open(log, "w", encoding="utf-8").write(t)
+
+
+# ---------------------------------------------------------------- AC 4: R4 Failure: line and its floor
+PAGE5 = "page visions/5whys.md"
+
+
+def fail_fx(out, failure, f="skipped: not a failure seed", reviews=(), named=True):
+    """reviews: (file under notes/reviews, verdict text, session, task); each session gets a dream review launch row after the Task's previous entry."""
+    fx = tfx(out, f=f, failure=failure)
+    lines, verdicts = [], []
+    for k, (rel, text, sess) in enumerate(reviews):
+        fx.files[rel] = text
+        r = review_row(CUT + "T01:%02d:00-08:00" % (10 + k), sess)
+        if named and rel.endswith(".txt"):         # a Review: line names it: today's scope (R4/R5) and verdict rules apply to it too
+            man = f"notes/snapshots/rv{k}/rv{k}.sha256"
+            fx.files[man] = f"{sha('# foo stub' + chr(10))}  PRD-foo.md\n"
+            r = dict(r, scope=man, scope_id=scope_id(fx.files[man]))
+            lines.append(f"Review: {rel} reviewer-session={sess}")
+            verdicts += [v[1] for v in (H["verdict_of"](x) for x in text.split("\n")) if v]
+        fx.rows.append(r)
+    if lines:
+        fx.entry["Review"] = lines
+        fx.entry["State"] = "State: foo=linted " + " ".join(f"foo=reviewed:{v}" for v in verdicts)   # one token per named verdict (today's rule)
+    fx.build()
+    policy(out)
+
+
+def scope_id(text):
+    """The row's scope_id: the lint's own canonical scope hash (scope_canon) of a manifest with this text."""
+    with tempfile.NamedTemporaryFile("w", suffix=".sha256", delete=False, encoding="utf-8") as fh:
+        fh.write(text)
+    try:
+        return H["scope_canon"](fh.name)[0]
+    finally:
+        os.unlink(fh.name)
+
+
+for _c, _f in (("recurring-failure", PAGE5), ("failed-acceptance", PAGE5), ("consequential-obstacle", PAGE5), ("transient", "inline"), ("other", "skipped: not a failure seed")):
+    case(f"ac04-class-{_c}", 0, [], f"d['analysis']['failure'] == {{'class': {_c!r}, 'refs': ['ledger:A1']}}")(
+        (lambda c, f: lambda out: fail_fx(out, f"Failure: {c} ledger:A1", f=f))(_c, _f))
+case("ac04-none", 0, [], "d['analysis']['failure'] == {'class': 'none', 'refs': []}")(lambda out: fail_fx(out, "Failure: none"))
+case("ac04-unknown-class", 1, ["failure-grammar"])(lambda out: fail_fx(out, "Failure: flaky ledger:A1"))
+case("ac04-class-without-ref", 1, ["failure-grammar"])(lambda out: fail_fx(out, "Failure: other"))
+case("ac04-bad-ref", 1, ["failure-grammar"])(lambda out: fail_fx(out, "Failure: other A1-was-red"))
+case("ac04-placeholder-ref", 1, ["failure-grammar"])(lambda out: fail_fx(out, "Failure: other file:tbd"))
+case("ac04-no-failure-line", 1, ["line-missing"])(lambda out: fail_fx(out, None))
+REJ = ("notes/reviews/v-reject.txt", f"reviewer session {S_F}\nfoo REJECT opus\n", S_F)
+FIX1 = ("notes/reviews/v-fix-1.txt", f"reviewer session {S_F}\nfoo FIX opus\n", S_F)
+FIX2 = ("notes/reviews/v-fix-2.txt", f"reviewer session {S_G}\nfoo FIX opus\n", S_G)
+case("ac04-none-beside-reject-named", 1, ["failure-class-mismatch"])(lambda out: fail_fx(out, "Failure: none", reviews=[REJ]))
+case("ac04-none-beside-reject-omitted", 1, ["failure-class-mismatch"])(lambda out: fail_fx(out, "Failure: none", reviews=[REJ], named=False))
+case("ac04-other-beside-reject", 1, ["failure-class-mismatch"])(lambda out: fail_fx(out, "Failure: other ledger:A1", reviews=[REJ]))
+case("ac04-failed-acceptance-beside-reject", 0, [])(lambda out: fail_fx(out, "Failure: failed-acceptance ledger:A1", f=PAGE5, reviews=[REJ]))
+case("ac04-first-fix-is-no-floor", 0, [])(lambda out: fail_fx(out, "Failure: none", reviews=[FIX1]))
+case("ac04-none-beside-second-fix-named", 1, ["failure-class-mismatch"])(lambda out: fail_fx(out, "Failure: none", reviews=[FIX1, FIX2]))
+case("ac04-none-beside-second-fix-omitted", 1, ["failure-class-mismatch"])(lambda out: fail_fx(out, "Failure: none", reviews=[FIX1, FIX2], named=False))
+case("ac04-failed-acceptance-beside-second-fix", 1, ["failure-class-mismatch"])(
+    lambda out: fail_fx(out, "Failure: failed-acceptance ledger:A1", f=PAGE5, reviews=[FIX1, FIX2]))
+case("ac04-recurring-beside-second-fix", 0, [])(lambda out: fail_fx(out, "Failure: recurring-failure ledger:A1", f=PAGE5, reviews=[FIX1, FIX2]))
+case("ac04-none-beside-reject-in-result-json", 1, ["failure-class-mismatch"])(lambda out: fail_fx(out, "Failure: none", reviews=[
+    ("notes/reviews/r9/result.json", json.dumps({"type": "result", "is_error": False, "session_id": S_F, "result": "foo REJECT opus"}), S_F)], named=False))
+case("ac04-unbound-reject-is-no-floor", 0, [])(lambda out: fail_fx(out, "Failure: none", reviews=[
+    ("notes/reviews/author-draft.txt", "foo REJECT opus\n", "cccccccc-0000-4000-8000-000000000099")], named=False))
+
+
+# ---------------------------------------------------------------- AC 5: R5 5whysandrhyme trigger
+FIVE = f"# five whys page\nsession: {S_5}\n"
+
+
+def five_fx(out, cls, f, rows=(), refs="ledger:A1", five_other_task=False):
+    fx = tfx(out, f=f, failure=f"Failure: {cls} {refs}")
+    if five_other_task:                          # the reused page is bound to another task's 5whysandrhyme launch row
+        fx.files["visions/5whys-a7.md"] = f"# five whys page of A7\nsession: {S_G}\n"
+        fx.rows.append(row(CUT + "T00:20:00-08:00", "launch", "A7", "5whysandrhyme", "opus-xhigh", "claude-opus-5-5", "xhigh", S_G))
+    fx.rows += list(rows)
+    fx.build()
+    policy(out)
+
+
+REUSED7 = f"reused visions/5whys-a7.md sha256={sha('# five whys page of A7' + chr(10) + 'session: ' + S_G + chr(10))}"
+for _c in ("recurring-failure", "failed-acceptance", "consequential-obstacle"):
+    k = _c.split("-")[0]
+    case(f"ac05-{k}-bound-page", 0, [])((lambda c: lambda out: five_fx(out, c, PAGE5))(_c))
+    case(f"ac05-{k}-inline", 1, ["analysis-trigger-unmet"])((lambda c: lambda out: five_fx(out, c, "inline"))(_c))
+    case(f"ac05-{k}-skip-corroborated", 0, [])((lambda c: lambda out: five_fx(out, c, f"skipped: blocked decision={OUT_TS}",
+                                                                                 [denied("5whysandrhyme", "malformed policy: expected object")]))(_c))
+    case(f"ac05-{k}-skip-later-launch", 1, ["analysis-trigger-unmet"])((lambda c: lambda out: five_fx(out, c, f"skipped: blocked decision={OUT_TS}",
+                                                                                                      [denied("5whysandrhyme", "malformed policy: expected object"),
+                                                                                                       later("5whysandrhyme")]))(_c))
+    case(f"ac05-{k}-skip-fixable", 1, ["analysis-trigger-unmet"])((lambda c: lambda out: five_fx(out, c, f"skipped: blocked decision={OUT_TS}",
+                                                                                                 [denied("5whysandrhyme", FIXABLE)]))(_c))
+    case(f"ac05-{k}-skip-live-worker", 1, ["analysis-trigger-unmet"])((lambda c: lambda out: five_fx(out, c, f"skipped: blocked decision={OUT_TS}",
+                                                                                                     [denied("5whysandrhyme", LIVE)]))(_c))
+    case(f"ac05-{k}-reuse-cited", 0, [])((lambda c: lambda out: five_fx(out, c, REUSED7, refs="ledger:A1 page:visions/5whys-a7.md", five_other_task=True))(_c))
+    case(f"ac05-{k}-reuse-uncited", 1, ["analysis-trigger-unmet"])((lambda c: lambda out: five_fx(out, c, REUSED7, five_other_task=True))(_c))
+    case(f"ac05-{k}-unbound-page", 1, ["analysis-page-unbound", "analysis-trigger-unmet"])((lambda c: lambda out: five_fx(out, c, "page visions/5whys-a7.md", five_other_task=True))(_c))
+case("ac05-transient-inline", 0, [])(lambda out: five_fx(out, "transient", "inline", refs="run:retry-1"))
+case("ac05-transient-skipped-transient", 0, [])(lambda out: five_fx(out, "transient", "skipped: transient", refs="run:retry-1"))
+case("ac05-transient-page", 1, ["analysis-trigger-unmet"])(lambda out: five_fx(out, "transient", PAGE5, refs="run:retry-1"))
+
+
+# ---------------------------------------------------------------- AC 8: notes written as SKILL.md Phases 1-2 say lint clean
+@case("ac08-page-under-notes-analysis", 0, [], "d['analysis']['covered'] == 'new-material'")
+def _(out):
+    fx = tfx(out, w="ran notes/analysis/wwhtbt.md")
+    fx.files["notes/analysis/wwhtbt.md"] = f"# wwhtbt page\ntask: A1\nsession: {S_W}\n"
+    fx.build()
+    policy(out)
+
+
+case("ac08-exact-reuse", 0, [], "d['analysis']['reuse']['verified'] is True")(lambda out: reuse(out, seed="listed"))
+
+
+@case("ac08-recorded-outage-and-trigger-page", 0, [], "d['analysis']['failure']['class'] == 'failed-acceptance'")
+def _(out):
+    fx = tfx(out, w=f"skipped: blocked decision={OUT_TS}", f=PAGE5, failure="Failure: failed-acceptance ledger:A1 file:notes/reviews/v-reject.txt")
+    fx.files["notes/reviews/v-reject.txt"] = f"reviewer session {S_F}\nfoo REJECT opus\n"
+    fx.rows += [denied("wwhtbt", OUTAGE), review_row(CUT + "T01:10:00-08:00", S_F)]
+    fx.build()
+    policy(out)
+
+
+@case("ac08-transient-inline", 0, [])
+def _(out):
+    five_fx(out, "transient", "inline", refs="run:retry-1")
+
+
+# ---------------------------------------------------------------- driver
+def build(name, out):
+    os.makedirs(out, exist_ok=True)
+    CASES[name]["fn"](out)
+
+
+def lint(lint_path, out, ungov, cwd, home_env):
+    args = ["bash", lint_path, os.path.join(out, "home", "notes", "dream-log.md"), "--last", "--prd-dir", os.path.join(out, "home"), "--json"]
+    if not ungov:
+        args[5:5] = []
+        args += ["--decisions", os.path.join(out, "decisions.jsonl")]
+    env = {k: v for k, v in os.environ.items() if k not in ("SKILL_ROUTING_DECISIONS", "ANALYSIS_WIKI_DIR", "SKILL_ROUTING_POLICY")}
+    env.update(HOME=home_env, SKILL_ROUTING_POLICY=os.path.join(out, "policy.json"), GIT_CONFIG_NOSYSTEM="1")
+    p = subprocess.run(args, capture_output=True, text=True, env=env, cwd=cwd, timeout=300)
+    try:
+        d = json.loads(p.stdout)
+    except ValueError:
+        d = None
+    return p.returncode, d, p.stderr
+
+
+def run(prefix, lint_path, report=None):
+    lint_path = os.path.abspath(lint_path)          # the lint runs from another working directory
+    top = tempfile.mkdtemp(prefix=f"datr-{prefix}-")
+    home_env, cwd = os.path.join(top, "fakehome"), os.path.join(top, "cwd")
+    os.makedirs(home_env)
+    os.makedirs(cwd)
+    names = [n for n in CASES if n.startswith(prefix + "-")]
+    lines, bad = [], 0
+    for n in names:
+        c, out = CASES[n], os.path.join(top, n)
+        try:
+            build(n, out)
+            rc, d, err = lint(lint_path, out, c["ungov"], cwd, home_env)
+        except Exception as e:         # a fixture that does not build is a failure of this case, never a pass
+            rc, d, err = None, None, f"{type(e).__name__}: {e}"
+        got = sorted((d or {}).get("findings") or []) if d else None
+        ok = rc == c["rc"] and d is not None and got == sorted(c["findings"])
+        why = ""
+        if ok and c["check"]:
+            try:
+                ok = bool(eval(c["check"], {"d": d}))
+                why = "" if ok else f"check {c['check']} false: analysis={json.dumps(d.get('analysis'))[:400]}"
+            except Exception as e:
+                ok, why = False, f"check raised {type(e).__name__}: {e}"
+        if ok and c.get("detail") and not any(ln.startswith("FAIL ") and c["detail"] in ln for ln in err.splitlines()):
+            ok, why = False, f"no FAIL line carries {c['detail']!r}: stderr={err.strip()[:600]}"
+        if not ok and not why:
+            why = f"rc={rc} want {c['rc']}; findings={got} want {sorted(c['findings'])}; stderr={err.strip()[:600]}"
+        bad += 0 if ok else 1
+        lines.append(f"{'PASS' if ok else 'FAIL'} {n}" + (f": {why}" if why else ""))
+    text = "".join(x + "\n" for x in lines) + f"# {prefix}: {len(names)} cases, {len(names) - bad} pass, {bad} fail (lint {lint_path})\n"
+    sys.stdout.write(text)
+    if report:
+        with open(report, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    shutil.rmtree(top, ignore_errors=True)
+    return 1 if bad or not names else 0
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if a and a[0] == "--list":
+        for n, c in CASES.items():
+            if len(a) < 2 or n.startswith(a[1] + "-"):
+                print(f"{n}\t{c['rc']}\t{json.dumps(c['findings'])}\t{c['check'] or '-'}\t{'ungoverned' if c['ungov'] else 'governed'}")
+        sys.exit(0)
+    if a and a[0] == "--run" and len(a) in (3, 4):
+        sys.exit(run(a[1], a[2], a[3] if len(a) == 4 else None))
+    if len(a) == 2 and a[0] in CASES:
+        build(a[0], a[1])
+        sys.exit(0)
+    sys.exit(__doc__)

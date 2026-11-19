@@ -126,3 +126,15 @@ doubts a rule can see what it cost when it was missing. Append-only.
   names the note's `adversarial=` matrix, a renamed matrix in `changed` is checked on its own side
   of the row, and a header without `matrix` keeps the matrix of the entry that first listed the
   manifest, so the existing notes lint unchanged (PRD dream-matrix-per-manifest).
+- **An analysis is run, reused exactly, or skipped only on a recorded outage (2026-11-19, A1723).**
+  Every governed run note on file said `wwhtbt=skipped`: 21 of 21 across four PRD homes, nine of
+  them missions, for reasons that had since gone away (a Fable-only route, a wiki path out of
+  scope). The lint accepted any skip text, a `reused` it could not verify, and a failure recorded
+  only in prose, so a skip made for a reason that still holds looked the same as one that no
+  longer does. From the cutover date written in the lint, a covered entry (a mission, new material,
+  or a PRD moved since the last manifest a reviewer bound) records a page it ran, a reuse whose page
+  digest and input manifest verify, or a skip naming a denied route-outage row that no later launch
+  of the same skill contradicts. A typed `Failure:` line names the class, whose floor comes from
+  verdict files the author does not write, and the three trigger classes need a bound
+  5whysandrhyme page. Pages may live under the PRD home's `notes/analysis/`, which removes the
+  wiki-scope reason for skipping (PRD dream-analysis-trigger-record).
