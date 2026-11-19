@@ -32,6 +32,7 @@ for name in sorted(os.listdir(logs)):
         if not re.search(r"^Analysis:", body, re.M):
             continue
         n += 1
+        is_cov = False
         task = (re.search(r"^Task:\s+(\S+)", body, re.M) or re.search(r"^Task:\s+(\S+)", text[:m.start()], re.M) or [None, "none"])[1]
         for variant in ("as-is", "ran"):
             b = body
@@ -52,7 +53,10 @@ for name in sorted(os.listdir(logs)):
             try:
                 d = json.loads(p.stdout)
             except ValueError:
-                d = {}
+                d = None
+            if not isinstance(d, dict):                         # a crash or a non-JSON answer is a failure, never a skipped check
+                bad += 1; print(f"FAIL {name} entry {m.group(1)} ({variant}): no JSON result: rc={p.returncode} {p.stderr.strip()[-160:]!r}")
+                continue
             fid = d.get("findings") or []
             covered = (d.get("analysis") or {}).get("covered")
             if variant == "as-is":
@@ -63,12 +67,18 @@ for name in sorted(os.listdir(logs)):
                         refused += 1
                     else:
                         bad += 1; print(f"FAIL {name} entry {m.group(1)}: covered ({covered}) free-text skip: rc={p.returncode} findings={fid}")
-            elif a and covered not in (None, "none"):    # only a free-text skip is rewritten; an entry that already ran a page is not this AC's
+            elif a and is_cov:    # only a covered free-text skip is rewritten; an entry that already ran a page is not this AC's
                 errs = [l for l in p.stderr.splitlines() if l.startswith(("FAIL analysis-skip-refused", "FAIL analysis-provenance-missing: wwhtbt", "FAIL analysis-page-unbound: wwhtbt"))]
-                if errs:
-                    bad += 1; print(f"FAIL {name} entry {m.group(1)} rewritten to ran: {errs[:2]}")
-                elif a:
+                if covered in (None, "none"):                   # the rewrite touches no R1 trigger, so the entry stays covered
+                    bad += 1; print(f"FAIL {name} entry {m.group(1)} rewritten to ran: covered={covered!r}")
+                elif errs or "analysis-skip-refused" in fid:
+                    bad += 1; print(f"FAIL {name} entry {m.group(1)} rewritten to ran: {errs[:2] or fid}")
+                else:
                     cleared += 1
+if cleared != refused:                                  # AC 1: every refused entry clears once rewritten to ran
+    bad += 1; print(f"FAIL {refused} covered free-text skips refused but {cleared} cleared once rewritten to ran")
+if not refused:                                         # nothing shown: AC 1 needs at least one covered free-text skip
+    bad += 1; print("FAIL no covered entry with a free-text wwhtbt=skipped was refused")
 print(f"entries={n} covered={cov} refused={refused} cleared={cleared} bad={bad}")
 sys.exit(1 if bad else 0)
 PY
