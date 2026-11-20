@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # H1 (PRD-dream-analysis-trigger-record amendment): tests/fixtures/redate.py moves dates and regenerates derived values exactly.
 # 1. The re-dated drfc, drmr and drmx fixtures, re-dated back to their 43d5b39 dates, are byte-identical to 43d5b39 (the drmr README's
-#    H1 sentence aside), so the re-date changed dates and the values derived from them and nothing else.
+#    H1 sentence aside, and the drmx compat runner's 300 s child lifetime, which a6cc088 removed: each later edit is put back exactly
+#    once before the comparison), so the re-date changed dates and the values derived from them and nothing else.
 # 2. Exactly the drfc and drmr manifests that verified at 43d5b39 (sha256sum -c in their own directory) verify now, renamed paths mapped.
 # 3. The tool refuses, writing nothing: a NEW date the tree already holds, an OLD date it does not hold, and a short digest prefix of a
 #    changed file it cannot regenerate; after review r10, also a symlinked directory (LOW-3), an --also file that holds the NEW date (LOW-5) or
@@ -28,8 +29,13 @@ added = (", with one exception: PRD-dream-analysis-trigger-record's H1 amendment
          "times of day and order kept) with\n`tests/fixtures/redate.py`, which regenerated every digest, manifest and `scope_id` below.")
 assert s.count(added) == 1, "drmr README: the H1 sentence is not there once"
 open(p, "w").write(s.replace(added, "."))
+p = "tests/fixtures/drmx/compat.py"   # a6cc088 (Hermes 19:02Z: no finite per-child lifetime) removed the run's timeout=300
+s = open(p).read()
+now = "    p = subprocess.run(args, capture_output=True, text=True, env=env)\n"
+assert s.count(now) == 1 and "timeout" not in s, "drmx compat.py: the a6cc088 run line is not there once"
+open(p, "w").write(s.replace(now, now.replace("env=env)", "env=env, timeout=300)")))
 PY
-) || fail "drmr README does not carry the H1 sentence once"
+) || fail "drmr README does not carry the H1 sentence once, or drmx compat.py the a6cc088 run line"
 ( cd "$T/new" \
   && "${R[@]}" --map 2026-11-18=2027-02-01 --also tests/drfc_ac05_consumers.sh --also tests/drfc_lib.sh tests/fixtures/drfc \
   && "${R[@]}" --map 2026-11-17=2027-01-04 --also tests/drmr_lib.sh tests/fixtures/drmr \
