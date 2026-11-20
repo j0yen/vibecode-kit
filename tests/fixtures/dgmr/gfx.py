@@ -8,7 +8,7 @@ mfx.py writes them; every review row records its manifest's scope_id.
 R1 cases (legacy matrix) take the A1724 GEN1 shape: entry 1 carries no scope= and names matrix x1;
 the manifest m1 frozen with x1 and a header without `matrix` is first listed by entry 2, whose
 adversarial= names x2. The `-before` cases move every fixture date to 2026-11-17, before
-LEGACY_MATRIX_SINCE; the others stay on the drmx fixture day (2027-03-01), after it.
+LEGACY_MATRIX_SINCE; the others stay on the drmx fixture day (mfx.DAY), after it.
 
 R4 cases (path keys) take rounds(2) (F1 on foo, repaired m1 -> m2) with m2 one directory deeper
 (notes/snapshots/deep/m2/m2.sha256) and five data files data/g1..g5/graph.json listed by path in

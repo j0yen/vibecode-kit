@@ -20,4 +20,5 @@ rep() { jtrue "isinstance(d['mission'].get('repairs'), dict) and (lambda m: $1)(
 # gmxb <day> <hour>: the basename of a fixture matrix written at <hour>:00 on <day>
 gmxb() { printf '%sT%02d:00:00-08:00-adversarial.md' "$1" "$2"; }
 OLD_DAY=2026-11-17
-NEW_DAY=2027-03-01
+# the drmx fixture day (mfx.DAY), re-dated by PRD-dream-analysis-trigger-record R7 before its cutover
+NEW_DAY=$(sed -n 's/^DAY = "\(.*\)"$/\1/p' "$here/fixtures/drmx/mfx.py")

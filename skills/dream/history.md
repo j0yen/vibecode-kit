@@ -166,10 +166,11 @@ doubts a rule can see what it cost when it was missing. Append-only.
   frozen before the edges header carried `matrix`, lists the one matrix its first entry named
   while the entry first listing it named a later one. Two rules of PRD
   dream-generation-aware-mission-records are built. R1: a legacy-header manifest first listed
-  before `LEGACY_MATRIX_SINCE` = 2026-11-20T00:00:00-08:00 keeps the one matrix it lists when
+  before `LEGACY_MATRIX_SINCE` = 2026-11-18T06:05:00-08:00 keeps the one matrix it lists when
   an entry names it in `adversarial=` or its copy passes the matrix grammar at its listed
-  digest; the installing commit sets the constant no earlier than the installation and records
-  the value here. R4: an entry a manifest lists by a path outside the directories of the
+  digest. That instant is the installation of the per-manifest matrix lint (vibecode-kit
+  43d5b39), the first time an edges header could carry `matrix`; it falls before every fixture
+  the trigger-record cutover re-dated onto 2026-11-18, so those families keep their side of it. R4: an entry a manifest lists by a path outside the directories of the
   manifests compared is keyed by that path, a row names it by path with a `delta` record
   checked against both manifests, a legacy row's ambiguous bare basename is listed in
   `repairs.ambiguous`, and header members, the repairs file among them, stay basename-keyed in

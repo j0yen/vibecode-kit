@@ -7,10 +7,10 @@
 # digest passes the grammar; m1 listing none, two, one unnamed stale matrix (sections for another
 # slug), or one unnamed matrix whose frozen copy no longer hashes to its listed digest is
 # mission-scope-incomplete naming x2 and the adversarial= rule. The
-# same one-matrix shape on 2027-03-01, after the constant, and drmx `rename-no-header`, are
+# same one-matrix shape on the drmx fixture day (NEW_DAY), after the constant, and drmx `rename-no-header`, are
 # mission-scope-incomplete as installed;
-# with only the linted entry's header ts on 2027-03-01 and its Route decision= on 2026-11-17 it passes
-# (an entry is dated by its Route decision= on a governed host); and a later round on 2027-03-01 (m3,
+# with only the linted entry's header ts on NEW_DAY and its Route decision= on 2026-11-17 it passes
+# (an entry is dated by its Route decision= on a governed host); and a later round on NEW_DAY (m3,
 # r3, x3), linted last, keeps m1's legacy matrix (m1 is dated by the entry that first listed it);
 # and a mission whose headers name `matrix` (rounds of three) lints clean.
 set -uo pipefail
@@ -19,8 +19,10 @@ set -uo pipefail
 setup_mx
 since=$(grep -m1 '^LEGACY_MATRIX_SINCE = ' "$LINT" | sed 's/.*= "\(.*\)"/\1/')
 [ -n "$since" ] || fail "the lint defines no LEGACY_MATRIX_SINCE"
+# the constant lies after every legacy-day fixture time and before the drmx and drfc fixture times of the re-dated day
+# (they start at 08:00), so each family keeps its side of it (trigger-record R7: every constant they straddle)
 python3 -c 'import sys,datetime as d; a,b,c=(d.datetime.fromisoformat(x) for x in sys.argv[1:4]); sys.exit(0 if a<b<c else 1)' \
-  "${OLD_DAY}T23:59:59-08:00" "$since" "${NEW_DAY}T00:00:00-08:00" \
+  "${OLD_DAY}T23:59:59-08:00" "$since" "${NEW_DAY}T08:00:00-08:00" \
   || fail "LEGACY_MATRIX_SINCE $since is not between the two fixture days"
 gx legacy-one-before; run_mr; clean
 gx legacy-named-stale-before; run_mr; clean

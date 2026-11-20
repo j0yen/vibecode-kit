@@ -837,7 +837,7 @@ SIDECAR_BINDING_SINCE = "2026-11-16T20:00:00-08:00"
 # PRD-dream-generation-aware-mission-records R1: a legacy-header manifest first listed before this
 # instant may keep the one matrix it lists. A fixed instant no earlier than the rule's installation,
 # set by the installing commit (as SIDECAR_BINDING_SINCE was) and recorded in history.md.
-LEGACY_MATRIX_SINCE = "2026-11-20T00:00:00-08:00"
+LEGACY_MATRIX_SINCE = "2026-11-18T06:05:00-08:00"
 LEGACY_MATRIX_RULE = "the one matrix this legacy manifest lists, first listed before LEGACY_MATRIX_SINCE"
 MISSION_IDS = ("mission-grammar", "mission-edges-missing", "edge-grammar", "edge-unexplained",
                "edge-unknown-unowned", "edge-node-unlisted", "mission-prd-unlisted",
