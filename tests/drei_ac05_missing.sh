@@ -15,7 +15,7 @@ run_root() { JS=$(cd / && "$LINT" "$LOG" --last --prd-dir "$H" --decisions "$DEC
 run_root; [ "$RC" = 0 ] || fail "passing fixture from /: rc=$RC: $ERR"
 miss() { # <case> <path substring>
   run_root; [ "$RC" = 1 ] || fail "$1: rc=$RC (never 0): $ERR"
-  printf '%s' "$JS" | jget 'd["findings"]' | grep -qF '"mission-edges-missing"' || fail "$1: no mission-edges-missing: $ERR"
+  printf '%s' "$JS" | jget 'd["findings"]' | grep >/dev/null -F '"mission-edges-missing"' || fail "$1: no mission-edges-missing: $ERR"
   has_fail mission-edges-missing "$2"
 }
 reset_ei; setline Mission "Mission: $EI_NAME edges=notes/missions/none.edges.jsonl"

@@ -11,7 +11,7 @@ set -uo pipefail
 S="$REPO/skills/dream/SKILL.md"; HI="$REPO/skills/dream/history.md"
 section() { awk -v h="$1" '/^```/{fence=!fence} !fence&&/^## /{f=(index($0,h)==1);next} f' "$S"; }
 tpl=$(section '## Phase 4 — Persist' | awk '/^```/{n++; next} n==1')
-printf '%s\n' "$tpl" | grep -qxF 'Consumption: <record path>' || fail "Phase 4 template: no 'Consumption: <record path>' line"
+printf '%s\n' "$tpl" | grep >/dev/null -xF 'Consumption: <record path>' || fail "Phase 4 template: no 'Consumption: <record path>' line"
 p4=$(section '## Phase 4 — Persist' | tr '\n' ' ' | tr -s ' ')
 for s in '**Consuming analysis findings.**' '`Consumption: <record path>`' 'notes/consumption/<ISO-ts>-<slug>.jsonl' '`analysis-consumption.v1`' \
          '`id` (unique in the file)' '`page_sha256`' '`falsifier` or `mechanism:<n>`' '`author_session`' '`note`' 'The five bindings' \
@@ -23,11 +23,11 @@ for s in '**Consuming analysis findings.**' '`Consumption: <record path>`' 'note
          '`consumption-repair-unbound`' '`consumption-repair-unproven`' '`consumption-residual-unaccepted`' '`consumption-pending-overdue`' \
          '`consumption-receipt-only`' '`consumption-finding-unbound`' '`consumption-page-stale`' '`consumption-page-unparsed`' \
          '`canonical-unavailable`' '`falsifier-not-first`' '`consumption-blocked`'; do
-  printf '%s' "$p4" | grep -qF -- "$s" || fail "Phase 4 does not state '$s'"
+  printf '%s' "$p4" | grep >/dev/null -F -- "$s" || fail "Phase 4 does not state '$s'"
 done
 hi=$(tr '\n' ' ' < "$HI" | tr -s ' ')
 for s in '`Consumption:`' '`requirement`' '`repair`' '`test`' '`residual`' '`pending`' 'PRD dream-finding-consumption'; do
-  printf '%s' "$hi" | grep -qF -- "$s" || fail "history.md does not name $s"
+  printf '%s' "$hi" | grep >/dev/null -F -- "$s" || fail "history.md does not name $s"
 done
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; mkdir -p "$T/base" "$T/cases"
 out=$(python3 -I "$here/fixtures/dfcn/dfcnlog.py" --run ac08- "$REPO/skills/dream/scripts/dream-run-note-lint.sh" "$T/cases" 2>&1) \

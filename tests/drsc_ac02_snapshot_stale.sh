@@ -17,9 +17,9 @@ stale_ok() { # <case> <slug> <changed file>
   [ "$(printf '%s' "$js" | jget 'd["provenance"].get("snapshot")')" = '"self"' ] || fail "$1: snapshot label not self: $js"
   out=$(lint 2>&1)
   l=$(findline review-snapshot-stale "$out") || fail "$1: no FAIL line: $out"
-  printf '%s' "$l" | grep -qw "$2" || fail "$1: slug $2 not named: $l"
+  printf '%s' "$l" | grep >/dev/null -w "$2" || fail "$1: slug $2 not named: $l"
   cur=$(sha256sum "$3" | cut -c1-12)
-  printf '%s' "$l" | grep -q "$cur" && printf '%s' "$l" | grep -q "$MAN_A" || fail "$1: digests $cur/$MAN_A not named: $l"
+  printf '%s' "$l" | grep >/dev/null "$cur" && printf '%s' "$l" | grep >/dev/null "$MAN_A" || fail "$1: digests $cur/$MAN_A not named: $l"
 }
 printf 'x' >> "$H/$B/PRD-rs-alpha.md"
 stale_ok approve rs-alpha "$H/$B/PRD-rs-alpha.md"
@@ -62,6 +62,6 @@ reset_v; not_root; chmod 000 "$H/$B/PRD-rs-alpha.md"
 js=$(lint --json 2>"$T/err"); rc=$?; no_traceback "$(cat "$T/err")"
 expect_exact "$rc" 1 "$js" review-snapshot-stale
 out=$(lint 2>&1); l=$(findline review-snapshot-stale "$out") || fail "unreadable: $out"
-printf '%s' "$l" | grep -q 'PRD-rs-alpha.md' && printf '%s' "$l" | grep -qi unreadable || fail "unreadable: path/unreadable not named: $l"
+printf '%s' "$l" | grep >/dev/null 'PRD-rs-alpha.md' && printf '%s' "$l" | grep >/dev/null -i unreadable || fail "unreadable: path/unreadable not named: $l"
 chmod 644 "$H/$B/PRD-rs-alpha.md"
 pass

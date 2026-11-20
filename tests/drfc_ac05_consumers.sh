@@ -47,5 +47,5 @@ st2 "${ST2_ALL/d=reviewed:APPROVE d=reviewed:APPROVE/d=reviewed:APPROVE}"
 run_fc
 jtrue 'not [f for f in d["findings"] if f.startswith(("repair-", "sweep-", "affected-"))]' "no finding of this PRD for d"
 jtrue 'set(d["findings"]) <= {"mission-scope-incomplete", "mission-snapshot-stale"}' "only the chain-review packet refusals"
-if printf '%s\n' "$ERR" | grep '^FAIL review-snapshot-stale' | grep -q 'slug d'; then fail "d's earlier APPROVE does not stand: $ERR"; fi
+if printf '%s\n' "$ERR" | grep '^FAIL review-snapshot-stale' | grep >/dev/null 'slug d'; then fail "d's earlier APPROVE does not stand: $ERR"; fi
 pass "b removed; b at its before digest; bounded re-review; d unrequired"

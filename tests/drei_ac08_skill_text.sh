@@ -20,7 +20,7 @@ for s in 'notes/missions/<name>.edges.jsonl' outcome invariants prds external pr
   grep -qF -- "$s" <<<"$para" || fail "Phase 2 edge-map paragraph lacks '$s'"
 done
 tpl=$(section '## Phase 4 — Persist' | awk '/^```/{n++; next} n==1')
-printf '%s\n' "$tpl" | grep -A1 '^State:' | grep -q '^Mission: ' || fail "Phase 4 template: no Mission: line right after State:"
+printf '%s\n' "$tpl" | grep -A1 '^State:' | grep >/dev/null '^Mission: ' || fail "Phase 4 template: no Mission: line right after State:"
 p4=$(section '## Phase 4 — Persist' | tr '\n' ' ' | tr -s ' ')
 grep -qF 'The six record lines' <<<"$p4" || fail "Phase 4: the record-lines paragraph does not say six"
 # shellcheck disable=SC2016  # literal backticks of the skill text

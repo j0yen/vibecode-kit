@@ -40,7 +40,7 @@ for c in P3 P4; do
   want "$c" || continue
   mut "$c"
   pos "$c" "$pres_b"
-  printf '%s\n' "$OUT" | grep -q 'slug b:' && fail "$c: a finding names slug b: $OUT"
+  printf '%s\n' "$OUT" | grep >/dev/null 'slug b:' && fail "$c: a finding names slug b: $OUT"
   echo "ok $c preservation: b's pin current, b not under superseded"
   pos "$c" '
 assert d["exit"]==0 and d["findings"]==[] and d["provenance"]["snapshot"]=="verified", (d["findings"], d["provenance"])

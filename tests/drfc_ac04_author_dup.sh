@@ -22,11 +22,11 @@ use base; redit "R[0]['author_session'] = '$X'"; run_fc; findings_eq '["repair-a
 use base; redit "R[0]['author_session'] = '$S_F1'"; run_fc; findings_eq '["repair-author-mismatch"]'; has_fail repair-author-mismatch "$S_F1"
 use base; run_fc; [ "$RC" = 0 ] || fail "earlier author with its row: rc=$RC $ERR"
 use base; decedit "{k: v for k, v in r.items() if k != 'role'} if r.get('session') == '$S_FAX' else r"
-grep -F "$S_FAX" "$DEC" | grep -qF '"role"' && fail "the earlier author's launch row still carries role"
+grep -F "$S_FAX" "$DEC" | grep >/dev/null -F '"role"' && fail "the earlier author's launch row still carries role"
 run_fc; [ "$RC" = 0 ] || fail "earlier author, its launch row without role: rc=$RC $ERR"; findings_eq '[]'
 use base; decedit "None if r.get('session') == '$S_FA0' else r"; run_fc; has_fail repair-author-mismatch "$S_FA0"
 use base; _e2 set Route "Route: ungoverned session=$S_FA host=fixture"; run_fc_ungov; has_fail repair-author-mismatch "$S_FAX"
-if printf '%s\n' "$ERR" | grep '^FAIL repair-author-mismatch' | grep -q "session $S_FA0"; then fail "ungoverned: entry 1's Route session refused: $ERR"; fi
+if printf '%s\n' "$ERR" | grep '^FAIL repair-author-mismatch' | grep >/dev/null "session $S_FA0"; then fail "ungoverned: entry 1's Route session refused: $ERR"; fi
 use base; redit "R.append(dict(R[0]))"; run_fc; has_fail repair-duplicate "F1"
 use declined-repaired; redit "R.append(dict(R[2]))"; run_fc; has_fail repair-duplicate "F1"
 use amended; redit "R.append(dict(R[2]))"; run_fc; has_fail repair-duplicate "PRD-a.md"

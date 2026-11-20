@@ -13,13 +13,13 @@ section() { awk -v h="$1" '/^```/{fence=!fence} !fence&&/^## /{f=(index($0,h)==1
 p1=$(section '## Phase 1 — Research'); p2=$(section '## Phase 2 — Vision')
 for s in 'Failure: none' 'Failure: <class> <ref> [<ref> ...]' '`recurring-failure`' '`failed-acceptance`' '`consequential-obstacle`' '`transient`' '`other`' \
          'evidence.ref_pattern' 'evidence.placeholders' "notes/reviews/" 'named on a `Review:` line or not'; do
-  printf '%s' "$p1" | grep -qF -- "$s" || fail "Phase 1 does not state '$s'"
+  printf '%s' "$p1" | grep >/dev/null -F -- "$s" || fail "Phase 1 does not state '$s'"
 done
 for s in 'skipped: blocked decision=<ts>' '`policy-missing:`' '`policy file not found`' '`policy is malformed`' '`malformed policy JSON: <Error>`' \
          '`ledger lookup unavailable; cannot verify ledger:<id> (fail closed)`' 'require_permission_mode' '(policy error, fail closed)' 'excuses no skip' 'A1300' \
          'for any task' 'live-worker' 'reused <page> sha256=<64 hex> inputs=<manifest>' 'sha256sum -c' "manifest's own directory" 'seed file' \
          'reused <page> sha256=<64 hex>`' 'page:<path>' 'skipped: transient' '`recurring-failure`, `failed-acceptance` and `consequential-obstacle`' 'notes/analysis/'; do
-  printf '%s' "$p2" | grep -qF -- "$s" || fail "Phase 2 does not state '$s'"
+  printf '%s' "$p2" | grep >/dev/null -F -- "$s" || fail "Phase 2 does not state '$s'"
 done
 grep -qF 'PRD dream-analysis-trigger-record' "$HI" || fail "history.md does not name PRD dream-analysis-trigger-record"
 cases ac08

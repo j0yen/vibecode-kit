@@ -11,8 +11,8 @@ git -C "$REPO" cat-file -e "$ADOPTED^{commit}" 2>/dev/null || { echo "UNKNOWN co
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 git -C "$REPO" show "$ADOPTED:skills/dream/SKILL.md" > "$tmp/adopted.md"
 [ "$(frontmatter "$SKILL")" = "$(frontmatter "$tmp/adopted.md")" ] || fail "frontmatter differs from $ADOPTED"
-frontmatter "$SKILL" | grep -qx 'fable-spawn: true' || fail "fable-spawn: true missing"
-frontmatter "$SKILL" | grep -qE '^(model|effort):' && fail "frontmatter still pins model/effort"
+frontmatter "$SKILL" | grep >/dev/null -x 'fable-spawn: true' || fail "fable-spawn: true missing"
+frontmatter "$SKILL" | grep >/dev/null -E '^(model|effort):' && fail "frontmatter still pins model/effort"
 phase_routing "$tmp/adopted.md" > "$tmp/want"
 phase_routing "$SKILL" > "$tmp/got"
 n=$(wc -l < "$tmp/want")

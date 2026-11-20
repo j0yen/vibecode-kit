@@ -22,7 +22,7 @@ for n in pass:drsp-p1-superseded pass:drsp-p4-b-not-superseded \
          pass:drsp-kb4-launch-across-manifests \
          refuse:review-snapshot-stale:drsp-kb5-no-mission refuse:review-snapshot-stale:drsp-kb6-j-legacy \
          pass:drsp-kb11-unlisted-manifest-not-chain refuse:mission-verdict-missing:drsp-kb13-j-no-result; do
-  printf '%s\n' "$st" | grep -qx "PASS $n" || fail "selftest has no passing case $n"
+  printf '%s\n' "$st" | grep >/dev/null -x "PASS $n" || fail "selftest has no passing case $n"
 done
 f="${DREAM_SKILL_MD:-$REPO/skills/dream/SKILL.md}"
 [ -r "$f" ] || fail "skill file missing or unreadable: $f"
@@ -31,17 +31,17 @@ para() { awk -v s="$1" 'index($0,s)==1{f=1} f&&/^$/{exit} f' | tr '\n' ' ' | tr 
 rv=$(section '## Phase 3 — Draft' | para '**Review:**')
 # shellcheck disable=SC2016  # literal backticks of the skill text
 r5='(FIX and REJECT are not pinned). On a note whose `Mission:` line carries `scope=`, only the latest chain review (in `Review:` line order) whose file names a slug pins that slug; an earlier chain review'"'"'s APPROVE on it is superseded by that later verdict, and under `mission=APPROVE` the whole packet is pinned to that review'"'"'s manifest.'
-printf '%s' "$rv" | grep -qF -- "$r5" || fail "Phase 3 **Review:** paragraph lacks chain-review R5's sentence after '(FIX and REJECT are not pinned)': $rv"
+printf '%s' "$rv" | grep >/dev/null -F -- "$r5" || fail "Phase 3 **Review:** paragraph lacks chain-review R5's sentence after '(FIX and REJECT are not pinned)': $rv"
 case "$rv" in *'a gate-fix convention'*) fail "Phase 3 **Review:** paragraph still carries the G9 sentence that chain-review R6 replaces";; esac
 p4=$(section '## Phase 4 — Persist' | tr '\n' ' ' | tr -s ' ')
 # shellcheck disable=SC2016
-printf '%s' "$p4" | grep -qF -- '`verified` counts a superseded APPROVE as matched, and the JSON names it under `superseded`' \
+printf '%s' "$p4" | grep >/dev/null -F -- '`verified` counts a superseded APPROVE as matched, and the JSON names it under `superseded`' \
   || fail "Phase 4 provenance-label text lacks the superseded sentence"
 hist="$REPO/skills/dream/history.md"
 n=$(grep -c '^- \*\*.*gate fix, A1723' "$hist")
 [ "$n" = 1 ] || fail "history.md: $n gate-fix entries naming A1723, want 1"
 e=$(awk '/^- \*\*.*gate fix, A1723/{f=1;print;next} f&&/^- \*\*/{exit} f' "$hist" | tr '\n' ' ')
 for s in 'superseded' 'notes/dream-log.md' 'dream-early-integration' 'r9'; do
-  printf '%s' "$e" | grep -qF -- "$s" || fail "history.md A1723 entry does not name $s: $e"
+  printf '%s' "$e" | grep >/dev/null -F -- "$s" || fail "history.md A1723 entry does not name $s: $e"
 done
 pass "$(printf '%s\n' "$st" | tail -1)"

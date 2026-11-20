@@ -14,7 +14,7 @@ mismatch() { # <case> <grep -F needle>...: exactly [review-scope-mismatch], ever
   [ "$(printf '%s' "$js" | jget 'd["provenance"].get("snapshot")')" = '"self"' ] || fail "$c: snapshot label not self: $js"
   out=$(lint 2>&1); no_traceback "$out"
   l=$(findline review-scope-mismatch "$out") || fail "$c: no FAIL line: $out"
-  for n in "$@"; do printf '%s' "$l" | grep -qF -- "$n" || fail "$c: '$n' not named: $l"; done
+  for n in "$@"; do printf '%s' "$l" | grep >/dev/null -F -- "$n" || fail "$c: '$n' not named: $l"; done
 }
 # the launcher's canonical text (fable-launch.sh canon(): awk basename, LC_ALL=C sort -u)
 id_of() { LC_ALL=C awk '{n=split($2,p,"/"); print $1 "  " p[n]}' "$1" | LC_ALL=C sort -u | sha256sum | cut -d' ' -f1; }

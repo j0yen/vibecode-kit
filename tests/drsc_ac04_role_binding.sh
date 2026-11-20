@@ -14,18 +14,18 @@ decedit "[dict({k:v for k,v in r.items() if k not in ('role','scope','scope_id')
 js=$(lint --json 2>"$T/err"); rc=$?; no_traceback "$(cat "$T/err")"
 expect_exact "$rc" 1 "$js" review-provenance-missing
 out=$(lint 2>&1); l=$(findline review-provenance-missing "$out") || fail "author: $out"
-printf '%s' "$l" | grep -qF 'first failing field: role' && printf '%s' "$l" | grep -qF "$S_REV" || fail "author: field/session not named: $l"
+printf '%s' "$l" | grep >/dev/null -F 'first failing field: role' && printf '%s' "$l" | grep >/dev/null -F "$S_REV" || fail "author: field/session not named: $l"
 [ "$(printf '%s' "$js" | jget 'd["provenance"].get("snapshot")')" = '"self"' ] || fail "author: snapshot not self: $js"
 # latest row with another role value
 reset_v; decedit "dict(r,role='reviewer') if $rev else r"
 out=$(lint 2>&1); l=$(findline review-provenance-missing "$out") || fail "other role: $out"
-printf '%s' "$l" | grep -qF 'first failing field: role' || fail "other role: field not named: $l"
+printf '%s' "$l" | grep >/dev/null -F 'first failing field: role' || fail "other role: field not named: $l"
 # Route row with role review
 reset_v; decedit "dict(r,role='review') if $aut else r"
 js=$(lint --json 2>"$T/err"); rc=$?
 expect_exact "$rc" 1 "$js" route-provenance-mismatch
 out=$(lint 2>&1); l=$(findline route-provenance-mismatch "$out") || fail "route role: $out"
-printf '%s' "$l" | grep -qF 'role=review' || fail "route role: role=review not named: $l"
+printf '%s' "$l" | grep >/dev/null -F 'role=review' || fail "route role: role=review not named: $l"
 [ "$(printf '%s' "$js" | jget 'd["provenance"]["route"]')" = '"self"' ] || fail "route role: route label not self: $js"
 # reviewer-session equal to the Route session: review-self as today
 reset_v; setline Review "Review: $VERDICTS reviewer-session=$S_AUTH"

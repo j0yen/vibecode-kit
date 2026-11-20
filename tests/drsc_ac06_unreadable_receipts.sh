@@ -17,7 +17,7 @@ chmod 000 "$H/$VERDICTS"
 js=$(lint --json 2>"$T/err"); rc=$?; no_traceback "$(cat "$T/err")"
 expect_exact "$rc" 1 "$js" review-file-missing
 out=$(lint 2>&1); l=$(findline review-file-missing "$out") || fail "verdicts: $out"
-printf '%s' "$l" | grep -qF "$VERDICTS" || fail "verdicts: path not named: $l"
+printf '%s' "$l" | grep >/dev/null -F "$VERDICTS" || fail "verdicts: path not named: $l"
 [ "$(printf '%s' "$js" | jget '[d["provenance"]["reviews"], d["provenance"].get("snapshot")]')" = '["self", "self"]' ] \
   || fail "verdicts: labels not self: $js"
 chmod 644 "$H/$VERDICTS"
@@ -26,7 +26,7 @@ chmod 000 "$H/$RESULT"
 js=$(lint --json 2>"$T/err"); rc=$?; no_traceback "$(cat "$T/err")"
 expect_exact "$rc" 1 "$js" review-result-mismatch
 out=$(lint 2>&1); l=$(findline review-result-mismatch "$out") || fail "result: $out"
-printf '%s' "$l" | grep -qF "$RESULT" && printf '%s' "$l" | grep -qF 'missing or not JSON' || fail "result: path/reason not named: $l"
+printf '%s' "$l" | grep >/dev/null -F "$RESULT" && printf '%s' "$l" | grep >/dev/null -F 'missing or not JSON' || fail "result: path/reason not named: $l"
 [ "$(printf '%s' "$js" | jget 'd["provenance"]["reviews"]')" = '"self"' ] || fail "result: line not labelled self: $js"
 [ "$(printf '%s' "$js" | jget 'd["provenance"].get("snapshot")')" != 'null' ] || fail "result: no snapshot label: $js"
 chmod 644 "$H/$RESULT"

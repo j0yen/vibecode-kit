@@ -36,7 +36,7 @@ for id in line-missing route-grammar analysis-grammar review-grammar state-gramm
   route-provenance-ambiguous route-ungoverned-on-governed-host task-none-governed-route \
   analysis-provenance-missing analysis-page-unbound task-none-ran review-self review-provenance-missing \
   review-result-mismatch adversarial-missing adversarial-slug-missing adversarial-family-missing adversarial-case-missing; do
-  printf '%s\n' "$st" | grep -q "^PASS refuse:$id" || fail "selftest has no passing refusal fixture for $id"
+  printf '%s\n' "$st" | grep >/dev/null "^PASS refuse:$id" || fail "selftest has no passing refusal fixture for $id"
 done
-printf '%s\n' "$st" | grep -q '^PASS pass:checked-' || fail "selftest has no passing result= (checked) fixture"
+printf '%s\n' "$st" | grep >/dev/null '^PASS pass:checked-' || fail "selftest has no passing result= (checked) fixture"
 pass "$(printf '%s\n' "$st" | tail -1)"

@@ -47,7 +47,7 @@ usage2() { # <case> <needle> <args...>: exit 2, no JSON on stdout, the needle on
   local c=$1 n=$2; shift 2
   JS=$("$LINT" "$@" 2>"$T/err"); RC=$?; ERR=$(cat "$T/err"); no_traceback "$ERR"
   [ "$RC" = 2 ] && [ -z "$JS" ] || fail "$c: rc=$RC want 2 with no JSON: $JS $ERR"
-  printf '%s' "$ERR" | grep -qF -- "$n" || fail "$c: '$n' not on stderr: $ERR"
+  printf '%s' "$ERR" | grep >/dev/null -F -- "$n" || fail "$c: '$n' not on stderr: $ERR"
 }
 # unchanged: no --scope-root
 run; [ "$RC" = 0 ] || fail "baseline: rc=$RC $ERR"

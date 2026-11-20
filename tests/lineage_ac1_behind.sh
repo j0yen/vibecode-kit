@@ -24,7 +24,7 @@ git push -q origin main
 rc=0
 out=$("$SCRIPT_UNDER_TEST" "$tmp/behind_clone") || rc=$?
 
-echo "$out" | head -1 | grep -qE '^behind 3 \(local=1\.0\.0 remote=1\.1\.0\)$' \
+echo "$out" | head -1 | grep >/dev/null -E '^behind 3 \(local=1\.0\.0 remote=1\.1\.0\)$' \
   || fail "unexpected verdict line: $(echo "$out" | head -1)"
 [ "$rc" -eq 2 ] || fail "expected exit 2, got $rc"
 

@@ -25,7 +25,7 @@ vedit "$MR_CHAIN/verdict.txt" "L[:] = [l for l in L if not l.startswith('a APPRO
 capture "$MR_CHAIN/result.json" "L[:] = [l for l in L if not l.startswith('a APPROVE')]"
 state "a=linted a=eligible b=linted b=reviewed:APPROVE c=linted c=reviewed:APPROVE c=eligible"; run_mr
 findings_eq '["mission-approval-blocked"]'; has_fail mission-approval-blocked "slug a" "no per-PRD verdict"
-if printf '%s\n' "$ERR" | grep -q 'slug c'; then fail "c blocked: $ERR"; fi
+if printf '%s\n' "$ERR" | grep >/dev/null 'slug c'; then fail "c blocked: $ERR"; fi
 # the reverse hop: the finding names E2's consumer c; its producer b is held by E2 alone
 use fix
 side "$MR_CHAIN" "R[0]['prds'] = ['PRD-c.md']"

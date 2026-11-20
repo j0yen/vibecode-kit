@@ -26,7 +26,7 @@ js=$("$LINT" --edges "$EF" --json 2>"$T/err"); rc=$?
 [ "$rc" = 1 ] && [ "$(printf '%s' "$js" | jget 'd["findings"]')" = '["edge-unexplained"]' ] || fail "--edges refused edge: rc=$rc $js"
 grep -q '^FAIL edge-unexplained: .*edge E1: trigger' "$T/err" || fail "--edges FAIL line: $(cat "$T/err")"
 js=$("$LINT" --edges "$EF" --prds PRD-zz.md --json 2>/dev/null); rc=$?
-if ! { [ "$rc" = 1 ] && printf '%s' "$js" | jget 'd["findings"]' | grep -qF '"mission-prd-unlisted"'; }; then fail "--prds outside prds: rc=$rc $js"; fi
+if ! { [ "$rc" = 1 ] && printf '%s' "$js" | jget 'd["findings"]' | grep >/dev/null -F '"mission-prd-unlisted"'; }; then fail "--prds outside prds: rc=$rc $js"; fi
 reset_ei
 for args in "$LOG --edges $EF" "--edges $EF --matrix $EF --states a=linted" "--edges $EF --scope-id $H/$EI_M1"; do
   # shellcheck disable=SC2086  # word splitting of the argument list is intended

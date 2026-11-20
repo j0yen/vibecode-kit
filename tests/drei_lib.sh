@@ -64,4 +64,4 @@ findings_eq() { local f; f=$(printf '%s' "$JS" | jget 'd["findings"]') || fail "
   [ "$f" = "$1" ] || fail "findings=$f want $1 (rc=$RC): $ERR"; }
 # has_fail <id> <substring...>: a FAIL <id> line on stderr carrying every substring
 has_fail() { local id=$1 l; shift; l=$(printf '%s\n' "$ERR" | grep "^FAIL $id: ") || fail "no FAIL $id line: $ERR"
-  for s in "$@"; do printf '%s\n' "$l" | grep -qF -- "$s" || fail "FAIL $id lines lack '$s': $l"; done; }
+  for s in "$@"; do printf '%s\n' "$l" | grep >/dev/null -F -- "$s" || fail "FAIL $id lines lack '$s': $l"; done; }

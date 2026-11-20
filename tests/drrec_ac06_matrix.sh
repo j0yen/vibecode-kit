@@ -18,8 +18,8 @@ open(p,'w').write(pre+'## PRD-foo\n'+foo+'## PRD-bar\n'+body+'## Uncovered\n'+un
 PY
 setline State "State: foo=linted foo=reviewed:APPROVE bar=linted"
 out=$(lint 2>&1); l=$(printf '%s\n' "$out" | grep '^FAIL adversarial-family-missing: ') || fail "family: $out"
-printf '%s' "$l" | grep -qw foo && printf '%s' "$l" | grep -qi 'falsifier quality' || fail "family: slug/family not named: $l"
-printf '%s' "$l" | grep -qw bar && fail "family: bar named: $l"
+printf '%s' "$l" | grep >/dev/null -w foo && printf '%s' "$l" | grep >/dev/null -i 'falsifier quality' || fail "family: slug/family not named: $l"
+printf '%s' "$l" | grep >/dev/null -w bar && fail "family: bar named: $l"
 js=$(lint --json 2>/dev/null); expect_exact "$?" 1 "$js" adversarial-family-missing
 # conditional fallback prefix in the family after the bypass heading only
 cp "$T/mx.orig" "$M"; setline State "State: foo=linted foo=reviewed:APPROVE"
@@ -32,6 +32,6 @@ s=s.replace('The six families below','The conditional case and the six families 
 open(p,'w').write(s)
 PY
 grep -q '^| conditional fallback: AC4' "$M" || fail "fixture edit failed"
-out=$(lint 2>&1); printf '%s\n' "$out" | grep -q '^FAIL adversarial-case-missing: conditional-fallback' || fail "case: $out"
+out=$(lint 2>&1); printf '%s\n' "$out" | grep >/dev/null '^FAIL adversarial-case-missing: conditional-fallback' || fail "case: $out"
 js=$(lint --json 2>/dev/null); expect_exact "$?" 1 "$js" adversarial-case-missing
 pass
