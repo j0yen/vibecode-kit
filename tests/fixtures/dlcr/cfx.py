@@ -399,7 +399,8 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
     "escaped-comma" (W's dot written \u002e, then a comma), "latin1" (a byte 0xff after the rows: not UTF-8); review r23h:
     "misspelled" (row 3's after key spelled After), "no-keys" (row 3 has neither before nor after), "blank", "empty",
     "surrogate" (row 3's after is " ", "" or a lone surrogate), "before-list" (row 3's before is [W], its after m3), "array"
-    (line 3 is the JSON list [W]) and "repeated" (row 3 names W as after, then m3 as after again); surrogate_row: a
+    (line 3 is the JSON list [W]), "repeated" (row 3 names W as after, then m3 as after again) and "repeated-nested" (the
+    same after a nested object, so the row's own keys are the last object decoded); surrogate_row: a
     launch row's reasons hold a lone surrogate."""
     M = rounds(3)
     post = M.entries[-1]
@@ -459,11 +460,13 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
             if flag == "before-list":                      # review r23h L3 (H4): before is [W], after m3
                 rows[-1]["before"], rows[-1]["after"] = [W_REL], m3
             text = repairs_text(rows)
-            if flag in ("array", "repeated"):              # review r23h L3 (H3): line 3 is [W]; L1: after W, then after m3
+            if flag in ("array", "repeated", "repeated-nested"):   # review r23h L3 (H3): line 3 is [W]; L1: after W, then m3
                 raw = text.decode() if isinstance(text, bytes) else text
                 ls = raw.split("\n")
                 assert ls[2].endswith("}") and W_REL in ls[2]
-                ls[2] = json.dumps([W_REL]) if flag == "array" else ls[2][:-1] + ', "after": ' + json.dumps(m3) + "}"
+                ls[2] = (json.dumps([W_REL]) if flag == "array" else
+                         ls[2][:-1] + (', "meta": {"note": "x"}' if flag == "repeated-nested" else "") + ', "after": '
+                         + json.dumps(m3) + "}")
                 text = "\n".join(ls).encode() if isinstance(text, bytes) else "\n".join(ls)
             if flag in ("comma", "dotted-comma", "escaped-comma"):   # review r23e M2 / r23g M1: row 3 is no JSON object
                 raw = text.decode() if isinstance(text, bytes) else text
@@ -588,6 +591,7 @@ CASES = {
     "r6-repairs-earlier-before-list": lambda: r6_base(old_repairs="before-list"),
     "r6-repairs-earlier-array": lambda: r6_base(old_repairs="array"),
     "r6-repairs-earlier-repeated": lambda: r6_base(old_repairs="repeated"),
+    "r6-repairs-earlier-repeated-nested": lambda: r6_base(old_repairs="repeated-nested"),
     "r6-surrogate-row": lambda: r6_base(surrogate_row=True),
     "r6-exists-slash": lambda: r6_base(exists=True, token_value=f"{W_REL}/"),
     "r6-exists-dot": lambda: r6_base(exists=True, token_value=f"{W_REL}/."),

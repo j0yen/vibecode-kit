@@ -26,7 +26,8 @@
 # whatever it spells (W with ./ or with its dot escaped, then a comma), and a file that is not UTF-8 (M1, L2). Review r23h:
 # (e) also refuses an earlier row with no after (its key spelled After) or neither key (M1), an after that is blank (M1),
 # empty (L3, R4) or a lone surrogate (L2), a before that is a list (L3, H4), a JSON line that is a list (L3, H3) and a row
-# repeating its after key (L1); a decisions value that is a lone surrogate names nothing, and neither ends in a traceback (L2).
+# repeating its after key (L1), also after a nested object; a decisions value that is a lone surrogate names nothing, and
+# neither ends in a traceback (L2).
 set -uo pipefail
 # shellcheck source=tests/dlcr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dlcr_lib.sh"
@@ -115,6 +116,8 @@ has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repa
 cx r6-repairs-earlier-array; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'        # r23h L3 (H3)
 has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl is no JSON object"
 cx r6-repairs-earlier-repeated; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'     # r23h L1
+has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl repeats its after key"
+cx r6-repairs-earlier-repeated-nested; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'  # the row's own keys
 has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl repeats its after key"
 cx r6-surrogate-row; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"   # r23h L2: names nothing, no traceback
 cx r6-repairs-earlier-latin1; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'   # r23g L2
