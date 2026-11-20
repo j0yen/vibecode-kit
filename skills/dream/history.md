@@ -197,3 +197,16 @@ doubts a rule can see what it cost when it was missing. Append-only.
   `consolidates` earlier ones of its pair, judged for duplicates in their place with theirs kept
   in `repairs_historical` (`repair-consolidation-mismatch` otherwise). Each falls back to the
   existing finding when its conditions fail, and no recorded row or sidecar is rewritten.
+- **Reading a review scope recorded on another host (2026-11-20, A1723).** A1113's nine
+  chain reviews ran on Carbon, and their launch rows record `scope` under Carbon's PRD home
+  (`/home/jsy/.cache/dream-a1113/prds-clone`). The continuation on RedBaron holds the same
+  manifests at the same home-relative paths, under another root. The lint read an absolute
+  `scope` literally, so on RedBaron the case-11 union cleared the nine
+  `review-provenance-missing` findings but left nine `review-scope-mismatch`. The PRD author
+  ruled the explicit root map (source request 6, Q5, option A), and the lint gained
+  `--scope-root <recorded root>=<this run's PRD home>`, which the gate passes for a delivered
+  source whose `observed.json` names the root. A row's absolute `scope` under the recorded
+  root is read at the same relative path under the local home. Both paths are recorded, in
+  `scope_roots` and the review's `scope_read`. Every content check stands, and the sweep and
+  pin checks take a mapped read only when it canonicalizes to the row's `scope_id`. A scope
+  under no recorded root is read as before.

@@ -192,7 +192,10 @@ the frozen files the reviewer reads (the PRDs, the vision, the matrix), its path
 or relative to the manifest's own directory, because `sha256sum -c` is run there. The
 launcher's row then carries `role` review, `scope` and `scope_id`; a request without a
 snapshot launches as an author, which the lint refuses on a `Review:` line. Keep the
-manifest until the run note is linted.
+manifest until the run note is linted. A review row written on another host records that
+host's absolute `scope`. The case-11 gate reads it on this host only through the lint's
+`--scope-root <recorded root>=<PRD home>`, taken from the delivered decisions source that
+names the root, and every content check still applies.
 
 **Mission trace and edge map (before decomposition).** When a run drafts a mission (several
 PRDs over one shared chain), write `notes/missions/<name>.edges.jsonl` under the PRD home

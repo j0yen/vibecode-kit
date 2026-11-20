@@ -5,7 +5,7 @@
 #
 # Usage:
 #   dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] [--json]
-#                          [--prd-dir <dir>] [--decisions <path>]
+#                          [--prd-dir <dir>] [--decisions <path>] [--scope-root <recorded root>=<PRD home> ...]
 #   dream-run-note-lint.sh --matrix <path> --states <slug=value ...> [--json]
 #   dream-run-note-lint.sh --scope-id <manifest>
 #   dream-run-note-lint.sh --edges <edges.jsonl> [--prds <PRD basename ...>] [--json]
@@ -80,6 +80,16 @@
 # launcher's (fable-launch.sh R4): every line `<sha256>  <basename>`, bytewise sorted and
 # de-duplicated, newline-terminated, under the shared line rule; --scope-id prints its
 # sha256 (exit 0) or the review-scope-mismatch detail (exit 1) and reads nothing else.
+#
+# Scope roots (A1723 source request 6, Q5, ruled A): --scope-root <recorded root>=<PRD home>, repeatable, is given by
+# the case-11 gate for a delivered decisions source whose observed.json names the PRD home root its rows were written
+# under. A review row's absolute scope under a recorded root is read at the same relative path under this run's PRD
+# home. The JSON's scope_roots carries the map and every such read with both paths; the review's scope_read carries
+# its own. Every check stands: scope_id equality on the canonical bytes, the verdict slugs, each APPROVE slug's current
+# file. The sweep and pin checks treat a read under a root whose canonical id is not the row's scope_id as unreadable.
+# A scope under no recorded root, and a relative scope, is read as before. The right side must be this run's PRD home;
+# a root of /, two roots where one holds the other, or a root holding this run's PRD home or inside it, exits 2. No
+# row is rewritten.
 #
 # Mission chain review (PRD-dream-mission-chain-review): only on a Mission: line carrying
 # scope=<manifest>[,<manifest>...] (freeze order). Each manifest must canonicalize, hold its
@@ -199,7 +209,7 @@ class Exit2(Exception):
 
 def usage(msg):
     raise Exit2(msg + " (usage: dream-run-note-lint.sh <dream-log.md> [--last | --entry <ISO-ts>] "
-                "[--json] [--prd-dir <dir>] [--decisions <path>] | --matrix <path> --states "
+                "[--json] [--prd-dir <dir>] [--decisions <path>] [--scope-root <recorded root>=<PRD home> ...] | --matrix <path> --states "
                 "<slug=value ...> [--json] | --scope-id <manifest> | --edges <path> [--prds <PRD basename ...>] [--json] "
                 "| --consumption <record> --task <T> [--page <page>] [--prd-home <dir>] [--reviews <dir>] [--decisions <path>] "
                 "[--require-closed] [--json] | --selftest)")
@@ -243,6 +253,75 @@ def scope_canon(path):
     if rep:
         raise ScopeError(f"scope {shown}: prd-repeat: {bshow(rep[0])} listed with two digests")
     return hashlib.sha256(b"".join(canon)).hexdigest(), digests
+
+
+class ScopeRoots:
+    """Q5 (A1723 source request 6, ruled A): --scope-root <recorded root>=<this run's PRD home>, given by the case-11
+    gate from a delivered decisions source that names the PRD home root its rows were written under. A review row's
+    absolute `scope` under a recorded root is read at the same relative path under the local home; every such read is
+    recorded with both paths. A scope under no recorded root, and every relative scope, is read as before."""
+
+    def __init__(self, pairs, home):
+        self.pairs, self.home, self.reads = pairs, home, []
+
+    def path(self, scope, row=None):
+        """-> (the file read, the recorded root it was mapped under or None)."""
+        full = scope if os.path.isabs(scope) else os.path.join(self.home, scope)
+        if not os.path.isabs(scope):
+            return full, None
+        n = os.path.normpath(scope)
+        for root, local in self.pairs:
+            if n.startswith(root + os.sep):
+                got = os.path.join(local, n[len(root) + 1:])
+                rec = {"scope": scope, "read": got, "root": root,
+                       "session": row.get("session") if isinstance(row, dict) else None}
+                if rec not in self.reads:
+                    self.reads.append(rec)
+                return got, root
+        return full, None
+
+
+def scope_roots(vals, home):
+    """Q5: the --scope-root values -> [(recorded root, local home)]. Exit 2 for a value that is not
+    <absolute root>=<this run's PRD home>, a root of /, two roots where one holds the other, or a root that holds this
+    run's PRD home or lies inside it (equal to it is the identity)."""
+    pairs = []
+    for v in vals or []:
+        if v.count("=") != 1:
+            usage(f"--scope-root {v!r}: not <recorded root>=<this run's PRD home> (one '=')")
+        root, local = v.split("=")
+        if not os.path.isabs(root) or os.path.normpath(root) == "/":
+            usage(f"--scope-root {v!r}: the recorded root is not an absolute directory below /")
+        if not local or os.path.realpath(local) != os.path.realpath(home):
+            usage(f"--scope-root {v!r}: maps onto {local!r}, not this run's PRD home {home}")
+        root, hp = os.path.normpath(root), os.path.realpath(home)
+        if root != hp and (hp.startswith(root + os.sep) or root.startswith(hp + os.sep)):
+            usage(f"--scope-root {v!r}: the recorded root {root} and this run's PRD home {hp} hold one another, so a "
+                  "scope written on this host would be read at another path")
+        for r0, _ in pairs:
+            if r0 == root or r0.startswith(root + os.sep) or root.startswith(r0 + os.sep):
+                usage(f"--scope-root {v!r}: the recorded root {root} overlaps {r0}")
+        pairs.append((root, os.path.realpath(home)))
+    return pairs
+
+
+def scope_file(resolve, scope, row=None):
+    """The file a review row's `scope` names on this host, and the --scope-root it was read under (or None)."""
+    sr = getattr(resolve, "scope_roots", None)
+    return sr.path(scope, row) if sr is not None else (resolve(scope), None)
+
+
+def scope_digests(resolve, scope, row):
+    """{basename: digest} of a review row's scope manifest, {} when unreadable. A read under a --scope-root binds by
+    content only: its canonical id must be the row's scope_id (Q5), else it reads as unreadable."""
+    if not isinstance(scope, str):
+        return {}
+    full, root = scope_file(resolve, scope, row)
+    try:
+        got, dg = scope_canon(full)
+    except ScopeError:
+        return {}
+    return {} if root is not None and got != row.get("scope_id") else dg
 
 
 def manifest_paths(full):
@@ -328,14 +407,17 @@ def check_scope(L, rv, row, vlines, last, home, resolve):
     if not isinstance(scope, str):
         L.fail("review-scope-mismatch", f"{who}: the row's scope is absent or not a path")
         return False
-    full = resolve(scope)
+    full, root = scope_file(resolve, scope, row)
+    mapped = f"the row's scope {scope}, read at {full} under --scope-root {root}: " if root is not None else ""
+    if root is not None:
+        rv["scope_read"] = {"scope": scope, "read": full, "root": root}
     try:
         got, digests = scope_canon(full)
     except ScopeError as e:
-        L.fail("review-scope-mismatch", f"{who}: {e}")
+        L.fail("review-scope-mismatch", f"{who}: {mapped}{e}")
         return False
     if ok and got != sid:
-        L.fail("review-scope-mismatch", f"{who}: scope {full} canonicalizes to {got}, the row's scope_id is {sid}")
+        L.fail("review-scope-mismatch", f"{who}: {mapped}scope {full} canonicalizes to {got}, the row's scope_id is {sid}")
         ok = False
     for slug in dict.fromkeys(v[0] for v in vlines):
         if b"PRD-" + slug.encode() + b".md" not in digests:
@@ -951,11 +1033,7 @@ def superseded_pins(chain, home, resolve):
             skip.setdefault(k["i"], set()).add(s)
             if v != "APPROVE":
                 continue
-            scope = k["row"].get("scope")
-            try:
-                _, dg = scope_canon(resolve(scope)) if isinstance(scope, str) else (None, {})
-            except ScopeError:
-                dg = {}
+            dg = scope_digests(resolve, k["row"].get("scope"), k["row"])
             want = dg.get(b"PRD-" + s.encode() + b".md")
             cur = first_holder(home, PRD_DIRS, f"PRD-{s}.md")
             got = file_sha(cur) if cur else None
@@ -1895,12 +1973,8 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                     if isinstance(sid, str) and sid in ids:     # a chain review: its listed manifest (R2)
                         dg = mans[ids.index(sid)]["names"]
                     else:
-                        sc = rv["row"].get("scope")
-                        try:
-                            dg = {k.decode("utf-8", "backslashreplace"): v for k, v in scope_canon(resolve(sc))[1].items()} \
-                                if isinstance(sc, str) else {}
-                        except ScopeError:
-                            dg = {}
+                        dg = {k.decode("utf-8", "backslashreplace"): v
+                              for k, v in scope_digests(resolve, rv["row"].get("scope"), rv["row"]).items()}
                     if dg.get(c) == want:
                         hit = True
                         break
@@ -2188,7 +2262,7 @@ def parse_args(argv):
     a = {"log": None, "mode": "last", "entry": None, "json": False, "prd_dir": None,
          "decisions": None, "matrix": None, "states": None, "selftest": False, "scope_id": None,
          "edges": None, "prds": None, "consumption": None, "task": None, "page": None, "prd_home": None, "reviews": None,
-         "require_closed": False}
+         "require_closed": False, "scope_roots": None}
     i = 0
     while i < len(argv):
         x = argv[i]
@@ -2213,6 +2287,11 @@ def parse_args(argv):
             a[key] = argv[i + 1]
             if x == "--entry":
                 a["mode"] = "entry"
+            i += 1
+        elif x == "--scope-root":
+            if i + 1 >= len(argv):
+                usage(f"{x} needs a value")
+            a["scope_roots"] = (a["scope_roots"] or []) + [argv[i + 1]]
             i += 1
         elif x == "--states":
             vals = []
@@ -2408,7 +2487,7 @@ def newest_review_snapshot(same, task, rows, resolve):
     if found is None:
         return None
     try:          # fail closed: an unreadable snapshot, or one whose canonical id is not the row's scope_id, is no proof of unchanged bytes (security ddf46516 finding 4)
-        sid, digests = scope_canon(resolve(found["scope"]))
+        sid, digests = scope_canon(scope_file(resolve, found["scope"], found)[0])
     except ScopeError:
         return found["scope"], None
     return (found["scope"], digests) if found.get("scope_id") == sid else (found["scope"], None)   # a row without scope_id proves nothing (abb2e978 L1)
@@ -3091,9 +3170,12 @@ def lint_log(a):
             raise Exit2(f"decisions log is empty: {dec_path}")
         rows, malformed = load_decisions(dec_path)
     default_dp = default_decisions()
+    sroots = ScopeRoots(scope_roots(a["scope_roots"], home), home) if a["scope_roots"] else None
 
     def resolve(p):
         return p if os.path.isabs(p) else os.path.join(home, p)
+    if sroots is not None:
+        resolve.scope_roots = sroots       # Q5: read only by scope_file, for review rows' scope
 
     L = Lint()
     lines = {}
@@ -3538,11 +3620,14 @@ def lint_log(a):
         "adversarial": None if adv is None else {"kind": adv[0], "value": adv[1], "uncovered": adv[2]},
         "reviews": [dict({"file": r["file"], "session": r["session"], "result": r["result"],
                           "role": r.get("role"), "scope_id": r.get("scope_id")},
-                         **({"superseded": r["superseded"]} if r.get("superseded") else {})) for r in reviews],
+                         **({"superseded": r["superseded"]} if r.get("superseded") else {}),
+                         **({"scope_read": r["scope_read"]} if r.get("scope_read") else {})) for r in reviews],
         "states": states,
         "provenance": prov,
         "mission": mission_json(mrec),
     }
+    if sroots is not None:                              # Q5: the map and every review scope read under it, both paths
+        obj["scope_roots"] = {"map": [{"recorded": r, "local": h} for r, h in sroots.pairs], "reads": sroots.reads}
     if trig is not None:
         obj["analysis"].update(trig)                    # trigger-record R6: covered, failure and, for a reuse, reuse
     if cons is not None:
@@ -4263,7 +4348,8 @@ def cons_runs_lint(check, record, successor):
         pa = parse_args(toks[i + 1:])
     except Exit2:
         return False, "the lint refuses its arguments"
-    if pa["selftest"] or any(pa[k] not in (None, False) for k in ("log", "entry", "prd_dir", "matrix", "states", "scope_id", "edges", "prds")):
+    if pa["selftest"] or any(pa[k] not in (None, False) for k in ("log", "entry", "prd_dir", "matrix", "states", "scope_id", "edges", "prds",
+                                                                   "scope_roots")):
         return False, "it runs another mode of the lint"
     if not pa["consumption"] or cons_check_path(pa["consumption"]) != os.path.realpath(record):
         return False, f"its --consumption is not {record}"
@@ -4280,7 +4366,8 @@ def main(argv):
         if a["selftest"]:
             return selftest()
         if a["consumption"] is not None or any(a[k] not in (None, False) for k in ("task", "page", "prd_home", "reviews", "require_closed")):
-            if a["consumption"] is None or any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "matrix", "states", "scope_id", "edges", "prds")):
+            if a["consumption"] is None or any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "matrix", "states", "scope_id", "edges", "prds",
+                                                                                   "scope_roots")):
                 usage("--consumption <record> --task <T> goes with --page, --prd-home, --reviews, --decisions, --require-closed and --json only")
             L, obj, ok = cons_check(a)
             text = [f"FAIL {fid}: {d}" for fid, d in L.findings] or [ok]
@@ -4292,18 +4379,18 @@ def main(argv):
             return 1 if L.findings else 0
         if a["scope_id"] is not None:
             if any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "decisions", "matrix", "states", "json",
-                                                       "edges", "prds")):
+                                                       "edges", "prds", "scope_roots")):
                 usage("--scope-id takes one manifest path and nothing else")
             return scope_id_mode(a["scope_id"])
         if a["edges"] is not None or a["prds"] is not None:
             if a["edges"] is None or any(a[k] not in (None, False) for k in
-                                         ("log", "entry", "prd_dir", "decisions", "matrix", "states", "scope_id")):
+                                         ("log", "entry", "prd_dir", "decisions", "matrix", "states", "scope_id", "scope_roots")):
                 usage("--edges takes one edges file, --prds <PRD basename ...> and --json, without a log, "
                       "--matrix or --scope-id")
             L, obj, ok = edges_mode(a)
         elif a["matrix"] is not None or a["states"] is not None:
-            if a["matrix"] is None or a["states"] is None or a["log"] is not None:
-                usage("--matrix and --states go together, without a log")
+            if a["matrix"] is None or a["states"] is None or a["log"] is not None or a["scope_roots"] is not None:
+                usage("--matrix and --states go together, without a log or --scope-root")
             L, obj, ok = lint_matrix_mode(a)
         else:
             L, obj, ok = lint_log(a)
