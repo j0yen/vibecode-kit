@@ -513,8 +513,9 @@ holds the successor alone when the canonical ledger shows that successor still o
 done-check running this lint, and every `State:` slug otherwise, as an unbound mechanism and that
 5whys skip do. An unbound falsifier, a refused falsifier row and the WWHTBT skip hold the first
 PRDs (every member when none is first). A note whose Task cannot be read (no `Task:` line, or
-one naming no Task) holds every `State:` slug, since no earlier record of its Task can be
-checked. A held slug cannot
+one from which no Task id can be read) holds every `State:` slug, since no earlier record of
+its Task can be checked; a `Task: none` note has no Task whose earlier records apply. A held
+slug cannot
 reach `eligible`, and an earlier record's unconsumed row keeps holding until a later record
 binds the same page and finding as consumed, or binds that page whole at its current bytes
 (every current finding consumed) once the finding has left the page. `scripts/dream-run-note-lint.sh --consumption <record> --task <T> [--page <page>]
