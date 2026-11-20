@@ -50,8 +50,8 @@ run_mr_ungov() { JS=$(lint_ungov --json 2>"$T/err"); RC=$?; ERR=$(cat "$T/err");
 no_tb() { case "$ERR" in *Traceback*) fail "traceback: $ERR";; esac; }
 findings_eq() { local f; f=$(printf '%s' "$JS" | jget 'd["findings"]') || fail "no JSON (rc=$RC): $ERR"
   [ "$f" = "$1" ] || fail "findings=$f want $1 (rc=$RC): $ERR"; }
-has_id() { printf '%s' "$JS" | jget 'd["findings"]' | grep >/dev/null -F "\"$1\"" || fail "findings lack $1 (rc=$RC): $ERR"; }
-no_id() { printf '%s' "$JS" | jget 'd["findings"]' | grep >/dev/null -F "\"$1\"" && fail "findings carry $1 (rc=$RC): $ERR"; return 0; }
+has_id() { printf '%s' "$JS" | jget 'd["findings"]' | grep -qF "\"$1\"" || fail "findings lack $1 (rc=$RC): $ERR"; }
+no_id() { printf '%s' "$JS" | jget 'd["findings"]' | grep -qF "\"$1\"" && fail "findings carry $1 (rc=$RC): $ERR"; return 0; }
 # has_fail <id> <substring...>: one FAIL <id> line carrying every substring
 has_fail() { local id=$1; shift
   python3 - "$ERR" "$id" "$@" <<'PY' || fail "no FAIL $id line carrying [$*]: $ERR"
