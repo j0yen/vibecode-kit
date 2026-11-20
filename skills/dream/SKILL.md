@@ -507,13 +507,14 @@ and an optional `note` (free text, never read as a binding). The five bindings:
 - `pending`: `owner`, `due`, and `ask` and `successor` checked as for `repair`; optional `prd`.
 A session, run id, rc, report or receipt path binds nothing. An unconsumed finding (a pending
 row, a refused row, an unbound finding, a covered note's WWHTBT skip, or a 5whys skip under a
-trigger-class `Failure:`) holds only what it names. A row naming `prd` holds that slug, and
-every `State:` slug too when that PRD is none of the run's. A row naming no `prd` holds the
-successor alone when the canonical ledger shows that successor with its done-check running this
-lint, and every `State:` slug otherwise, as an unbound mechanism and that 5whys skip do. An
-unbound falsifier, a refused falsifier row and the WWHTBT skip hold the first PRDs (every member
-when a `Depends-on` cycle leaves none first). A note whose `Task:` line cannot be read holds
-every `State:` slug, since no earlier record of its Task can be checked. A held slug cannot
+trigger-class `Failure:`) holds only what it names. A row naming `prd` holds that slug, and a
+refused one every `State:` slug too when that PRD is none of the run's. A row naming no `prd`
+holds the successor alone when the canonical ledger shows that successor still open with its
+done-check running this lint, and every `State:` slug otherwise, as an unbound mechanism and that
+5whys skip do. An unbound falsifier, a refused falsifier row and the WWHTBT skip hold the first
+PRDs (every member when none is first). A note whose Task cannot be read (no `Task:` line, or
+one naming no Task) holds every `State:` slug, since no earlier record of its Task can be
+checked. A held slug cannot
 reach `eligible`, and an earlier record's unconsumed row keeps holding until a later record
 binds the same page and finding as consumed, or binds that page whole at its current bytes
 (every current finding consumed) once the finding has left the page. `scripts/dream-run-note-lint.sh --consumption <record> --task <T> [--page <page>]

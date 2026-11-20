@@ -130,9 +130,10 @@ def old_rows(fx, m1):
     return [test_fal(fx, PG2, "e-fal"), m1, mech(fx, 2, PG2, "e-m2")]
 
 
-def ledger(fx, n_rows, names="wwhtbt.md#mechanism:2"):
-    """A temp canonical store (the real wm-decide behind a wm-asks shim) with, per name in `names` (one or a list), an ask naming it and its
-    successor, whose done-check runs this lint on this entry's record for that successor with --require-closed (R3): A1/A2, then A3/A4, ..."""
+def ledger(fx, n_rows, names="wwhtbt.md#mechanism:2", ask_check="true"):
+    """A temp canonical store (the real wm-decide behind a wm-asks shim) with, per name in `names` (one or a list), an ask naming it (its done-check
+    `ask_check`) and its successor, whose done-check runs this lint on this entry's record for that successor with --require-closed (R3): A1/A2, then
+    A3/A4, ..."""
     wd = os.environ.get("DFCN_WM_DECIDE") or shutil.which("wm-decide")
     if not wd:
         raise SystemExit("FAIL dfcnlog: no wm-decide for the temp canonical store (set DFCN_WM_DECIDE to a wm-decide binary)")
@@ -146,7 +147,7 @@ def ledger(fx, n_rows, names="wwhtbt.md#mechanism:2"):
     seeds = []
     for i, nm in enumerate([names] if isinstance(names, str) else names):
         a, sc = "A%d" % (2 * i + 1), "A%d" % (2 * i + 2)
-        seeds += [(a, "ctl", "repair %s (pending)" % nm, "true"),
+        seeds += [(a, "ctl", "repair %s (pending)" % nm, ask_check),
                   (sc, "hermes", "successor closes-after=row:%s" % a, f"bash {fx.lint} --consumption {rec} --task {sc} --require-closed")]
     for me, owner, what, chk in seeds:
         p = subprocess.run([os.path.join(shim, "wm-asks"), "asks", "add", "--by", "t-author", "--owner", owner, "--due", "2099-12-31T09:00",
@@ -264,9 +265,10 @@ case("ac04-an-earlier-finding-still-on-the-page-is-not-lifted-by-a-partial-recor
 # review r15 L2: a Task: line short of the full grammar (line-missing; the route row's task_id A1 then differs from the note's, route-provenance-mismatch)
 # still names the Task its earlier records are read by, as entry_task reads every earlier entry; a line naming no Task holds every State: slug
 def task_line(line):
+    """An earlier record of Task A1 holds x; the last entry's Task: line is `line` (None: no Task: line)."""
     return lambda fx: (earlier(fx, rows=old_rows(fx, crow("e-m1", "mechanism:1", "residual", PG2, owner="ctl", evidence=["ledger:A1"],
                                                           accepted_by="rv-nobody", prd="PRD-x.md"))),
-                       fx.entry.__setitem__("Task", line), fx)[-1]
+                       fx.entry.pop("Task") if line is None else fx.entry.__setitem__("Task", line), fx)[-1]
 
 
 case("ac04-a-task-line-short-of-the-grammar-keeps-its-earlier-holds", 1, ["consumption-blocked", "line-missing", "route-provenance-mismatch"], ["x"],
@@ -274,6 +276,94 @@ case("ac04-a-task-line-short-of-the-grammar-keeps-its-earlier-holds", 1, ["consu
 case("ac04-an-unreadable-task-line-holds-every-slug", 1, ["consumption-blocked", "line-missing", "route-provenance-mismatch"], ["x", "y"],
      "the entry's Task: line cannot be read")(task_line("Task:A1   Consumer: hermes"))
 
+
+# review r15b LOW 1: a closed successor's done-check holds nothing, so a pending row whose successor is closed holds every State: slug. The temp store
+# closes a successor on an attested PASS (the installed store) or refuses to (a close gate, swarm-decide cf0d111: the successor needs a run PASS); each
+# case reads the successor's resulting status and states the expectation for it (fx.expect): closed, every slug held; still open, its gate holds it.
+def wa(fx, *args):
+    p = subprocess.run([os.path.join(fx.root, "shim", "wm-asks")] + list(args), capture_output=True, text=True)
+    return p.stdout + p.stderr
+
+
+def status(fx, ids):
+    return {x["ask_id"]: x["status"] for x in json.loads(wa(fx, "asks", "query", "--ids", ids, "--status", "all", "--json"))}
+
+
+def flag(fx, ask="A1"):
+    return os.path.join(fx.root, "flag-" + ask)
+
+
+def close(fx, ask, how):
+    """Close `ask` through the store's own writers: `prove` a run FAIL then a run PASS at one sha (its check `test -e <flag>`, the flag made between
+    the runs), `attest` an attested PASS."""
+    d = [w for w in wa(fx, "record", "--agent", "ctl", "--kind", "other", "--what", "d", "--why", "t", "--evidence", "ledger:x", "--reverse-text",
+                       "none").split() if w.startswith("d-")][0]
+    v = [w for w in wa(fx, "record", "--agent", "fable-regrader", "--kind", "verdict", "--gates", d, "--model", "deterministic", "--what", "v", "--why",
+                       "t", "--evidence", "ledger:x", "--reverse-text", "none").split() if w.startswith("d-")][-1]
+    if how == "prove":
+        wa(fx, "asks", "accept", ask, "--by", "r7")
+        open(flag(fx, ask), "w").close()
+        wa(fx, "asks", "accept", ask, "--by", "r7")
+    else:
+        wa(fx, "asks", "accept", ask, "--by", "r7", "--result", "PASS", "--evidence", "ledger:outside")
+    rev = str(json.loads(wa(fx, "asks", "query", "--ids", ask, "--status", "all", "--json"))[0]["rev"])     # the row's rev after its accepts
+    wa(fx, "asks", "resolve", ask, "--by", "r7", "--evidence", "ledger:x", "--expect-rev", rev, "--verdict-row", v)
+    return fx
+
+
+def closed_successor(fx, ask_too, held, findings, needle):
+    if ask_too:
+        close(fx, "A1", "prove")
+    close(fx, "A2", "attest")
+    if status(fx, "A2")["A2"] != "closed":       # the store refused the bypass: the open successor's gate holds the row
+        fx.expect = {"rc": 1 if "consumption-pending-overdue" in findings else 0,
+                     "findings": sorted({"consumption-pending-overdue"} & set(findings)), "held": [], "needle": None}
+    else:
+        fx.expect = {"rc": 1, "findings": sorted(findings), "held": sorted(held), "needle": needle}
+    return fx
+
+
+case("ac04-a-pending-row-whose-successor-is-closed-holds-every-slug", 1, ["consumption-blocked", "consumption-repair-unproven"], ["x", "y"])(
+    lambda fx: closed_successor(ledger(swap(fx, 2, pending()), 2, ask_check="test -e " + flag(fx)), True, ["x", "y"],
+                                ["consumption-blocked", "consumption-repair-unproven"], "slug x=eligible while held by row c-m2"))
+case("ac04-a-pending-row-whose-ask-is-open-and-successor-closed-holds-every-slug", 1, ["consumption-blocked", "consumption-repair-unproven"], ["x", "y"])(
+    lambda fx: closed_successor(ledger(swap(fx, 2, pending()), 2), False, ["x", "y"], ["consumption-blocked", "consumption-repair-unproven"],
+                                "successor A2 is closed"))
+case("ac04-an-overdue-pending-row-whose-successor-is-closed-holds-every-slug", 1, ["consumption-blocked", "consumption-pending-overdue"], ["x", "y"])(
+    lambda fx: closed_successor(ledger(swap(fx, 2, pending(due="2020-01-01T00:00:00+00:00")), 2, ask_check="test -e " + flag(fx)), True, ["x", "y"],
+                                ["consumption-blocked", "consumption-pending-overdue"], "slug x=eligible while held by row c-m2"))
+# ... while a repair proved (an accept FAIL then a run PASS) whose successor then closed is consumed: over-strict control
+def proved_repair(fx):
+    """A repair proved by a run FAIL then a run PASS at one sha, its successor then closed (on an attested PASS where the store allows it): consumed.
+    A store that writes no accept `mode` (the installed wm-decide before swarm-decide cf0d111, the mode-field install order) cannot show a run PASS,
+    so there the repair stays unproven and holds every slug, as R3 fails closed."""
+    ledger(swap(fx, 2, crow("c-m2", "mechanism:2", "repair", owner="ctl", ask="A1", successor="A2")), 2, ask_check="test -e " + flag(fx))
+    close(fx, "A1", "prove")
+    close(fx, "A2", "attest")
+    runs = [json.loads(e["detail"]) for e in json.loads(wa(fx, "asks", "events", "A1", "--json")) if e.get("op") == "accept"]
+    if not any(isinstance(d, dict) and d.get("mode") == "run" for d in runs):
+        fx.expect = {"rc": 1, "findings": ["consumption-blocked", "consumption-repair-unproven"], "held": ["x", "y"],
+                     "needle": "shows no accept FAIL followed by a run PASS"}
+    return fx
+
+
+case("ac04-a-proved-repair-whose-successor-closed-is-consumed", 0, [], [])(proved_repair)
+# review r15b LOW 2: a note with no readable Task (no Task: line, a lowercase or an indented one) holds every State: slug
+case("ac04-a-note-with-no-task-line-holds-every-slug", 1, ["consumption-blocked", "line-missing", "route-provenance-mismatch"], ["x", "y"],
+     "the entry's Task: line cannot be read")(task_line(None))
+case("ac04-a-lowercase-task-line-holds-every-slug", 1, ["consumption-blocked", "line-missing", "route-provenance-mismatch"], ["x", "y"],
+     "the entry's Task: line cannot be read")(task_line("task: A1   Consumer: hermes"))
+case("ac04-an-indented-task-line-holds-every-slug", 1, ["consumption-blocked", "line-missing", "route-provenance-mismatch"], ["x", "y"],
+     "the entry's Task: line cannot be read")(task_line(" Task: A1   Consumer: hermes"))
+# review r15b LOW 3: a valid pending row naming a PRD of the home outside the run holds that PRD alone
+PRD_W = "# w\n\n- Depends-on: none\n\n## Acceptance criteria\n\n1. P0 — Given wwhtbt.md#mechanism:2, When `tests/w.sh` runs, Then it exits 0.\n"
+case("ac04-a-valid-pending-row-naming-a-later-slice-holds-it-alone", 0, [], ["w"])(
+    lambda fx: (fx.files.__setitem__("build-queue/PRD-w.md", PRD_W), ledger(swap(fx, 2, pending(prd="PRD-w.md")), 2))[-1])
+# review r15b LOW 4: a cycle with a member the home lacks leaves no first PRD: every member is held
+case("ac04-a-cycle-with-an-unknown-member-holds-every-member", 1, ["adversarial-slug-missing", "consumption-blocked", "consumption-finding-unbound",
+                                                                   "state-grammar"],
+     ["x", "y", "z"], "wwhtbt.md#falsifier unbound")(
+    lambda fx: (fx.entry.__setitem__("State", fx.entry["State"] + " z=eligible"), swap(cycle(fx), 0, None))[-1])
 
 def wwhtbt_skip(fx):
     fx.entry["Analysis"] = f"Analysis: wwhtbt=skipped: blocked decision={OUT_TS} 5whys=skipped: not a failure seed adversarial={M_NEW} uncovered=1"
@@ -390,6 +480,7 @@ def run(prefix, lint, T):
         fx = base(out, eligible=n.startswith("ac04"))
         fx.lint = lint
         fx = c["fn"](fx)
+        c = dict(c, **getattr(fx, "expect", None) or {})
         fx.build()
         with open(os.path.join(out, "policy.json"), "w", encoding="utf-8") as fh:
             json.dump(POLICY, fh)
