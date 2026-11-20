@@ -21,7 +21,9 @@
 # row holding a NUL and a file where W's folder would be leave the token applying. Review r23e: (a) looks W up as written
 # and as normalized (M1: `W/`, `W/.` and `W/../mw.sha256` with W written are refused as existing); (e) refuses an earlier
 # entry's repairs file that is missing or unreadable, or whose line naming W is no JSON object (M2), and applies with
-# the same file clean; a NUL in the token is mission-grammar (L1), never a traceback.
+# the same file clean; a NUL in the token is mission-grammar (L1), never a traceback. Review r23g: (e) also refuses an
+# earlier row whose after is no path string ([W], {"path": W}, W followed by a NUL), any line that is no JSON object
+# whatever it spells (W with ./ or with its dot escaped, then a comma), and a file that is not UTF-8 (M1, L2).
 set -uo pipefail
 # shellcheck source=tests/dlcr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dlcr_lib.sh"
@@ -87,7 +89,17 @@ for c in slash dot dotdot; do                # review r23e M1
 done
 cx r6-repairs-earlier-clean; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"     # review r23e M2: the twin of the three below
 cx r6-repairs-earlier-comma; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
-has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl, which is no JSON object, names it"
+has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl is no JSON object, so a row naming it cannot be ruled out"
+for c in list dict nul; do                 # review r23g M1 and L2: row 3's after is no path string ([W], {"path": W}, W + NUL)
+  cx "r6-repairs-earlier-$c"; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
+  has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl: after is no path string"
+done
+for c in dotted-comma escaped-comma; do    # review r23g M1: W spelled otherwise on a line that is no JSON object
+  cx "r6-repairs-earlier-$c"; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
+  has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl is no JSON object"
+done
+cx r6-repairs-earlier-latin1; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'   # r23g L2
+has_fail repair-scope-mismatch "withdrawn=$WM" "notes/missions/old.repairs.jsonl cannot be read (not UTF-8)"
 cx r6-repairs-earlier-missing; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
 has_fail repair-scope-mismatch "withdrawn=$WM" "notes/missions/old.repairs.jsonl cannot be read (No such file or directory)"
 if [ "$(id -u)" != 0 ]; then             # the clean file made unreadable: a row naming W cannot be ruled out (review r23e M2)

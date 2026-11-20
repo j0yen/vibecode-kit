@@ -8,10 +8,11 @@
 # Positives, no repair-grammar: R20-F3's shape, F1's row (m1 -> m2) changes the edges file; R20-F2's shape, it changes
 # the consumption record, a packet member. Negatives, repair-grammar: an empty-prds finding whose row changes neither
 # (the record listed in packet and moved by an amended row); the record moved but no header lists it in packet; a
-# finding naming PRD-bar.md whose row changes only the edges file, or only the record. In every case an amended row of
+# finding naming PRD-bar.md whose row changes only the edges file, or only the record; a row changing only the repairs
+# file, which the headers list in packet (review r23g L3: it never counts). In every case an amended row of
 # the author's declares the rest of what moved m1 -> m2, so F1's row alone decides. A packet entry that is no string is
-# edge-grammar, never a traceback. Over-strict control: the installed rule (43d5b39), which demands a contract file of
-# the external, refuses both positives.
+# edge-grammar, never a traceback, in the live header and in a frozen one (review r23g L1). Over-strict control: the
+# installed rule (43d5b39), which demands a contract file of the external, refuses both positives.
 set -uo pipefail
 # shellcheck source=tests/dlcr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dlcr_lib.sh"
@@ -32,8 +33,12 @@ for c in r8-prd-edges r8-prd-record; do
 done
 cx r8-packet-malformed; run_mr; findings_eq '["edge-grammar", "mission-finding-incomplete"]'
 has_fail edge-grammar "field packet: not a list of basenames"
+cx r8-packet-malformed-frozen; run_mr; findings_eq '["edge-grammar", "mission-finding-incomplete"]'     # review r23g L1
+has_fail edge-grammar "manifest notes/snapshots/m1/m1.sha256:" "field packet: not a list of basenames"
+cx r8-repairs-in-packet; run_mr; findings_eq '["mission-finding-incomplete", "repair-grammar"]'          # review r23g L3
+has_fail repair-grammar "$RP: row 1: finding F1: changed names none of drmx-mission.edges.jsonl, m.consumption.jsonl $NOP"
 for c in r8-edges r8-record; do
   today "$c"; findings_eq '["mission-finding-incomplete", "repair-grammar"]'
   has_fail repair-grammar "row 1: finding F1: changed names none of"
 done
-pass "a finding naming no PRD repairs the edges file (R20-F3) or a packet member (R20-F2); its row changing neither, or a moved record no header lists in packet, refused; a finding naming a PRD whose row changes only the edges file or only the record refused as today; a non-string packet entry is edge-grammar, no traceback; the installed rule refuses both positives"
+pass "a finding naming no PRD repairs the edges file (R20-F3) or a packet member (R20-F2); its row changing neither, a moved record no header lists in packet, or only the repairs file, refused; a finding naming a PRD whose row changes only the edges file or only the record refused as today; a non-string packet entry is edge-grammar in a live or frozen header, no traceback; the installed rule refuses both positives"

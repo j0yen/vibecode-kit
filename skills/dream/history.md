@@ -242,7 +242,10 @@ doubts a rule can see what it cost when it was missing. Append-only.
   whose correction is to the edge map (chain review 20's R20-F3) or to a packet record (R19-F4
   and R20-F2, which moved the binding record) failed `repair-grammar` whatever it changed. For a
   finding whose `prds` is empty, the mission's edges file and the members of the edges header's
-  `packet` now count too. A finding that names PRDs keeps the old set.
+  `packet` now count too, except the repairs file, which moves with every row written. A finding
+  that names PRDs keeps the old set. Review r23g then closed the rest of the withdrawn check's
+  (e): a line of an earlier repairs file that is no JSON object, or a row whose `before` or
+  `after` is no path string, now rules nothing out, as an unreadable file already did.
 - **Reading a review scope recorded on another host (2026-11-20, A1723).** A1113's nine
   chain reviews ran on Carbon, and their launch rows record `scope` under Carbon's PRD home
   (`/home/jsy/.cache/dream-a1113/prds-clone`). The continuation on RedBaron holds the same

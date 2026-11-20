@@ -394,7 +394,9 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
     scoped_list: a review row's scope is the list [W] (L2); named_row: a launch row with no role names W in reasons
     ("nested": in a nested field); nul_row: a row's reasons hold a NUL; parent_file: W's folder is a file. Review r23e:
     old_repairs "clean" (row 3 names m3, not W), "comma" (row 3 names W and ends in a comma, so it is no JSON object) or
-    "missing" (the file is never written; the 10:30 entry still names it)."""
+    "missing" (the file is never written; the 10:30 entry still names it); review r23g: "list", "dict", "nul" (row 3's after
+    is [W], {"path": W} or W followed by a NUL), "dotted-comma" (W spelled notes/snapshots/./mw/…, then a comma),
+    "escaped-comma" (W's dot written \u002e, then a comma), "latin1" (a byte 0xff after the rows: not UTF-8)."""
     M = rounds(3)
     post = M.entries[-1]
     m1, m2, m3 = (m["rel"] for m in M.mans_decl)
@@ -439,12 +441,20 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
             rows = copy.deepcopy(M.rep_rows[:2]) + [dict(M.rep_rows[-1], finding="F9", before=m2, after=W_REL)]
             if flag == "clean":
                 rows[-1]["after"] = m3
+            if flag in ("list", "dict", "nul", "dotted-comma"):    # review r23g M1: row 3's after is no path string, or
+                rows[-1]["after"] = {"list": [W_REL], "dict": {"path": W_REL}, "nul": W_REL + "\u0000",   # spelled otherwise
+                                     "dotted-comma": W_REL.replace("/mw/", "/./mw/")}[flag]
             text = repairs_text(rows)
-            if flag == "comma":          # review r23e M2: row 3, which names W, is no JSON object
+            if flag in ("comma", "dotted-comma", "escaped-comma"):   # review r23e M2 / r23g M1: row 3 is no JSON object
                 raw = text.decode() if isinstance(text, bytes) else text
                 ls = raw.split("\n")
+                if flag == "escaped-comma":
+                    assert "mw.sha256" in ls[2]
+                    ls[2] = ls[2].replace("mw.sha256", "mw\\u002esha256")
                 ls[2] += ","
                 text = "\n".join(ls).encode() if isinstance(text, bytes) else "\n".join(ls)
+            if flag == "latin1":         # review r23g L2: an earlier repairs file that is not UTF-8
+                text = (text if isinstance(text, bytes) else text.encode()) + b"\xff\n"
             if flag != "missing":
                 M.files[rel] = text
             lines = at_entry if at_entry is not None else post["lines"]
@@ -544,6 +554,12 @@ CASES = {
     "r6-repairs-earlier-clean": lambda: r6_base(old_repairs="clean"),
     "r6-repairs-earlier-comma": lambda: r6_base(old_repairs="comma"),
     "r6-repairs-earlier-missing": lambda: r6_base(old_repairs="missing"),
+    "r6-repairs-earlier-list": lambda: r6_base(old_repairs="list"),
+    "r6-repairs-earlier-dict": lambda: r6_base(old_repairs="dict"),
+    "r6-repairs-earlier-nul": lambda: r6_base(old_repairs="nul"),
+    "r6-repairs-earlier-dotted-comma": lambda: r6_base(old_repairs="dotted-comma"),
+    "r6-repairs-earlier-escaped-comma": lambda: r6_base(old_repairs="escaped-comma"),
+    "r6-repairs-earlier-latin1": lambda: r6_base(old_repairs="latin1"),
     "r6-exists-slash": lambda: r6_base(exists=True, token_value=f"{W_REL}/"),
     "r6-exists-dot": lambda: r6_base(exists=True, token_value=f"{W_REL}/."),
     "r6-exists-dotdot": lambda: r6_base(exists=True, token_value=f"{W_REL}/../mw.sha256"),
@@ -555,6 +571,8 @@ CASES = {
     "r8-prd-edges": lambda: r8_base(prds=["PRD-bar.md"]),
     "r8-prd-record": lambda: r8_base(prds=["PRD-bar.md"], changed="record", packet=True),
     "r8-packet-malformed": lambda: r8_base(changed="record", packet=True, packet_value=[REC, {"name": REC}]),
+    "r8-packet-malformed-frozen": lambda: r8_base(changed="record", packet=True, frozen_bad=True),
+    "r8-repairs-in-packet": lambda: r8_base(changed="repairs", packet=True),
     "r6-repairs-later": lambda: r6_base(mid="withdraws", later_repairs=True),
     "r6-dangling": lambda: r6_base(dangling=True),
     "r6-repeated": lambda: r6_base(token_value=f"{W_REL},{W_REL}"),
@@ -577,13 +595,15 @@ for _k, _v in (("id", "F9"), ("class", "authority-bypass"), ("counterexample", "
 REC = "m.consumption.jsonl"
 
 
-def r8_base(prds=(), changed="edges", packet=False, listed=True, packet_value=None):
+def r8_base(prds=(), changed="edges", packet=False, listed=True, packet_value=None, frozen_bad=False):
     """F1 names `prds` (none: R20-F2/F3's shape) and external:hermes. F1's row (m1 -> m2) changes the matrices and
     `changed`: "edges" (the edges file), "record" (the record) or "neither" (PRD-foo.md); an amended row of the author's
     declares the rest of what moved m1 -> m2, so only F1's row decides. F1's sweep stays as built (E1 and E2, every edge
     incident to its PRDs and to external:hermes). packet: the manifests hold the record (m1 one
     version, m2 the next, the live copy m2's) and, when listed, every edges header lists it in `packet` (or lists
-    packet_value instead)."""
+    packet_value instead). frozen_bad (review r23g L1): m1's frozen header alone lists a dict beside the record. changed
+    "repairs" (review r23g L3): the headers also list the repairs file in packet, m1 holds an earlier version of it, and
+    F1's row changes only the matrices and the repairs file."""
     M = rounds(2)
     rv1 = M.review("notes/reviews/r1", S["R1"], [("foo", "FIX"), ("bar", "APPROVE")], "FIX", findings=[
         {"id": "F1", "class": "semantic-incompatibility", "prds": list(prds), "consumers": ["external:hermes"]}])
@@ -595,6 +615,10 @@ def r8_base(prds=(), changed="edges", packet=False, listed=True, packet_value=No
         for k, m in enumerate(M.mans_decl):
             if listed:
                 pv = [REC] if packet_value is None else packet_value
+                if frozen_bad and k == 0:
+                    pv = [REC, {"name": REC}]
+                if changed == "repairs":
+                    pv = [REC, M.rb]
                 ed = M.edges(matrix=M.mxb[k], mutate=lambda h, es: h.__setitem__("packet", pv))
                 m["members"][M.eb] = m["copies"][M.eb] = ed
             m["members"][REC] = m["copies"][REC] = ('{"id": "L1-%02d", "round": %d}\n' % (k + 1, k + 1)).encode()
@@ -604,9 +628,12 @@ def r8_base(prds=(), changed="edges", packet=False, listed=True, packet_value=No
     r["class"] = "semantic-incompatibility"
     mx = [x for x in r["changed"] if x != M.eb and not x.startswith("PRD-")]
     moved = ["PRD-foo.md", M.eb] + ([REC] if packet else [])
-    own = {"edges": M.eb, "record": REC, "neither": "PRD-foo.md"}[changed]
+    own = {"edges": M.eb, "record": REC, "neither": "PRD-foo.md", "repairs": M.rb}[changed]
+    if changed == "repairs":
+        m0 = M.mans_decl[0]
+        m0["members"][M.rb] = m0["copies"][M.rb] = b""
     r["changed"] = mx + [own]
-    rest = [x for x in moved if x != own]
+    rest = [x for x in moved if x != own and x != M.rb]
     m1, m2 = M.mans_decl[0], M.mans_decl[1]
     sw_foo = [e["id"] for e in json_edges(m1["members"][M.eb]) if "PRD-foo.md" in (e["producer"], e["consumer"])]
     M.rep_rows.append({"finding": None, "class": None, "author_session": S["A"], "before": m1["rel"], "after": m2["rel"],

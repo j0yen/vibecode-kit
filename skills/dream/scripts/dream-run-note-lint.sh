@@ -115,8 +115,9 @@
 # string value that resolves to it; a line that is no JSON object, when it names it; no decisions source counts as one),
 # (c) it is the last element of the scope= list of the latest earlier entry that lists it, (d) this entry's own scope=
 # does not list it and is the previous entry's list without it followed only by appended manifests, and (e) no row of a
-# repairs file any entry of the Task names names it as before or after (a file that cannot be read, or a line of it that
-# is no JSON object but names it, rules nothing out). A NUL in any Mission: token value is mission-grammar.
+# repairs file any entry of the Task names names it as before or after (a file that cannot be read, a line of it that
+# is no JSON object, or a row whose before or after is no non-empty path string rules nothing out). A NUL in any Mission:
+# token value is mission-grammar.
 # The token is the entry's own (never inherited) and applies whole: any unmet condition is mission-grammar ((e):
 # repair-scope-mismatch) and the rules apply unchanged. The JSON's mission.withdrawn lists each token of the Task.
 #
@@ -128,7 +129,8 @@
 # of the finding's PRDs or a contract file of an external among its consumers; for a finding whose prds list is empty it
 # may also name the mission's edges file or a packet member of its edges header (the edge map states an external's
 # interface; a packet record such as the binding record is corrected in place). A finding naming PRDs keeps that set.
-# A packet entry that is no string is edge-grammar and is dropped from the header's packet list, never hashed.
+# A packet entry that is no string is edge-grammar, in the live header and in a frozen one, and is dropped from the header's packet list,
+# never hashed. The repairs file itself never counts, even when the header lists it in packet: it moves with every row written.
 #
 # Failure-class sweep (PRD-dream-failure-class-sweep): with repairs=<path> on the Mission: line,
 # a chain-review finding followed by a later chain review, or a digest moving between two
@@ -916,7 +918,8 @@ def withdrawn_check(p, seq, resolve, dec):
     lists it (only a planned freeze can be withdrawn); (d) this entry carries its own scope=, which does not list it
     and is the previous entry's list without the withdrawn manifests followed only by appended manifests; and (e) no
     row of a repairs file any entry of the Task names, up to the linted one, names it as before or after (review r23d M1):
-    a file that cannot be read, or a line that is no JSON object but names it, rules nothing out (review r23e M2).
+    a file that cannot be read, a line that is no JSON object (review r23e M2), or a row whose before or after is present
+    but no non-empty NUL-free string (review r23g M1) rules nothing out.
     (a) looks the path up as written and as normalized (review r23e M1). A token applies only whole."""
     x, ws = seq[p], seq[p]["withdrawn"]
     tok = ",".join(ws)
@@ -958,10 +961,8 @@ def withdrawn_check(p, seq, resolve, dec):
                                               "the latest that lists it (only a planned freeze, listed last, is withdrawn)"))
         if x["own_scope"] is not None and any(same(w, m) for m in x["own_scope"]):
             bad.append((w, "mission-grammar", "this entry's scope= still lists it"))
-        full = resolve(w)
-        names = {w, full, os.path.relpath(os.path.normpath(full), resolve("."))} | path_keys(full)
-        for rp in reps:                          # review r23e M2: a file that cannot be read, or a line that is no JSON
-            try:                                 # object but names it, cannot rule a row out
+        for rp in reps:                          # reviews r23e M2 and r23g M1: a file that cannot be read, a line that is no JSON
+            try:                                 # object, or a row whose before or after is no path string cannot rule a row out
                 with open(resolve(rp), "rb") as fh:
                     text = fh.read().decode("utf-8")
             except (OSError, UnicodeDecodeError) as e:
@@ -969,18 +970,24 @@ def withdrawn_check(p, seq, resolve, dec):
                 bad.append((w, "repair-scope-mismatch", f"{rp} cannot be read ({why}), so a row naming it cannot be ruled out"))
                 continue
             for n, ln in enumerate(text.split("\n"), 1):
+                if not ln.strip():
+                    continue
                 try:
-                    r = json.loads(ln) if ln.strip() else None
+                    r = json.loads(ln)
                 except ValueError:
-                    r = False
-                if isinstance(r, dict):
-                    for side in ("before", "after"):
-                        v = r.get(side)
-                        if isinstance(v, str) and v and "\0" not in v and same(w, v):
-                            bad.append((w, "repair-scope-mismatch", f"row {n} of {rp} names it as {side}"))
-                elif ln.strip() and any(x in ln for x in names):
-                    bad.append((w, "repair-scope-mismatch", f"line {n} of {rp}, which is no JSON object, names it, so a row "
-                                                            "naming it cannot be ruled out"))
+                    r = None
+                if not isinstance(r, dict):
+                    bad.append((w, "repair-scope-mismatch", f"line {n} of {rp} is no JSON object, so a row naming it cannot be ruled out"))
+                    continue
+                for side in ("before", "after"):
+                    if side not in r:
+                        continue
+                    v = r[side]
+                    if not (isinstance(v, str) and v and "\0" not in v):
+                        bad.append((w, "repair-scope-mismatch", f"row {n} of {rp}: {side} is no path string, so a row naming it cannot "
+                                                                "be ruled out"))
+                    elif same(w, v):
+                        bad.append((w, "repair-scope-mismatch", f"row {n} of {rp} names it as {side}"))
     if x["own_scope"] is None:
         bad.append((tok, "mission-grammar", "this entry's Mission: line carries no scope= of its own"))
     elif p > 0:
@@ -1560,8 +1567,8 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
             fh, fe, fpr = read_edges(copy, copy)
             if fh is None:
                 once("mission-scope-mismatch", f"manifest {m['path']}: frozen edges copy {copy} has no header")
-            for fid, d in fpr:      # matrix-per-manifest R1 on a frozen header (its other fields stay unread here)
-                if fid == "edge-grammar" and ": field matrix: " in d:
+            for fid, d in fpr:      # matrix-per-manifest R1 and the packet list (review r23g L1) on a frozen header
+                if fid == "edge-grammar" and (": field matrix: " in d or ": field packet: " in d):
                     once("edge-grammar", f"manifest {m['path']}: {d}")
             m["frozen"], m["frozen_edges"] = fh, fe
         mxm, mxl, mslugs = manifest_matrix(m, mrec, adv, states, resolve)
@@ -2008,6 +2015,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                     if nop:      # Repair 8 (addenda 6, 7): a finding naming no PRD may repair the edge map or a packet member
                         allowed |= ({os.path.basename(mrec["edges"])} if mrec.get("edges") else set()) | \
                             set(hd["packet"] if hd else [])
+                        allowed.discard(os.path.basename(mrec["repairs"]) if mrec.get("repairs") else None)   # review r23g L3
                     if not ch:
                         L.fail("repair-grammar", f"{tok}: row {n}: finding {fid}: changed is empty on a repaired {cls} "
                                                  "row (a repair that changes no bytes is declined with a reason)")
