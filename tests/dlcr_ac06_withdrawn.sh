@@ -10,9 +10,9 @@
 # that dropped W without it (the A1723 log as written), and an entry after the one that withdrew W (the token is never
 # inherited). Negatives (the author's table): W exists; a review launch row scopes W; W is not the last element; the
 # rest of the list reordered (each mission-grammar); a repairs row names W as after (repair-scope-mismatch). Further
-# negatives: W named as before; a later freeze appended after W; a row scoping W under a --scope-root; a decisions line
-# that is no JSON object naming W; no decisions source; no scope= of its own; W still listed; a manifest no earlier entry
-# lists. Over-strict control: the original stays refused (the log is append-only), and so does the earlier dropping
+# negatives: W named as before; a later freeze appended after W; a row scoping W under a --scope-root or through a
+# directory link; a decisions line that is no JSON object naming W; no decisions source; no scope= of its own; W still
+# listed; a manifest no earlier entry lists; W listed again after its withdrawal and dropped with no token. Over-strict control: the original stays refused (the log is append-only), and so does the earlier dropping
 # entry, linted itself, after the token; the installed rule (43d5b39) refuses the positive.
 set -uo pipefail
 # shellcheck source=tests/dlcr_lib.sh
@@ -42,6 +42,10 @@ cx r6-after-w; run_mr; has_fail mission-grammar "withdrawn=$WM" "is not the last
 cx r6-scoped-root; run_mr; clean
 JS=$(lint --json --scope-root "/a1723-recorded-home=$H" 2>"$T/err"); RC=$?; ERR=$(cat "$T/err"); no_tb
 has_fail mission-grammar "withdrawn=$WM" "scopes it"; has_id mission-edges-missing
+cx r6-scoped-link; run_mr; has_fail mission-grammar "withdrawn=$WM" "scopes it"; has_id mission-edges-missing
+# withdrawn at 10:45, planned again at 10:50 and dropped untokened at 14:00: the 10:45 token covers only entries before it
+cx r6-relisted; run_mr; has_fail mission-edges-missing "mw/mw.sha256" "continuity of entry 2026-11-18T10:50:00-08:00"
+has_fail mission-grammar "never shortens or reorders"; withdrawn_is "[[\"$T1045\", [\"$WM\"], true]]"
 cx r6-malformed-row; run_mr; has_fail mission-grammar "withdrawn=$WM" "which is no JSON object, names it"
 cx r6-ungoverned; run_mr_ungov; has_fail mission-grammar "withdrawn=$WM" "no decisions source was read"; has_id mission-edges-missing
 cx r6-no-scope; run_mr; has_fail mission-grammar "withdrawn=$WM" "carries no scope= of its own"
