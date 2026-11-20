@@ -3586,7 +3586,7 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
     if satisfied and not proved:
         return bad("consumption-repair-unproven", f"closed repair ask {r['ask']} shows no accept FAIL followed by a run PASS at one sha")
     if not g["succ_open"] and not (b == "repair" and satisfied):
-        return bad("consumption-repair-unproven", f"successor {r['successor']} is closed (or intake-accepted) while this {b} row is "
+        return bad("consumption-repair-unproven", f"successor {r['successor']} is closed, cancelled or intake-accepted while this {b} row is "
                                                   f"{'open' if b == 'repair' else 'pending'}: its done-check holds nothing any more")
     if not a["require_closed"] or r["successor"] != task:
         return True
@@ -3601,8 +3601,9 @@ def cons_ledger_gate(a, r, base, f):
     """R3's canonical reads for a repair or pending row: `bound` when the ask and the successor are in the canonical ledger as bound (the ask owned by
     `owner` and naming `<base>#<f>`, the successor's text carrying closes-after=row:<ask>; review r14 M2), and `ok` when the successor's done-check, or
     the check of a row its text names in closes-after=row:, runs this lint on this record for the successor with --require-closed (review r14 M1; `whys`
-    each checked row's reason); `succ_open` when the successor is neither closed nor intake-accepted, the close gate's predicate (a closed successor's
-    done-check holds nothing any more, review r15b LOW 1). Raises Exit2 when a canonical read cannot be made (canonical-unavailable)."""
+    each checked row's reason); `succ_open` when the successor is neither closed, intake-cancelled nor intake-accepted (a closed or cancelled successor's
+    done-check never runs again, reviews r15b LOW 1 and r15c M1: cons_satisfied alone reads a cancelled row as unsatisfied, which is right for a repair
+    ask but not for a successor). Raises Exit2 when a canonical read cannot be made (canonical-unavailable)."""
     got = cons_wm_asks(["query", "--ids", f"{r['ask']},{r['successor']}", "--status", "all", "--json"])
     if got is None:
         raise Exit2(f"canonical-unavailable: wm-asks is not installed here; row {r['id']} ({r['binding']}) needs the canonical ledger")
@@ -3613,7 +3614,8 @@ def cons_ledger_gate(a, r, base, f):
     if not ask or not succ or (ask.get("owner") != r["owner"]) or not cons_names(ask.get("what") or "", base, f) or r["ask"] not in closes:
         return g
     g["bound"] = True
-    g["succ_open"] = not cons_satisfied(succ, cons_intake_state(cons_wm_asks(["events", r["successor"], "--json"]) or []))   # review r15b LOW 1
+    si = cons_intake_state(cons_wm_asks(["events", r["successor"], "--json"]) or [])
+    g["succ_open"] = si != "cancelled" and not cons_satisfied(succ, si)   # reviews r15b LOW 1, r15c M1: a cancelled successor is closed (its check never runs)
     ok, why = cons_runs_lint(succ.get("check"), a["consumption"], r["successor"])
     if not ok:
         g["whys"].append(f"successor {r['successor']}: {why}")
@@ -4797,6 +4799,14 @@ def selftest():
     fx = cfx(m1=crow("c-m1", "mechanism:1", "pending", owner="ctl", due="2099-01-01T00:00:00+00:00", ask="A101", successor="A102"))
     refuse_c("a-pending-row-whose-successor-is-closed", ledger(fx, lrows2(fx, "open", "closed")), "consumption-repair-unproven",
              ("row c-m1", "successor A102 is closed"))
+    # review r15c M1: an intake-cancelled successor (closed in the store, its events ending in the intake cancel) holds nothing either
+    cancelled = {"A102": [{"op": "add", "detail": {"state": "ready"}}, {"op": "cancel", "detail": {}}]}
+    fx = cfx(m1=crow("c-m1", "mechanism:1", "pending", owner="ctl", due="2099-01-01T00:00:00+00:00", ask="A101", successor="A102"))
+    refuse_c("a-pending-row-whose-successor-is-cancelled", ledger(fx, lrows2(fx, "open", "closed"), cancelled), "consumption-repair-unproven",
+             ("row c-m1", "successor A102 is closed, cancelled or intake-accepted"))
+    fx = cfx(m1=crow("c-m1", "mechanism:1", "repair", ask="A101", owner="ctl", successor="A102"))
+    refuse_c("an-open-repair-whose-successor-is-cancelled", ledger(fx, lrows2(fx, "open", "closed"), cancelled), "consumption-repair-unproven",
+             ("row c-m1", "successor A102 is closed, cancelled or intake-accepted"))
     refuse_c("residual-without-a-review-launch-row", cfx(m1=crow("c-m1", "mechanism:1", "residual", owner="ctl", evidence=["ledger:A1"],
                                                                 accepted_by="rv-nobody")), "consumption-residual-unaccepted", ("row c-m1", "rv-nobody"))
     refuse_c("pending-overdue", cfx(m1=crow("c-m1", "mechanism:1", "pending", owner="ctl", due="2020-01-01T00:00:00+00:00", ask="A101",

@@ -348,6 +348,61 @@ def proved_repair(fx):
 
 
 case("ac04-a-proved-repair-whose-successor-closed-is-consumed", 0, [], [])(proved_repair)
+
+
+# review r15c M1: the route a bound successor closes by without its done-check running. On a store with the intake (swarm-decide cf0d111), the
+# successor is created through `intake submit`, the repair ask closes through the full close gate (a run FAIL, a run PASS at one sha, a verdict gating
+# the ask's own row_id), and the successor is then intake-cancelled (allowed once the ask it closes after is satisfied): it reads closed and its check
+# never runs again, so the pending row holds every State: slug. Each case reads what the store did and states the expectation for it (fx.expect).
+def intake_successor(fx):
+    """A1 by `asks add` (the repair ask, its check `test -e <flag>`); A2, its successor (closes-after=row:A1, its check this lint with
+    --require-closed), through `intake submit`."""
+    ledger(fx, 2, names=[], ask_check="test -e " + flag(fx))          # the shim and the temp store only
+    rec = os.path.join(fx.home, fx.CONS_REL)
+    wa(fx, "asks", "add", "--by", "t-author", "--owner", "ctl", "--due", "2099-12-31T09:00", "--what", "repair wwhtbt.md#mechanism:2 (pending)",
+       "--check", "test -e " + flag(fx))
+    env = {"authorized_by": "hermes", "text": "successor", "request_type": "new"}
+    ch = {"owner": "hermes", "due": "2099-12-31T09:00", "what": "successor closes-after=row:A1",
+          "check": f"bash {fx.lint} --consumption {rec} --task A2 --require-closed", "depends": []}
+    wa(fx, "intake", "submit", "--envelope", json.dumps(env), "--change", json.dumps(ch))
+    return fx
+
+
+def close_through_gate(fx, ask):
+    """Close `ask` through the close gate: a run FAIL, the flag, a run PASS at one sha, a verdict gating the ask's own row_id, resolve."""
+    wa(fx, "asks", "accept", ask, "--by", "r7")
+    open(flag(fx, ask), "w").close()
+    wa(fx, "asks", "accept", ask, "--by", "r7")
+    row = json.loads(wa(fx, "asks", "query", "--ids", ask, "--status", "all", "--json"))[0]
+    v = [w for w in wa(fx, "record", "--agent", "fable-regrader", "--kind", "verdict", "--gates", str(row.get("row_id")), "--model", "deterministic",
+                       "--what", "v", "--why", "t", "--evidence", "ledger:x", "--reverse-text", "none").split() if w.startswith("d-")]
+    rev = str(json.loads(wa(fx, "asks", "query", "--ids", ask, "--status", "all", "--json"))[0]["rev"])
+    wa(fx, "asks", "resolve", ask, "--by", "r7", "--evidence", "ledger:x", "--expect-rev", rev, "--verdict-row", v[-1] if v else "none")
+
+
+def cancelled_successor(fx, overdue):
+    intake_successor(fx)
+    close_through_gate(fx, "A1")
+    q = json.loads(wa(fx, "asks", "query", "--ids", "A2", "--status", "all", "--json") or "[]")
+    if q:
+        env = {"authorized_by": "hermes", "text": "cancel successor", "request_type": "cancel", "target_ask": "A2", "target_rev": q[0]["rev"]}
+        wa(fx, "intake", "submit", "--envelope", json.dumps(env), "--change", "{}")
+    try:
+        ev = json.loads(wa(fx, "asks", "events", "A2", "--json") or "[]")
+    except ValueError:
+        ev = []
+    if any(isinstance(e, dict) and e.get("op") == "cancel" for e in ev):        # cancelled: its check never runs, every slug held
+        fx.expect = {"rc": 1, "findings": ["consumption-blocked", "consumption-pending-overdue" if overdue else "consumption-repair-unproven"],
+                     "held": ["x", "y"], "needle": "slug x=eligible while held by row c-m2"}
+    else:                                                                         # the store refused the cancel: the open successor's gate holds the row
+        fx.expect = {"rc": 1 if overdue else 0, "findings": ["consumption-pending-overdue"] if overdue else [], "held": [], "needle": None}
+    return fx
+
+
+case("ac04-a-pending-row-whose-successor-is-intake-cancelled-holds-every-slug", 1, ["consumption-blocked", "consumption-repair-unproven"], ["x", "y"])(
+    lambda fx: cancelled_successor(swap(fx, 2, pending()), False))
+case("ac04-an-overdue-pending-row-whose-successor-is-intake-cancelled-holds-every-slug", 1, ["consumption-blocked", "consumption-pending-overdue"],
+     ["x", "y"])(lambda fx: cancelled_successor(swap(fx, 2, pending(due="2020-01-01T00:00:00+00:00")), True))
 # review r15b LOW 2: a note with no readable Task (no Task: line, a lowercase or an indented one) holds every State: slug
 case("ac04-a-note-with-no-task-line-holds-every-slug", 1, ["consumption-blocked", "line-missing", "route-provenance-mismatch"], ["x", "y"],
      "the entry's Task: line cannot be read")(task_line(None))
