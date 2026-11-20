@@ -109,6 +109,26 @@
 # APPROVE, an unaccepted decline's until acceptance (R7). JSON: mission.repairs (R8), whose
 # `file` keeps the repairs= path the edge-map JSON carried; null when nothing here applies.
 #
+# Path keys and the legacy matrix (PRD-dream-generation-aware-mission-records R4, R1): each
+# manifest's entries are also keyed by path, the line's path resolved against the manifest's
+# directory; the scope id stays basename-based. A repairs row's `changed` and `added` hold paths
+# relative to the `after` manifest's directory, `removed` relative to `before`'s, and `delta`
+# {changed: [{path, before, after}], added: [{path, sha256}], removed: [{path, sha256}]} records
+# them: a path entry (it holds `/`) needs its record, whose digests must be the two manifests'
+# (repair-hash-mismatch naming path and digests). A row without `delta` is a legacy row: its bare
+# basenames keep the basename rule, and one several entries of a manifest hold is listed in
+# mission.repairs.ambiguous, never failed; a `delta` row naming such a basename is repair-grammar
+# naming the paths. The undeclared-change pass keys entries holding `/` by path; bare names,
+# entries in the directory of either manifest of the pair and header members (the repairs file
+# included) by basename; a header member twice in one manifest is mission-scope-mismatch. A header
+# member is looked up by its basename in every pass (a row without `delta` may name one by path,
+# checked as installed), and every comparison of a row entry with a header member, an edge
+# endpoint or a hold reads its basename; a record matches its entry by resolved key. A manifest
+# whose frozen header has no `matrix`, first listed by an entry dated (Route decision=, else header
+# ts) before LEGACY_MATRIX_SINCE, that lists exactly one *-adversarial.md keeps that matrix when an
+# entry of the mission not later than the linted one names it in adversarial= or its copy at the
+# listed digest passes the matrix grammar; otherwise the matrix rule above applies unchanged.
+#
 # Env seams: SKILL_ROUTING_DECISIONS (default decisions path, as fable-launch.sh),
 #   ANALYSIS_WIKI_DIR (gated wiki root for reused pages; default ~/Notes/wiki, whose
 #   decisions/ and answers/ analysis-page-gate.sh protects).
@@ -221,6 +241,59 @@ def scope_canon(path):
     if rep:
         raise ScopeError(f"scope {shown}: prd-repeat: {bshow(rep[0])} listed with two digests")
     return hashlib.sha256(b"".join(canon)).hexdigest(), digests
+
+
+def manifest_paths(full):
+    """PRD-dream-generation-aware-mission-records R4: a manifest's entries keyed by path, in line
+    order: [(path as written, resolved key, basename, digest)], each path resolved against the
+    manifest's directory and normalized, as manifest paths are compared. None when the manifest is
+    unreadable or breaks the line rule (scope_canon reports that)."""
+    try:
+        with open(full, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    if not data or not data.endswith(b"\n"):
+        return None
+    d = os.path.dirname(full)
+    out = []
+    for ln in data[:-1].split(b"\n"):
+        if not SCOPE_LINE_RE.fullmatch(ln):
+            return None
+        h, raw = ln.split(b"  ", 1)
+        ps = raw.decode("utf-8", "backslashreplace")
+        out.append((ps, os.path.normpath(os.path.join(d, ps)), ps.rsplit("/", 1)[-1], h.decode("ascii")))
+    return out
+
+
+def entry_key(manifest_full, rel):
+    """R4: a row entry's key, the path resolved against the directory of the manifest it is relative to."""
+    return os.path.normpath(os.path.join(os.path.dirname(manifest_full), rel))
+
+
+def split_keys(m, members, dirs=()):
+    """R4: ({basename: digest} of the basename-keyed entries, {key: digest} of the path-keyed ones).
+    Basename-keyed: a bare name, an entry in the manifest's own directory or in a directory of dirs
+    (the other manifest of a compared pair, so a file one manifest lists bare and the other by path
+    is compared), a header member; the first digest of a basename is the first of the sorted canon,
+    as installed."""
+    mdirs = {os.path.normpath(os.path.dirname(m["full"]))} | set(dirs)
+    bk, pk = {}, {}
+    for raw, key, base, dg in sorted(m.get("entries") or [], key=lambda e: (e[3], e[2])):
+        if "/" not in raw or os.path.dirname(key) in mdirs or base in members:
+            bk.setdefault(base, dg)
+        else:
+            pk.setdefault(key, dg)
+    return bk, pk
+
+
+def entry_date(e):
+    """R1: an entry's date: its Route line's decision= instant, else its header ts."""
+    for ln in e["lines"]:
+        mm = re.match(r"^Route:.*\bdecision=(\S+)", ln)
+        if ln.startswith("Route:") and mm and parse_iso(mm.group(1)) is not None:
+            return parse_iso(mm.group(1))
+    return parse_iso(e["ts"])
 
 
 def check_scope(L, rv, row, vlines, last, home, resolve):
@@ -543,9 +616,41 @@ def manifest_matrix(m, mrec, adv, states, resolve):
     fh = m["frozen"]
     if fh and fh.get("matrix"):
         return fh["matrix"], "matrix named by the frozen edges header", seq[first][2]
+    dates = [x.get("date") for x in mrec["earlier"]] + [mrec.get("date")]
+    one = legacy_matrix(m, fh, first, seq, dates)
+    if one is not None:
+        return one, LEGACY_MATRIX_RULE, seq[first][2]
     src = next((i for i, (_, a, _) in enumerate(seq) if i >= first and a), None)
     mx = seq[src][1] if src is not None else None
     return (os.path.basename(mx) if mx else None), "matrix named by adversarial= (the header names none)", seq[first][2]
+
+
+def legacy_matrix(m, fh, first, seq, dates):
+    """PRD-dream-generation-aware-mission-records R1: the basename of the one *-adversarial.md entry
+    of a manifest whose frozen header has no `matrix`, first listed by an entry dated before
+    LEGACY_MATRIX_SINCE, when an entry of the mission not later than the linted one names it in
+    adversarial= or its copy at the listed digest passes the matrix grammar for the first-listing
+    entry's State slugs that are prds members of the frozen header. None otherwise (no such entry,
+    two or more, or one neither named nor passing): the matrix-per-manifest rule applies unchanged."""
+    since = parse_iso(LEGACY_MATRIX_SINCE)
+    d = dates[first] if first < len(dates) else None
+    if since is None or d is None or not d < since or not fh:
+        return None
+    mx = {}
+    for raw, key, base, dg in m.get("entries") or []:
+        if base.endswith("-adversarial.md"):
+            mx.setdefault(key, (base, dg))
+    if len(mx) != 1:
+        return None
+    key, (base, dg) = next(iter(mx.items()))
+    if any(a and os.path.basename(a) == base for _, a, _ in seq):
+        return base
+    if file_sha(key) != dg:
+        return None
+    sub = Lint()
+    sl = [s for s in dict.fromkeys(seq[first][2]) if fh and f"PRD-{s}.md" in fh["prds"]]
+    lint_matrix(sub, key, key, sl)
+    return None if sub.findings else base
 
 
 def frozen_edges_copy(manifest_full, edges_base):
@@ -591,7 +696,8 @@ def mission_record(L, entries, ei, task, states, resolve):
             for k, v in toks.items():
                 eff[k] = (v, e["ts"])
             prev = eff
-            earlier.append({"ts": e["ts"], "name": nm, "eff": eff, "slugs": entry_state_slugs(e), "adv": entry_matrix(e)})
+            earlier.append({"ts": e["ts"], "name": nm, "eff": eff, "slugs": entry_state_slugs(e), "adv": entry_matrix(e),
+                            "date": entry_date(e)})
     if not mls and not earlier:
         return None
     reported = set()
@@ -634,7 +740,7 @@ def mission_record(L, entries, ei, task, states, resolve):
     last = earlier[-1] if earlier else None
     members = [s for s in states if f"PRD-{s}.md" in cont]
     rec = {"line": bool(mls), "name": None, "edges": None, "scope": [], "repairs": None, "inherited_from": None,
-           "header": None, "edge_list": [], "earlier": earlier, "cont": cont}
+           "header": None, "edge_list": [], "earlier": earlier, "cont": cont, "date": entry_date(entry)}
     if not mls:
         if members:
             L.fail("mission-grammar", f"entry {last['ts']} carries 'Mission: {last['name']}'; this entry's State: names "
@@ -728,6 +834,11 @@ FINDINGS_LINE_RE = re.compile(r"^findings=(none|[0-9a-f]{64})\s*$")
 # reported sidecar_bound false, not refused; a findings= line present is compared whatever
 # the launch time. Set by the installing commit (A1723), the way KINDS is versioned.
 SIDECAR_BINDING_SINCE = "2026-11-16T20:00:00-08:00"
+# PRD-dream-generation-aware-mission-records R1: a legacy-header manifest first listed before this
+# instant may keep the one matrix it lists. A fixed instant no earlier than the rule's installation,
+# set by the installing commit (as SIDECAR_BINDING_SINCE was) and recorded in history.md.
+LEGACY_MATRIX_SINCE = "2026-11-20T00:00:00-08:00"
+LEGACY_MATRIX_RULE = "the one matrix this legacy manifest lists, first listed before LEGACY_MATRIX_SINCE"
 MISSION_IDS = ("mission-grammar", "mission-edges-missing", "edge-grammar", "edge-unexplained",
                "edge-unknown-unowned", "edge-node-unlisted", "mission-prd-unlisted",
                "mission-scope-mismatch", "mission-scope-incomplete", "mission-review-missing",
@@ -790,6 +901,7 @@ def mission_scopes(L, mrec, resolve):
             sid, digests = None, {}
         mans.append({"path": p, "full": full, "id": sid,
                      "names": {k.decode("utf-8", "backslashreplace"): v for k, v in digests.items()},
+                     "entries": (manifest_paths(full) or []) if sid is not None else [],
                      "frozen": None, "frozen_edges": []})
     return mans
 
@@ -898,6 +1010,21 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
                 if b not in m["names"]:
                     once("mission-scope-incomplete", f"manifest {m['path']}: lists no {b} ({mxl})" if kind is None else
                          f"manifest {m['path']}: lists no {b} ({kind} of the {label} edges header)")
+        # generation-aware R4: header members (the repairs file among them) are keyed by basename,
+        # so one may occur once per manifest
+        mem = {b for b in (mxm, eb, os.path.basename(mrec["repairs"]) if mrec.get("repairs") else None) if b}
+        for _, h in heads:
+            mem |= set(h["prds"]) | set(h["packet"]) | {os.path.basename(cp) for _, cp in header_contracts(h)}
+            mem |= {h["matrix"]} if h.get("matrix") else set()
+        m["members"] = mem
+        byb = {}
+        for raw, key, base, _ in m.get("entries") or []:
+            if base in mem:
+                byb.setdefault(base, {}).setdefault(key, raw)
+        for b, ks in sorted(byb.items()):
+            if len(ks) > 1:
+                once("mission-scope-mismatch", f"manifest {m['path']}: header member {b} occurs {len(ks)} times "
+                                               f"({', '.join(sorted(ks.values()))}); a header member is keyed by basename")
         # matrix-per-manifest R3: the last manifest's frozen header, and the live header, name the
         # note's adversarial= matrix
         for label, h in (heads if k == last else []):
@@ -1211,6 +1338,9 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             if a["id"] is not None and b["id"] is not None:
                 if any(n in b["names"] and b["names"][n] != dg for n, dg in a["names"].items() if n != rbase):
                     return True
+                pa = {key: dg for raw, key, _, dg in a.get("entries") or [] if "/" in raw}
+                if any(key in pa and pa[key] != dg for raw, key, _, dg in b.get("entries") or [] if "/" in raw):
+                    return True
         return False
     if not tok and not need and not moved():
         return None
@@ -1273,6 +1403,16 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                 if k in r and not (isinstance(r[k], list) and all(isinstance(x, str) and x.strip() for x in r[k])):
                     bad(k, "not a list of names")
                     ok = False
+            delta = None
+            if "delta" in r:                # generation-aware R4: the path records of a row, and its path
+                delta, why = parse_delta(r["delta"])     # lists (a row without delta keeps 43d5b39, which
+                if why:                                  # read neither added nor removed)
+                    bad("delta", why)
+                    ok = False
+                for k in ("added", "removed"):
+                    if k in r and not (isinstance(r[k], list) and all(isinstance(x, str) and x.strip() for x in r[k])):
+                        bad(k, "not a list of names")
+                        ok = False
             reason = r.get("reason")
             if disp in ("declined", "amended") and not (isinstance(reason, str) and reason.strip()):
                 bad("reason", f"a {disp} row needs a non-empty reason")
@@ -1302,14 +1442,17 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                         L.fail("repair-grammar", f"{tok}: row {n}: finding {fid}: changed is empty on a repaired {cls} "
                                                  "row (a repair that changes no bytes is declined with a reason)")
                         ok = False
-                    elif not set(ch) & allowed:
+                    elif not {os.path.basename(c) for c in ch} & allowed:
                         L.fail("repair-grammar", f"{tok}: row {n}: finding {fid}: changed names none of "
                                                  f"{', '.join(sorted(allowed))} (the PRDs and contract the finding names)")
                         ok = False
             recs.append({"n": n, "r": r, "ok": ok, "fid": fid if isinstance(fid, str) else None, "disp": disp,
                          "bi": man_index(r.get("before")), "ai": man_index(r.get("after")),
                          "changed": [x for x in r.get("changed") or [] if isinstance(x, str)] if isinstance(r.get("changed"), list) else [],
-                         "sweep": [x for x in r.get("sweep") or [] if isinstance(x, str)] if isinstance(r.get("sweep"), list) else []})
+                         "sweep": [x for x in r.get("sweep") or [] if isinstance(x, str)] if isinstance(r.get("sweep"), list) else [],
+                         "added": [x for x in r.get("added") or [] if isinstance(x, str)] if isinstance(r.get("added"), list) else [],
+                         "removed": [x for x in r.get("removed") or [] if isinstance(x, str)] if isinstance(r.get("removed"), list) else [],
+                         "delta": delta})
     out["rows"] = len(recs)
     out["repaired"] = sum(1 for x in recs if x["disp"] == "repaired")
     # duplicates (R1): one row per finding, or one declined followed by one repaired
@@ -1384,6 +1527,75 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             L.fail("repair-hash-mismatch", f"row {x['n']}: {field} {p}: {c}")
             return None
         return c[0], {k.decode("utf-8", "backslashreplace"): v for k, v in c[1].items()}
+    pmap = {}
+
+    def paths_of(x, field):
+        """R4: the [(path, key, basename, digest)] entries of the row's before or after manifest."""
+        k = x["bi"] if field == "before" else x["ai"]
+        if k is not None:
+            return mans[k].get("entries") or []
+        p = x["r"].get(field)
+        if p not in pmap:
+            pmap[p] = manifest_paths(resolve(p)) or []
+        return pmap[p]
+    amb = []
+
+    def short(d):
+        return d[:12] if isinstance(d, str) else "none"
+
+    def bare_ambiguous(x, field, b, sides):
+        """R4: True when the bare basename b names several entries of a manifest the field reads;
+        a legacy row lists it in repairs.ambiguous (never failed), a delta row is repair-grammar."""
+        for side in sides:
+            keys = {}
+            for raw, key, base, _ in paths_of(x, side):
+                if base == b:
+                    keys.setdefault(key, raw)
+            if len(keys) > 1:
+                cands = sorted(keys.values())
+                if x["delta"] is None:
+                    amb.append({"row": x["n"], "field": field, "name": b, "manifest": x["r"].get(side), "paths": cands})
+                else:
+                    L.fail("repair-grammar", f"{tok}: row {x['n']}: {field} {b}: a bare basename that {len(cands)} entries "
+                                             f"of {x['r'].get(side)} hold ({', '.join(cands)}); a row with delta names the path")
+                return True
+        return False
+
+    def path_entry(x, field, p, memb):
+        """R4: a path entry (it holds /) against its delta record and both manifests. A header member
+        (memb) is keyed by its basename in every pass, so its digests are looked up by basename (one
+        per manifest); a record matches the entry by resolved key, whatever its spelling."""
+        n, r, dl = x["n"], x["r"], x["delta"]
+        side = "before" if field == "removed" else "after"
+        key, base = entry_key(resolve(r[side]), p), os.path.basename(p)
+
+        def look(s):
+            return next((dg for _, k, b_, dg in paths_of(x, s) if (b_ == base if base in memb else k == key)), None)
+        bd, ad = look("before"), look("after")
+        if dl is None:
+            L.fail("repair-hash-mismatch", f"row {n}: {field} {p}: a path entry needs its delta record (the row carries "
+                                           f"no delta); {r['before']} holds {short(bd)}, {r['after']} holds {short(ad)}")
+            return
+        kind = field
+        rec = next((d for d in dl.get(field, []) if entry_key(resolve(r[side]), d["path"]) == key), None)
+        if rec is None and field == "changed":      # a changed path whose record sits under delta.added
+            rec = next((d for d in dl.get("added", []) if entry_key(resolve(r[side]), d["path"]) == key), None)
+            kind = "added" if rec is not None else kind
+        if rec is None:
+            L.fail("repair-hash-mismatch", f"row {n}: {field} {p}: no delta.{field} record; {r['before']} holds "
+                                           f"{short(bd)}, {r['after']} holds {short(ad)}")
+            return
+        if kind == "changed":
+            want = (rec["before"], rec["after"])
+            good = bd is not None and ad is not None and (bd, ad) == want and bd != ad
+            what = f"delta before {short(want[0])} after {short(want[1])}"
+        elif kind == "added":
+            good, what = bd is None and ad == rec["sha256"], f"delta added {short(rec['sha256'])}"
+        else:
+            good, what = ad is None and bd == rec["sha256"], f"delta removed {short(rec['sha256'])}"
+        if not good:
+            L.fail("repair-hash-mismatch", f"row {n}: {field} {p}: {what}; {r['before']} holds {short(bd)}, "
+                                           f"{r['after']} holds {short(ad)}")
     added, removed, swept, aff_of = set(), set(), set(), {}
     for x in recs:
         r, n, fid = x["r"], x["n"], x["fid"]
@@ -1398,7 +1610,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         bprds = set(bhead["prds"]) if bhead else prds
         # R3: class and sweep (affected graph at the before digest)
         if x["disp"] == "amended":
-            aff, cls = set(x["changed"]) & bprds, None
+            aff, cls = {os.path.basename(b) for b in x["changed"]} & bprds, None
         elif fid in fobj and x["disp"] in ("repaired", "declined"):
             f = fobj[fid]
             aff, cls = set(names_of(f)), r.get("class")
@@ -1450,7 +1662,16 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         if cb is not None and ca is not None and not (same_ok and not x["changed"]):
             mxo = mans[bi].get("matrix") if bi is not None else None
             mxn = mans[ai].get("matrix") if ai is not None else None
+            memb = set().union(*(mans[i].get("members", set()) for i in (bi, ai) if i is not None))
             for b in x["changed"]:
+                if "/" in b:                    # generation-aware R4: a path entry, relative to after's directory;
+                    if x["delta"] is not None or os.path.basename(b) not in memb:
+                        path_entry(x, "changed", b, memb)
+                        continue
+                    b = os.path.basename(b)     # a header member, keyed by basename in every pass: a row
+                                                # without delta names it as installed
+                if bare_ambiguous(x, "changed", b, ("before", "after")):
+                    continue
                 if mxo != mxn and b in (mxo, mxn):     # matrix-per-manifest R4: old against before, new against after
                     if b == mxo and b not in cb[1]:
                         L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, absent from before {r['before']}")
@@ -1464,9 +1685,15 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                 elif cb[1][b] == ca[1][b]:
                     L.fail("repair-hash-mismatch", f"row {n}: {b}: claimed changed, digests equal in {r['before']} "
                                                    f"and {r['after']}")
+            for field, sides in (("added", ("after", "before")), ("removed", ("before", "after"))):
+                for b in x[field]:          # generation-aware R4: a path entry against its record; a bare
+                    if "/" in b and (x["delta"] is not None or os.path.basename(b) not in memb):
+                        path_entry(x, field, b, memb)       # name (or a header member a row without delta
+                    else:                                   # names) is read only for ambiguity: 43d5b39
+                        bare_ambiguous(x, field, os.path.basename(b), sides)   # read neither field
         # R6: affected consumers in a later review's manifest (once the following review exists)
         cons = [(b, e["consumer"], e["id"]) for b in x["changed"] for e in bcopy
-                if e["producer"] == b and e["consumer"] in bprds]
+                if e["producer"] == os.path.basename(b) and e["consumer"] in bprds]
         aff_of[n] = {c for _, c, _ in cons}
         if fol is not None and ai is not None and fol["idx"] >= ai:
             t = fol["idx"] if fol["idx"] > ai else ai
@@ -1502,14 +1729,33 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         a, b = mans[k], mans[k + 1]
         if a["id"] is None or b["id"] is None:
             continue
-        decl = set()
+        mem = a.get("members", set()) | b.get("members", set())
+        bdir = os.path.normpath(os.path.dirname(b["full"]))
+        pdirs = {os.path.normpath(os.path.dirname(a["full"])), bdir}
+        ab, ap = split_keys(a, mem, pdirs)
+        bb, bp = split_keys(b, mem, pdirs)
+        decl, decl_m, decl_p, legacy_bare = set(), set(), set(), set()
         for x in recs:
             if x["bi"] == k and x["ai"] == k + 1:
-                decl |= set(x["changed"])
+                for c in x["changed"]:
+                    if "/" in c:                    # generation-aware R4: a path declares its key; its
+                        key = entry_key(b["full"], c)    # basename declares a header member of that name
+                        decl_p.add(key)
+                        decl_m.add(os.path.basename(c))
+                        if os.path.dirname(key) in pdirs:
+                            decl.add(os.path.basename(c))
+                    else:
+                        decl.add(c)
+                        if x["delta"] is None:      # a legacy row's bare name declares every path of it
+                            legacy_bare.add(c)
         mxr = {a.get("matrix"), b.get("matrix")} - {None} if a.get("matrix") != b.get("matrix") else set()
-        for nm in sorted(set(a["names"]) & set(b["names"])):
-            if nm != rbase and nm not in mxr and a["names"][nm] != b["names"][nm] and nm not in decl:
+        for nm in sorted(set(ab) & set(bb)):
+            if nm != rbase and nm not in mxr and ab[nm] != bb[nm] and nm not in decl and not (nm in mem and nm in decl_m):
                 L.fail("repair-hash-mismatch", f"{nm}: changed but undeclared between {a['path']} and {b['path']}")
+        for key in sorted(set(ap) & set(bp)):
+            if ap[key] != bp[key] and key not in decl_p and os.path.basename(key) not in legacy_bare:
+                L.fail("repair-hash-mismatch", f"{os.path.relpath(key, bdir)}: changed but undeclared between "
+                                               f"{a['path']} and {b['path']}")
         # the repairs file is exempt only for a pair whose rows it holds (writing them is what moves it)
         if rbase in a["names"] and rbase in b["names"] and a["names"][rbase] != b["names"][rbase] \
                 and not any(x["bi"] == k and x["ai"] == k + 1 for x in recs):
@@ -1530,7 +1776,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                 rel = vr is not None and vr["verdict"] == "APPROVE" and x["ai"] is not None and vr["idx"] >= x["ai"]
                 why = f"amended row {x['n']}"
             if not rel:
-                for b in set(x["changed"]) | aff_of.get(x["n"], set()):
+                for b in {os.path.basename(c) for c in x["changed"]} | aff_of.get(x["n"], set()):
                     hold(b, why)
         elif x["disp"] == "declined" and x["fid"] in fobj and x["fid"] not in sup and accepted.get(x["fid"]) is None:
             f = fobj[x["fid"]]
@@ -1547,7 +1793,37 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
     out["changed"] = sorted({b for x in recs for b in x["changed"]})
     out["swept_edges"] = len(swept)
     out["edges_added"], out["edges_removed"] = sorted(added), sorted(removed)
+    if amb:
+        out["ambiguous"] = amb
     return out
+
+
+HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def parse_delta(v):
+    """generation-aware R4: (the delta object, None) or (an empty one, why it is malformed). The shape
+    is {changed: [{path, before, after}], added: [{path, sha256}], removed: [{path, sha256}]}, each
+    list optional, paths non-empty strings, digests 64 lowercase hex."""
+    empty = {"changed": [], "added": [], "removed": []}
+    if not isinstance(v, dict):
+        return empty, "not an object"
+    extra = sorted(set(v) - set(empty))
+    if extra:
+        return empty, f"unknown key {extra[0]}"
+    out = {}
+    for k, fields in (("changed", ("before", "after")), ("added", ("sha256",)), ("removed", ("sha256",))):
+        lst = v.get(k, [])
+        if not isinstance(lst, list):
+            return empty, f"{k} is not a list"
+        for i, d in enumerate(lst):
+            if not (isinstance(d, dict) and isinstance(d.get("path"), str) and d["path"].strip()):
+                return empty, f"{k}[{i}]: no path"
+            for f in fields:
+                if not (isinstance(d.get(f), str) and HEX64_RE.fullmatch(d[f])):
+                    return empty, f"{k}[{i}] {d['path']}: {f} is not a sha256"
+        out[k] = lst
+    return out, None
 
 
 def read_text(path):
@@ -4428,6 +4704,43 @@ def selftest():
                                                    narrow=True), "affected-consumer-unreviewed", ["PRD-foo.md", "PRD-bar.md", "E1"])
     refuse("drfc-decline-unaccepted", repaired(new(), rows=(dict(ROW, disposition="declined", reason="no change needed"),)),
            "repair-declined-unaccepted", ["F1"])
+
+    # generation-aware mission records (PRD-dream-generation-aware-mission-records), R1 and R4: the
+    # selftest's headers carry no `matrix` and its entries are dated before LEGACY_MATRIX_SINCE.
+    # R1: a scope manifest listing one other matrix (not the adversarial= one), valid at its listed
+    # digest, passes; listing two is refused as installed. R4: a path entry moved between m1 and m2
+    # passes with its delta record; undeclared, or named by a row without delta, it is refused.
+    OLDMX = ("2026-11-15T00:30:00-08:00-adversarial.md", "2026-11-15T00:20:00-08:00-adversarial.md")
+
+    def legacy(fx, n):
+        fx = bound(fx, scope="notes/snapshots/m0.sha256,notes/snapshots/m.sha256")
+        keep = [ln for ln in fx.files["notes/snapshots/m.sha256"].splitlines() if not ln.endswith(MXB)]
+        for b in OLDMX[:n]:
+            fx.files["notes/snapshots/" + b] = mx_file(["foo", "bar"])
+        fx.files["notes/snapshots/m0.sha256"] = "".join(
+            ln + "\n" for ln in keep + [f"{h(mx_file(['foo', 'bar']).encode())}  {b}" for b in OLDMX[:n]])
+        return fx
+    passes("dgmr-legacy-one-matrix", legacy(new(), 1))
+    refuse("dgmr-legacy-two-matrices", legacy(new(), 2), "mission-scope-incomplete", ["notes/snapshots/m0.sha256", MXB])
+    GP, GV1, GV2 = "../../data/g/graph.json", b'{"v": 1}\n', b'{"v": 2}\n'
+
+    def bsid(t):                # the scope id over basenames, as scope_canon computes it
+        return h("".join(sorted({ln.split("  ", 1)[0] + "  " + ln.split("  ", 1)[1].rsplit("/", 1)[-1] + "\n"
+                                 for ln in t.splitlines()})).encode())
+
+    def pathed(fx, row):
+        fx = repaired(fx, rows=(row,))
+        fx.files["data/g/graph.json"] = GV2.decode()
+        for rel, v in (("notes/snapshots/m1.sha256", GV1), ("notes/snapshots/m2.sha256", GV2)):
+            fx.files[rel] += f"{h(v)}  {GP}\n"
+        fx.rows[4] = dict(fx.rows[4], scope_id=bsid(fx.files["notes/snapshots/m1.sha256"]))
+        fx.rows[5] = dict(fx.rows[5], scope_id=bsid(fx.files["notes/snapshots/m2.sha256"]))
+        return fx
+    passes("dgmr-path-entry-declared", pathed(new(), dict(ROW, changed=["PRD-foo.md", GP], delta={
+        "changed": [{"path": GP, "before": h(GV1), "after": h(GV2)}]})))
+    refuse("dgmr-path-entry-undeclared", pathed(new(), ROW), "repair-hash-mismatch", [GP, "changed but undeclared"])
+    refuse("dgmr-path-entry-no-delta", pathed(new(), dict(ROW, changed=["PRD-foo.md", GP])), "repair-hash-mismatch",
+           [GP, "needs its delta record"])
 
     # mission edge map (PRD-dream-mission-edge-map): one passing fixture, one refusal per new id
     def edged(fx, mutate=None, state=None):
