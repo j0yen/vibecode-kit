@@ -406,7 +406,8 @@ not cascade into `repair-hash-mismatch`.
 approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one that
 touches more than one repo or surface, is reviewed alone and persists in a batch of
 one. Write each verdict as `<slug> APPROVE|FIX|REJECT <reviewer>`, one line per PRD, to a
-review file. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
+review file; a line counts as a verdict only when its first token is a PRD slug
+(`[a-z0-9][a-z0-9-]*`), so a table row or other prose beside the verdicts is ignored. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
 slug's current PRD file with the digest in its reviewer's `review.snapshot` manifest, so a
 later edit to that PRD needs a new review (FIX and REJECT are not pinned). On a note whose
 `Mission:` line carries `scope=`, only the latest chain review (in `Review:` line order)

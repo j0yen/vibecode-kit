@@ -118,6 +118,10 @@
 # The token is the entry's own (never inherited) and applies whole: any unmet condition is mission-grammar ((e):
 # repair-scope-mismatch) and the rules apply unchanged. The JSON's mission.withdrawn lists each token of the Task.
 #
+# Verdict lines (Repair 7, the PRD author's addendum 5): a review file's line is a verdict line only when its first
+# token is a PRD slug ([a-z0-9][a-z0-9-]*) and its second APPROVE, FIX or REJECT; any other line (a markdown table row
+# such as `| FIX and UNKNOWN hold; ... |`) is prose, in the review file and in its result= capture alike.
+#
 # Failure-class sweep (PRD-dream-failure-class-sweep): with repairs=<path> on the Mission: line,
 # a chain-review finding followed by a later chain review, or a digest moving between two
 # listed manifests. Each repairs row {finding, class, author_session, before, after, changed,
@@ -2422,15 +2426,20 @@ def norm_line(line):
     return t
 
 
+VERDICT_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")   # Repair 7: a PRD slug, the file name without PRD- and .md
+
+
 def verdict_of(line):
     """(slug, verdict, normalized line) when the line is a verdict line, else None.
     Grammar as dream-persist.sh parses it: `<slug> APPROVE|FIX|REJECT <reviewer>`,
-    `#` comments and blanks ignored."""
+    `#` comments and blanks ignored. Repair 7 (the PRD author's addendum 5): the first
+    token must be a PRD slug as dream-persist.sh's header defines it; any other line,
+    such as a markdown table row `| FIX and UNKNOWN hold; ... |`, is prose and ignored."""
     t = norm_line(line)
     if not t or t.startswith("#"):
         return None
     p = t.split()
-    if len(p) < 3 or p[1] not in VERDICTS:
+    if len(p) < 3 or p[1] not in VERDICTS or not VERDICT_SLUG.match(p[0]):
         return None
     return p[0], p[1], " ".join(p)
 
