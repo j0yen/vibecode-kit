@@ -14,10 +14,12 @@ set -uo pipefail
 setup_mx
 MSG="is not later than the previous entry 2026-11-18T13:00:00-08:00 (an earlier run's matrix)"
 cx r5-positive; run_mr; clean
-for c in r5-scope-added r5-no-new-review r5-other-scope-id r5-uncovered-changed r5-older-matrix r5-old-line-dropped r5-new-line-author-role; do
+for c in r5-scope-added r5-no-new-review r5-other-scope-id r5-uncovered-changed r5-older-matrix r5-old-line-dropped r5-new-line-author-role r5-prev-other-task r5-scope-dropped; do
   cx "$c"; run_mr; has_fail analysis-grammar "$MSG"
 done
 cx r5-no-new-review; run_mr; findings_eq '["analysis-grammar"]'
 cx r5-uncovered-changed; run_mr; findings_eq '["analysis-grammar"]'
+cx r5-prev-other-task; run_mr; findings_eq '["analysis-grammar"]'
+# r5-scope-dropped also carries mission-grammar (its scope= does not begin with the previous entry's list)
 today r5-positive; findings_eq '["analysis-grammar"]'; has_fail analysis-grammar "$MSG"
-pass "review-14 entry shape accepted when its matrix, scope and reviews carry over and a new review of the last manifest is added; scope added, no new review, another scope_id, uncovered changed, an older matrix, a dropped earlier review line and a new line whose latest launch row is an author row refused; the installed rule refuses the positive"
+pass "review-14 entry shape accepted when its matrix, scope and reviews carry over and a new review of the last manifest is added; scope added, no new review, another scope_id, uncovered changed, an older matrix, a dropped earlier review line and a new line whose latest launch row is an author row, a previous entry of another task, a previous scope without m1 refused; the installed rule refuses the positive"

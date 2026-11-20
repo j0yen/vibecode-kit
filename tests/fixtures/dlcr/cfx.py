@@ -24,6 +24,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -224,10 +225,13 @@ def with_newx(M, k):
     return M
 
 
-def r4_base(declare_at=1, n=2, live_only=False, row_eb=True, reviewer_row=False, two_names=False):
+def r4_base(declare_at=1, n=2, live_only=False, row_eb=True, reviewer_row=False, two_names=False, row_author=None,
+            pair=None):
     """rounds(n) whose r1 finding F1 names consumers PRD-bar.md and external:newx; declare_at: the manifest index whose
     frozen header declares newx (1 = m2, the next; 2 = m3, two later; None = none); live_only: only the live header;
-    two_names: F1 also names external:other, which no header declares."""
+    two_names: F1 also names external:other, which no header declares; row_author: the edges row is written by this
+    session instead of the mission author (a session with no author launch row); pair: (before, after) manifest indexes
+    of the author's edges row instead of (0, 1)."""
     M = rounds(n)
     cons = ["PRD-bar.md", "external:newx"] + (["external:other"] if two_names else [])
     rv1 = M.review("notes/reviews/r1", S["R1"], [("foo", "FIX"), ("bar", "APPROVE")], "FIX", findings=[
@@ -243,6 +247,13 @@ def r4_base(declare_at=1, n=2, live_only=False, row_eb=True, reviewer_row=False,
     r = M.rep_rows[0]
     if not row_eb or reviewer_row:
         r["changed"] = [x for x in r["changed"] if x != M.eb]
+    if pair is not None:
+        r["before"], r["after"] = M.mans_decl[pair[0]]["rel"], M.mans_decl[pair[1]]["rel"]
+    if row_author is not None:           # the only (m1, m2) row naming the edges file is another session's
+        r["changed"] = [x for x in r["changed"] if x != M.eb]
+        M.rep_rows.append({"finding": None, "class": None, "author_session": row_author, "before": M.mans_decl[0]["rel"],
+                           "after": M.mans_decl[1]["rel"], "changed": [M.eb], "sweep": [], "disposition": "amended",
+                           "reason": "another session's edges row"})
     if reviewer_row:                     # the only (m1, m2) row naming the edges file is the reviewer's, an admitted
         ar = M.row(at(9, 50), S["R1"], role="author")   # author too: an author launch row placed before its
         M.rows.remove(ar)                                # review launch row, so the review binding still holds
@@ -255,17 +266,24 @@ def r4_base(declare_at=1, n=2, live_only=False, row_eb=True, reviewer_row=False,
 
 # ---------------------------------------------------------------- Repair 5
 def r5_base(prev_all=False, scope_extra=False, other_scope_id=False, prev_uncovered=None, older_matrix=False,
-            drop_old_line=False, new_author_role=False):
+            drop_old_line=False, new_author_role=False, prev_task=None, prev_scope_drop=False):
     """rounds(3)'s entry (14:00) split: a pre-review entry at 13:00 with the same lines but r3's Review: line (or all of
     them, prev_all), then the post-review entry. scope_extra: the post entry's scope= gains a manifest; other_scope_id:
     r3's launch row names m1; prev_uncovered: the pre entry's uncovered= value; older_matrix: the post entry names round
     1's matrix; drop_old_line: the post entry drops r1's Review: line; new_author_role: r3's latest launch row is an
-    author row carrying m3's scope_id."""
+    author row carrying m3's scope_id; prev_task: the pre-review entry's Task: names this task instead, after a
+    same-task copy of it at 12:30 (so the mission record's earlier scope is unchanged); prev_scope_drop: the pre entry's
+    scope= lacks m1 (the post entry adds a manifest that is not the last)."""
     M = rounds(3)
     post = M.entries[-1]
     pre = [ln for ln in post["lines"] if prev_all or not ln.startswith("Review: notes/reviews/r3/")]
     if prev_uncovered is not None:
         pre = [ln.replace(" uncovered=1", f" uncovered={prev_uncovered}") if ln.startswith("Analysis:") else ln for ln in pre]
+    if prev_scope_drop:
+        pre = [ln.replace("notes/snapshots/m1/m1.sha256,", "") if ln.startswith("Mission:") else ln for ln in pre]
+    if prev_task is not None:
+        M.entries.insert(len(M.entries) - 1, {"ts": at(12, 30), "lines": list(pre)})
+        pre = [re.sub(r"^Task: \S+", f"Task: {prev_task}", ln) for ln in pre]
     M.entries.insert(len(M.entries) - 1, {"ts": at(13), "lines": pre})
     if scope_extra:
         post["lines"] = [ln.replace("m3/m3.sha256", "m3/m3.sha256,notes/snapshots/m4/m4.sha256") if ln.startswith("Mission:")
@@ -311,6 +329,10 @@ CASES = {
     "r4-no-row": lambda: r4_base(row_eb=False),
     "r4-reviewer-row": lambda: r4_base(reviewer_row=True),
     "r4-two-names": lambda: r4_base(two_names=True),
+    "r4-foreign-row": lambda: r4_base(row_author="cccccccc-0000-4000-8000-0000000000ff"),
+    "r4-other-reviewer-row": lambda: r4_base(row_author=S["R2"]),
+    "r4-wrong-before": lambda: r4_base(pair=(1, 1)),
+    "r4-wrong-after": lambda: r4_base(pair=(0, 0)),
     "r5-positive": lambda: r5_base(),
     "r5-scope-added": lambda: r5_base(scope_extra=True),
     "r5-no-new-review": lambda: r5_base(prev_all=True),
@@ -319,6 +341,8 @@ CASES = {
     "r5-older-matrix": lambda: r5_base(older_matrix=True),
     "r5-old-line-dropped": lambda: r5_base(drop_old_line=True),
     "r5-new-line-author-role": lambda: r5_base(new_author_role=True),
+    "r5-prev-other-task": lambda: r5_base(prev_task="MX-2"),
+    "r5-scope-dropped": lambda: r5_base(prev_scope_drop=True),
 }
 for _k, _v in (("id", "F9"), ("class", "authority-bypass"), ("counterexample", "another counterexample"),
                ("correction", "another correction"), ("control", "another control")):
