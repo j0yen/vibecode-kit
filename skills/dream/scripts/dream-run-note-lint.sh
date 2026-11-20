@@ -22,7 +22,7 @@
 #             adversarial=<<path> uncovered=<n>|skipped: <r>>          (one line)
 #   Review: <verdict file> reviewer-session=<id> [result=<json>]   (one per reviewer) | Review: none
 #   State: <slug>=<value> ...   (a slug repeats once per state reached, in order)
-#   Mission: <name> edges=<path> [scope=<p>[,<p>...]] [repairs=<path>]   (optional sixth kind)
+#   Mission: <name> edges=<path> [scope=<p>[,<p>...]] [repairs=<path>] [withdrawn=<p>[,<p>...]]   (optional sixth kind)
 # Paths are relative to the PRD home (--prd-dir; default: the log's parent's parent)
 # or absolute.
 #
@@ -107,6 +107,15 @@
 # FIX, REJECT or absent per-PRD verdict; and, as blanket holds, every member while no chain
 # review binds, none binds to the last manifest, that manifest's latest-launched review is on no
 # Review: line, or the line carries no scope=.
+#
+# Withdrawn freeze (Repair 6, the PRD author's addendum 4): withdrawn=<manifest>[,...] on a Mission: line drops a
+# planned freeze that was never written from the continuity check of every earlier entry that lists it and from this
+# entry's list comparison, when (a) its file does not exist, (b) no row of the decisions source scopes it (a line that
+# is no JSON object and names it, or no decisions source, counts as one), (c) it is the last element of the scope=
+# list of the latest earlier entry that lists it, (d) this entry's own scope= does not list it and is the previous
+# entry's list without it followed only by appended manifests, and (e) no repairs row names it as before or after.
+# The token is the entry's own (never inherited) and applies whole: any unmet condition is mission-grammar ((e):
+# repair-scope-mismatch) and the rules apply unchanged. The JSON's mission.withdrawn lists each token of the Task.
 #
 # Failure-class sweep (PRD-dream-failure-class-sweep): with repairs=<path> on the Mission: line,
 # a chain-review finding followed by a later chain review, or a digest moving between two
@@ -477,19 +486,20 @@ EDGE_STATUS = ("known", "external", "unknown")
 REQUIRED_BY_STATUS = {"known": EDGE_FIELDS, "external": EDGE_FIELDS, "unknown": ()}
 MISSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 MISSION_KEYS = ("edges", "scope", "repairs")
+MISSION_TOKENS = MISSION_KEYS + ("withdrawn",)    # Repair 6: withdrawn= belongs to its own entry and is never inherited
 EDGE_KEYS = ("id", "status", "producer", "consumer")
 
 
 def parse_mission_line(line):
-    """R1 grammar of one `Mission: <name> edges=<p> [scope=<p>[,<p>...]] [repairs=<p>]` line:
-    (name or None, {key: value; scope a list}, [(token, why)])."""
+    """R1 grammar of one `Mission: <name> edges=<p> [scope=<p>[,<p>...]] [repairs=<p>] [withdrawn=<p>[,<p>...]]` line:
+    (name or None, {key: value; scope and withdrawn lists}, [(token, why)])."""
     toks = line[len("Mission:"):].split()
     probs, keys, name = [], {}, None
     if not toks:
         return None, keys, [("Mission:", "no mission name")]
     rest = toks
     k0 = toks[0].split("=", 1)[0]
-    if "=" in toks[0] and k0 in MISSION_KEYS:
+    if "=" in toks[0] and k0 in MISSION_TOKENS:
         probs.append((toks[0], "no mission name before the key=value tokens"))
     else:
         if MISSION_NAME_RE.fullmatch(toks[0]):
@@ -499,16 +509,18 @@ def parse_mission_line(line):
         rest = toks[1:]
     for t in rest:
         k, eq, v = t.partition("=")
-        if not eq or k not in MISSION_KEYS:
-            probs.append((t, "unknown token (only edges=, scope= and repairs= follow the name)"))
+        if not eq or k not in MISSION_TOKENS:
+            probs.append((t, "unknown token (only edges=, scope=, repairs= and withdrawn= follow the name)"))
         elif k in keys:
             probs.append((t, f"a second {k}= token"))
         elif not v:
             probs.append((t, "empty value"))
-        elif k == "scope":
+        elif k in ("scope", "withdrawn"):
             items = v.split(",")
             if not all(items):
-                probs.append((t, "an empty scope= item"))
+                probs.append((t, f"an empty {k}= item"))
+            elif k == "withdrawn" and len({os.path.normpath(x) for x in items}) != len(items):
+                probs.append((t, "a withdrawn= item repeats"))
             else:
                 keys[k] = items
         else:
@@ -825,11 +837,104 @@ def frozen_edges_copy(manifest_full, edges_base):
     return copy, digests, None
 
 
-def mission_record(L, entries, ei, task, states, resolve):
+def path_keys(full):
+    """The forms one resolved path is compared by (Repair 6): its normalized and its real path."""
+    return {os.path.normpath(full), os.path.realpath(full)}
+
+
+def withdrawn_scoped(w, resolve, dec):
+    """Repair 6 (b): why a launch row of the decisions source may have scoped manifest w, or None. Every row is read,
+    whatever its task, role or session: its `scope` as written and, for an absolute scope under a --scope-root, as
+    mapped. A decisions line that is no JSON object and names w (as written, resolved or relative to the PRD home)
+    counts as scoping it; with no decisions source read, nothing rules a row out."""
+    if dec is None:
+        return "no decisions source was read, so a launch row scoping it cannot be ruled out"
+    full = resolve(w)
+    wk = path_keys(full)
+    sr = getattr(resolve, "scope_roots", None)
+    for r in dec["rows"]:
+        s = r.get("scope")
+        if not isinstance(s, str) or not s.strip():
+            continue
+        forms = [resolve(s)]
+        if sr is not None and os.path.isabs(s):
+            n = os.path.normpath(s)
+            forms += [os.path.join(local, n[len(root) + 1:]) for root, local in sr.pairs if n.startswith(root + os.sep)]
+        if any(path_keys(f) & wk for f in forms):
+            return (f"the decisions row of session {r.get('session')} at {r.get('ts')} (role {r.get('role')}) scopes it, "
+                    "so it may have been reviewed")
+    names = {w, full, os.path.normpath(full), os.path.relpath(os.path.normpath(full), resolve("."))}
+    for n, ln in enumerate(read_text(dec["path"]).splitlines(), 1):
+        if not ln.strip():
+            continue
+        try:
+            ok = isinstance(json.loads(ln), dict)
+        except ValueError:
+            ok = False
+        if not ok and any(x in ln for x in names):
+            return f"decisions line {n}, which is no JSON object, names it, so a launch row scoping it cannot be ruled out"
+    return None
+
+
+def withdrawn_check(p, seq, resolve, dec):
+    """Repair 6 (the PRD author's addendum 4): [(manifest, finding id, why)] for the withdrawn= token of seq[p], one
+    item per unmet condition ([] when the token applies). seq is the same-Task entries carrying a Mission: line, in
+    log order, the linted entry last; each item has ts, eff (tokens carried or inherited), own_scope (the line's own
+    scope= or None) and withdrawn. A manifest may be withdrawn when (a) its file does not exist; (b) no launch row of
+    the decisions source scopes it; (c) it is the last element of the scope= list of the latest earlier entry that
+    lists it (only a planned freeze can be withdrawn); (d) this entry carries its own scope=, which does not list it
+    and is the previous entry's list without the withdrawn manifests followed only by appended manifests; and (e) no
+    row of a repairs file named from that earlier entry on names it as before or after. A token applies only whole."""
+    x, ws = seq[p], seq[p]["withdrawn"]
+    tok = ",".join(ws)
+
+    def same(a, b):
+        return bool(path_keys(resolve(a)) & path_keys(resolve(b)))
+
+    def scope_of(y):
+        return (y["eff"].get("scope") or ([], None))[0]
+    bad = []
+    reps = []
+    for y in seq[p:]:
+        rp = (y["eff"].get("repairs") or (None, None))[0]
+        if rp and rp not in reps:
+            reps.append(rp)
+    for w in ws:
+        if os.path.lexists(resolve(w)):
+            bad.append((w, "mission-grammar", f"{resolve(w)} exists; only a manifest that was never written is withdrawn"))
+        why = withdrawn_scoped(w, resolve, dec)
+        if why:
+            bad.append((w, "mission-grammar", why))
+        lister = next((y for y in reversed(seq[:p]) if any(same(w, m) for m in scope_of(y))), None)
+        if lister is None:
+            bad.append((w, "mission-grammar", "no earlier entry of this Task lists it in scope="))
+        elif not same(w, scope_of(lister)[-1]):
+            bad.append((w, "mission-grammar", f"it is not the last element of the scope= list of entry {lister['ts']}, "
+                                              "the latest that lists it (only a planned freeze, listed last, is withdrawn)"))
+        if x["own_scope"] is not None and any(same(w, m) for m in x["own_scope"]):
+            bad.append((w, "mission-grammar", "this entry's scope= still lists it"))
+        for rp in reps:
+            for n, r in repairs_rows({"repairs": rp}, resolve):
+                for side in ("before", "after"):
+                    if isinstance(r.get(side), str) and r[side] and same(w, r[side]):
+                        bad.append((w, "repair-scope-mismatch", f"row {n} of {rp} names it as {side}"))
+    if x["own_scope"] is None:
+        bad.append((tok, "mission-grammar", "this entry's Mission: line carries no scope= of its own"))
+    elif p > 0:
+        base = [m for m in scope_of(seq[p - 1]) if not any(same(m, w) for w in ws)]
+        if [os.path.normpath(resolve(m)) for m in x["own_scope"][:len(base)]] != \
+                [os.path.normpath(resolve(m)) for m in base]:
+            bad.append((tok, "mission-grammar", f"this entry's scope= is not the scope= list of entry {seq[p - 1]['ts']} "
+                                                "without the withdrawn manifests, followed only by appended manifests"))
+    return bad
+
+
+def mission_record(L, entries, ei, task, states, resolve, dec=None):
     """Edge-map R1-R5 for entry ei: the Mission: line, its inheritance and continuity across
     same-Task entries, the edges file and the State slugs. Returns None when neither this
     entry nor an earlier same-Task entry carries the line, else a dict (`line` False when only
-    the continuity rule applied)."""
+    the continuity rule applied). dec ({path, rows} of the decisions source, or None) is read
+    only for a withdrawn= token (Repair 6)."""
     entry = entries[ei]
     mls = [ln.rstrip() for ln in entry["lines"] if ln.startswith("Mission:")]
     earlier = []
@@ -844,10 +949,11 @@ def mission_record(L, entries, ei, task, states, resolve):
             nm, toks, _ = parse_mission_line(el[0])
             eff = dict(prev)
             for k, v in toks.items():
-                eff[k] = (v, e["ts"])
+                if k in MISSION_KEYS:
+                    eff[k] = (v, e["ts"])
             prev = eff
             earlier.append({"ts": e["ts"], "name": nm, "eff": eff, "slugs": entry_state_slugs(e), "adv": entry_matrix(e),
-                            "date": entry_date(e)})
+                            "date": entry_date(e), "own_scope": toks.get("scope"), "withdrawn": toks.get("withdrawn") or []})
     if not mls and not earlier:
         return None
     reported = set()
@@ -857,9 +963,25 @@ def mission_record(L, entries, ei, task, states, resolve):
             reported.add(key)
             L.fail("mission-edges-missing", detail)
 
+    # Repair 6: the withdrawn= tokens of the earlier entries and of this one, each applying whole or not at all
+    ctoks = parse_mission_line(mls[0])[1] if len(mls) == 1 else {}
+    ceff = dict(earlier[-1]["eff"]) if earlier else {}
+    ceff.update({k: (v, entry["ts"]) for k, v in ctoks.items() if k in MISSION_KEYS})
+    seq = earlier + [{"ts": entry["ts"], "eff": ceff, "own_scope": ctoks.get("scope"), "withdrawn": ctoks.get("withdrawn") or []}]
+    wd = []
+    for p, y in enumerate(seq):
+        if y["withdrawn"]:
+            bad = withdrawn_check(p, seq, resolve, dec)
+            wd.append({"pos": p, "entry": y["ts"], "manifests": list(y["withdrawn"]), "applies": not bad, "bad": bad})
+
+    def withdrawn_after(i, mp):
+        """(applying withdrawal, or a non-applying one, or None) of manifest mp by an entry later than earlier[i]."""
+        hits = [w for w in wd if w["pos"] > i and any(path_keys(resolve(mp)) & path_keys(resolve(m)) for m in w["manifests"])]
+        return next((w for w in hits if w["applies"]), hits[-1] if hits else None)
+
     # continuity set (R1): live headers + frozen copies of every earlier scope= manifest + earlier State slugs
     cont, by_name = set(), {}
-    for x in earlier:
+    for i, x in enumerate(earlier):
         before = set(cont)
         ep = x["eff"].get("edges")
         if ep:
@@ -872,10 +994,15 @@ def mission_record(L, entries, ei, task, states, resolve):
                         miss(d, resolve(ep[0]))
         base = os.path.basename(ep[0]) if ep else None
         for mp in (x["eff"].get("scope") or ([], None))[0]:
+            wa = withdrawn_after(i, mp) if wd else None
+            if wa is not None and wa["applies"]:
+                continue                       # Repair 6: withdrawn by a later entry; nothing of it was written
             mfull = resolve(mp)
             copy, _, err = frozen_edges_copy(mfull, base)
             if err:
-                miss(f"{copy}: {err} (continuity of entry {x['ts']})", copy)
+                note = (f"; withdrawn= of entry {wa['entry']} does not apply: "
+                        + "; ".join(f"{m}: {why}" for m, _, why in wa["bad"])) if wa is not None else ""
+                miss(f"{copy}: {err} (continuity of entry {x['ts']}{note})", copy)
                 continue
             hd, _, _ = read_edges(copy, copy)
             if hd is None:
@@ -890,7 +1017,13 @@ def mission_record(L, entries, ei, task, states, resolve):
     last = earlier[-1] if earlier else None
     members = [s for s in states if f"PRD-{s}.md" in cont]
     rec = {"line": bool(mls), "name": None, "edges": None, "scope": [], "repairs": None, "inherited_from": None,
-           "header": None, "edge_list": [], "earlier": earlier, "cont": cont, "date": entry_date(entry)}
+           "header": None, "edge_list": [], "earlier": earlier, "cont": cont, "date": entry_date(entry),
+           "withdrawn": [{"entry": w["entry"], "manifests": w["manifests"], "applies": w["applies"],
+                          "why": [f"{m}: {why}" for m, _, why in w["bad"]]} for w in wd]}
+    own = wd[-1] if wd and wd[-1]["pos"] == len(earlier) else None
+    if own is not None:
+        for m, fid, why in own["bad"]:
+            L.fail(fid, f"token 'withdrawn={','.join(own['manifests'])}': {m}: {why}; the token does not apply")
     if not mls:
         if members:
             L.fail("mission-grammar", f"entry {last['ts']} carries 'Mission: {last['name']}'; this entry's State: names "
@@ -918,6 +1051,9 @@ def mission_record(L, entries, ei, task, states, resolve):
             L.fail("mission-grammar", f"token 'edges={toks['edges']}': entry {pe[1]} names edges={pe[0]}; "
                                       "one mission keeps one edge map")
         ps = last["eff"].get("scope")
+        if ps and own is not None and own["applies"]:     # Repair 6: compared without what this entry withdraws
+            ps = ([x for x in ps[0] if not any(path_keys(resolve(x)) & path_keys(resolve(m)) for m in own["manifests"])],
+                  ps[1])
         if "scope" in toks and ps and [os.path.normpath(resolve(x)) for x in toks["scope"][:len(ps[0])]] != \
                 [os.path.normpath(resolve(x)) for x in ps[0]]:
             L.fail("mission-grammar", f"token 'scope={','.join(toks['scope'])}': does not begin with the scope= list "
@@ -947,10 +1083,13 @@ def mission_json(rec):
     if rec is None or not rec["line"]:
         return None
     hd, edges = rec["header"], rec["edge_list"]
-    return {"name": rec["name"], "edges_file": rec["edges"], "scope": list(rec["scope"]), "repairs": rec["repairs"],
-            "inherited_from": rec["inherited_from"], "single_component": hd["single_component"] if hd else None,
-            "prds": len(hd["prds"]) if hd else 0, "edges": edge_counts(edges),
-            "unknown_edges": [e["id"] for e in edges if e["status"] == "unknown"]}
+    out = {"name": rec["name"], "edges_file": rec["edges"], "scope": list(rec["scope"]), "repairs": rec["repairs"],
+           "inherited_from": rec["inherited_from"], "single_component": hd["single_component"] if hd else None,
+           "prds": len(hd["prds"]) if hd else 0, "edges": edge_counts(edges),
+           "unknown_edges": [e["id"] for e in edges if e["status"] == "unknown"]}
+    if rec.get("withdrawn"):              # Repair 6: present only when an entry of the Task carries withdrawn=
+        out["withdrawn"] = rec["withdrawn"]
+    return out
 
 
 def edges_mode(a):
@@ -3449,7 +3588,8 @@ def lint_log(a):
     # ---- mission record (PRD-dream-mission-edge-map): after the State parse, before provenance
     mrec = None
     if any(ln.startswith("Mission:") for e in entries[:ei + 1] for ln in e["lines"]):
-        mrec = mission_record(L, entries, ei, task, list(states), resolve)
+        mrec = mission_record(L, entries, ei, task, list(states), resolve,
+                              {"path": dec_path, "rows": rows} if governed else None)
 
     # ---- trigger record R1 (PRD-dream-analysis-trigger-record): coverage, before provenance reads the Analysis values
     coverage, floor_info = None, None

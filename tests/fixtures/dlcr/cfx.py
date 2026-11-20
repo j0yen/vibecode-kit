@@ -16,6 +16,8 @@ tests/fixtures/dgmr/gfx.py does. A case is one PRD home and a private decisions 
   rows 1-3, the 093500Z header and repairs row 136).
 - Repair 5 (r5-*, addendum 3): rounds(3)'s entry split into a pre-review entry (13:00, Review: lines of r1 and r2) and the
   post-review entry (14:00) adding r3's line, both naming the 11:00 matrix (A1723's review-14 entries).
+- Repair 6 (r6-*, addendum 4): a pre-review entry (10:30) lists a planned freeze W that is never written; the 14:00
+  entry drops it with withdrawn=W (A1723's 4:16:48 AM entry and its 124000Z manifest).
 
 Usage: cfx.py <case> <outdir> | --list
 """
@@ -348,6 +350,66 @@ def r5_first_round(keep_none=False):
     return M
 
 
+# ---------------------------------------------------------------- Repair 6 (addendum 4)
+W_REL = "notes/snapshots/mw/mw.sha256"        # the planned freeze, never written (A1723's 20261120T124000Z)
+OTHER = "dddddddd-0000-4000-8000-0000000000dd"
+ROOT6 = "/a1723-recorded-home"                # a PRD home root recorded on another host (Q5's --scope-root)
+
+
+def r6_mission(ln, scope, token=None, drop_scope=False):
+    ln = re.sub(r" scope=\S+", "" if drop_scope else " scope=" + ",".join(scope), ln)
+    return ln + (f" withdrawn={token}" if token else "")
+
+
+def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False, rep_side=None, mid=None,
+            malformed=False, no_scope=False, still_listed=False, token_value=None, scoped_root=False, ungoverned=False):
+    """rounds(3)'s entry (14:00, m1 m2 m3) preceded by a pre-review entry at 10:30 whose scope= ends with the planned
+    freeze W, never written (A1723's 4:16:48 AM entry and 124000Z); with token, the 14:00 entry carries withdrawn=W (the
+    4:40:26 AM entry as the rule reads it). where: W is "last" or in the "middle" of the 10:30 list; exists: W is
+    written; scoped: a review launch row scopes W; reorder: the 14:00 list is m2 m1 m3; rep_side: a repairs row names W
+    as before or after; mid: an entry at 10:45 between them, "appended" (m1 m2 m3, no token: the 4:40:26 entry as
+    written), "after-w" (m1 m2 W m3, no token) or "withdraws" (m1 m2, withdrawn=W; then the 14:00 entry carries no token);
+    malformed: a decisions line that is no JSON object names W; no_scope: the 14:00 line carries no scope=;
+    still_listed: the 14:00 list keeps W; token_value: withdrawn= names this instead of W; scoped_root: a review launch
+    row scopes W at its absolute path under the recorded root ROOT6 (the test maps ROOT6 onto the home by --scope-root);
+    ungoverned: every Route: line is `Route: ungoverned`, for a lint with no decisions source."""
+    M = rounds(3)
+    post = M.entries[-1]
+    m1, m2, m3 = (m["rel"] for m in M.mans_decl)
+    pre_scope = [m1, m2, W_REL] if where == "last" else [m1, W_REL, m2]
+    pre = [r6_mission(ln, pre_scope) if ln.startswith("Mission:")
+           else ln.replace(mfx.mx_rel(11), mfx.mx_rel(10)) if ln.startswith("Analysis:")
+           else ln for ln in post["lines"] if not ln.startswith("Review: notes/reviews/r3/")]
+    M.entries.insert(len(M.entries) - 1, {"ts": at(10, 30), "lines": pre})
+    if mid is not None:
+        ms = {"appended": [m1, m2, m3], "after-w": [m1, m2, W_REL, m3], "withdraws": [m1, m2]}[mid]
+        mline = [r6_mission(ln, ms, W_REL if mid == "withdraws" else None) if ln.startswith("Mission:") else ln
+                 for ln in pre]
+        M.entries.insert(len(M.entries) - 1, {"ts": at(10, 45), "lines": mline})
+        token = token and mid != "withdraws"
+    scope = [m2, m1, m3] if reorder else [m1, m2, W_REL, m3] if still_listed else [m1, m2, m3]
+    post["lines"] = [r6_mission(ln, scope, (token_value or W_REL) if token else None, drop_scope=no_scope)
+                     if ln.startswith("Mission:") else ln for ln in post["lines"]]
+    if exists:
+        M.manifest(W_REL, dict(M.mans_decl[1]["members"]))
+    if scoped:
+        M.row(at(10, 20), OTHER, role="review", scope=W_REL, sid="0" * 64)
+    if scoped_root:
+        M.row(at(10, 20), OTHER, role="review", scope=f"{ROOT6}/{W_REL}", sid="0" * 64)
+    if rep_side is not None:
+        r = dict(M.rep_rows[-1], finding="F9", before=m2, after=m3)
+        r[rep_side] = W_REL
+        M.rep_rows.append(r)
+        rewrite_repairs(M)
+    if malformed:
+        M.extra_dec = [f"not json: a launch of {W_REL}"]
+    if ungoverned:                       # every entry's Route: names no decisions row (linted with no decisions source)
+        for e in M.entries:
+            e["lines"] = [f"Route: ungoverned session={S['A']} host=fixture-host" if ln.startswith("Route:") else ln
+                          for ln in e["lines"]]
+    return M
+
+
 CASES = {
     "r1-positive": lambda: r1_base(),
     "r1-intermediate-reviewed": lambda: r1_base(intermediate_reviewed=True),
@@ -395,6 +457,24 @@ CASES = {
     "r5-later-non-dream-row": lambda: r5_later_row(skill="other"),
     "r5-first-round-review-none": lambda: r5_first_round(),
     "r5-first-round-keeps-none": lambda: r5_first_round(keep_none=True),
+    "r6-original": lambda: r6_base(token=False),
+    "r6-positive": lambda: r6_base(),
+    "r6-exists": lambda: r6_base(exists=True),
+    "r6-scoped": lambda: r6_base(scoped=True),
+    "r6-scoped-root": lambda: r6_base(scoped_root=True),
+    "r6-ungoverned": lambda: r6_base(ungoverned=True),
+    "r6-not-last": lambda: r6_base(where="middle"),
+    "r6-reordered": lambda: r6_base(reorder=True),
+    "r6-repairs-after": lambda: r6_base(rep_side="after"),
+    "r6-repairs-before": lambda: r6_base(rep_side="before"),
+    "r6-appended-later": lambda: r6_base(mid="appended"),
+    "r6-appended-later-original": lambda: r6_base(mid="appended", token=False),
+    "r6-after-w": lambda: r6_base(mid="after-w"),
+    "r6-later-entry": lambda: r6_base(mid="withdraws"),
+    "r6-malformed-row": lambda: r6_base(malformed=True),
+    "r6-no-scope": lambda: r6_base(no_scope=True),
+    "r6-still-listed": lambda: r6_base(still_listed=True),
+    "r6-not-listed": lambda: r6_base(token_value="notes/snapshots/mz/mz.sha256"),
 }
 for _k, _v in (("id", "F9"), ("class", "authority-bypass"), ("counterexample", "another counterexample"),
                ("correction", "another correction"), ("control", "another control")):
@@ -412,6 +492,9 @@ def main(argv):
     if not getattr(M, "no_resign", False):
         resign(M)
     M.write(argv[1])
+    if getattr(M, "extra_dec", None):        # Repair 6: decisions lines that are no JSON object
+        with open(os.path.join(argv[1], "decisions.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write("".join(x + "\n" for x in M.extra_dec))
     return 0
 
 

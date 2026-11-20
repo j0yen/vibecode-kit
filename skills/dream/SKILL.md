@@ -506,7 +506,7 @@ Analysis: wwhtbt=<ran <path> | reused <path> | skipped: <reason>> 5whys=<page <p
 Consumption: <record path>
 Review: <verdict file path> reviewer-session=<id> [result=<json path>]
 State: <slug>=<value> [<slug>=<value> ...]
-Mission: <name> edges=<path> [scope=<manifest>[,<manifest>...]] [repairs=<path>]
+Mission: <name> edges=<path> [scope=<manifest>[,<manifest>...]] [repairs=<path>] [withdrawn=<manifest>[,<manifest>...]]
 Open questions: <items>
 ```
 The six record lines, each on one line (`Mission:` only on a mission run):
@@ -525,7 +525,12 @@ The six record lines, each on one line (`Mission:` only on a mission run):
   `edges=`, `scope=` and `repairs=` tokens it omits, never names another edge map, and carries
   the line whenever its `State:` names a member of the mission (the live header's `prds`, the
   edges copy frozen beside every `scope=` manifest, and earlier entries' `State:` slugs). A
-  run without the line lints as before.
+  run without the line lints as before. A freeze named last in `scope=` before it is written,
+  and then never written, is dropped by a later entry's `withdrawn=<manifest>`: only when the
+  manifest does not exist, no launch row scopes it, it is the last element of the latest earlier
+  list that names it, no repairs row names it, and that entry's own `scope=` is the previous
+  entry's list without it, followed only by appended manifests. The token is never inherited,
+  and the earlier entries are left as written.
 - Paths are relative to the PRD home or absolute.
 
 **Consuming analysis findings.** On and after the cutover date written in the lint, a note

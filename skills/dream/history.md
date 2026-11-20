@@ -218,6 +218,14 @@ doubts a rule can see what it cost when it was missing. Append-only.
   `scope=` are unchanged, and it keeps the previous entry's `Review:` lines (`Review: none`
   counts as none) and adds at least one, each new line's session having as its latest launch row
   for the task a review of the last listed manifest (review r23 L2, L3).
+  A sixth followed (addendum 4). The 4:16:48 AM entry named the round-18 freeze 124000Z in
+  `scope=` before writing it, as the skill orders, and the freeze was then stopped on Hermes'
+  4:18 AM checkpoint, so the manifest was never written. The log is append-only: keeping the name
+  fails the continuity check, and dropping it fails the list comparison. A later entry may now
+  carry `withdrawn=<manifest>`, which drops the manifest from both checks. It applies only when
+  the file does not exist, no launch row scopes it, it is the last element of the latest earlier
+  list naming it, no repairs row names it, and the entry's own `scope=` is the previous list
+  without it, followed only by appended manifests. Any unmet condition keeps today's findings.
 - **Reading a review scope recorded on another host (2026-11-20, A1723).** A1113's nine
   chain reviews ran on Carbon, and their launch rows record `scope` under Carbon's PRD home
   (`/home/jsy/.cache/dream-a1113/prds-clone`). The continuation on RedBaron holds the same
