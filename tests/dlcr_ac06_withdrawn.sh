@@ -13,7 +13,12 @@
 # negatives: W named as before; a later freeze appended after W; a row scoping W under a --scope-root or through a
 # directory link; a decisions line that is no JSON object naming W; no decisions source; no scope= of its own; W still
 # listed; a manifest no earlier entry lists; W listed again after its withdrawal and dropped with no token. Over-strict control: the original stays refused (the log is append-only), and so does the earlier dropping
-# entry, linted itself, after the token; the installed rule (43d5b39) refuses the positive.
+# entry, linted itself, after the token; the installed rule (43d5b39) refuses the positive. Review r23d:
+# (e) reads the repairs file of every entry of the Task (M1: one named only by the earlier listing entry; V1: one named
+# only by an entry after the withdrawing one); a dangling link at W (V2) and an unreadable folder (L1) refuse; a
+# repeated item (V3); a later void token keeps an earlier applying withdrawal (V5); an unparsed line naming W in a form
+# other than the token's (V8); a row of any role (V9), a list-valued scope or any field naming W (L2) scopes it; a
+# row holding a NUL and a file where W's folder would be leave the token applying.
 set -uo pipefail
 # shellcheck source=tests/dlcr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dlcr_lib.sh"
@@ -51,9 +56,34 @@ cx r6-ungoverned; run_mr_ungov; has_fail mission-grammar "withdrawn=$WM" "no dec
 cx r6-no-scope; run_mr; has_fail mission-grammar "withdrawn=$WM" "carries no scope= of its own"
 cx r6-still-listed; run_mr; has_fail mission-grammar "withdrawn=$WM" "this entry's scope= still lists it"
 cx r6-not-listed; run_mr; has_fail mission-grammar "withdrawn=notes/snapshots/mz/mz.sha256" "no earlier entry of this Task lists it"
-for c in r6-scoped r6-not-last r6-reordered r6-after-w r6-malformed-row r6-not-listed; do
+cx r6-repairs-earlier; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
+has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl names it as after"
+cx r6-repairs-earlier-control; run_mr; findings_eq '["mission-edges-missing", "mission-grammar"]'
+cx r6-repairs-later; run_mr; withdrawn_is "[[\"$T1045\", [\"$WM\"], false]]"
+has_fail mission-edges-missing "continuity of entry 2026-11-18T10:30:00-08:00" "withdrawn= of entry $T1045 does not apply" \
+  "row 3 of notes/missions/new.repairs.jsonl names it as after"
+cx r6-dangling; run_mr; has_fail mission-grammar "withdrawn=$WM" "exists; only a manifest that was never written"
+if [ "$(id -u)" != 0 ]; then             # W written, its folder unreadable: it may exist (review r23d L1)
+  cx r6-exists; chmod 000 "$H/notes/snapshots/mw"; JS=$(lint --json 2>"$T/err"); RC=$?; chmod 755 "$H/notes/snapshots/mw"
+  ERR=$(cat "$T/err"); no_tb; has_fail mission-grammar "withdrawn=$WM" "cannot be checked (Permission denied), so it may exist"
+else
+  echo "note: run as root, so the unreadable-folder case (review r23d L1) is not run"
+fi
+cx r6-repeated; run_mr; has_fail mission-grammar "withdrawn=$WM,$WM" "a withdrawn= item repeats"
+cx r6-later-void; run_mr; findings_eq '["mission-grammar"]'; has_fail mission-grammar "mz.sha256: no earlier entry of this Task lists it"
+withdrawn_is "[[\"$T1045\", [\"$WM\"], true], [\"$T14\", [\"$WM\", \"notes/snapshots/mz/mz.sha256\"], false]]"
+cx r6-dot-token; run_mr; clean; withdrawn_is "[[\"$T14\", [\"./$WM\"], true]]"
+cx r6-dot-token-line; run_mr; has_fail mission-grammar "withdrawn=./$WM" "which is no JSON object, names it"
+cx r6-scoped-author; run_mr; has_fail mission-grammar "withdrawn=$WM" "role author) scopes it"
+cx r6-scoped-list; run_mr; has_fail mission-grammar "withdrawn=$WM" "role review) scopes it"
+cx r6-named-row; run_mr; has_fail mission-grammar "withdrawn=$WM" "names it in reasons"
+cx r6-named-nested; run_mr; has_fail mission-grammar "withdrawn=$WM" "names it in freeze"
+cx r6-nul-row; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"
+cx r6-parent-file; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"
+for c in r6-scoped r6-not-last r6-reordered r6-after-w r6-malformed-row r6-not-listed r6-repairs-earlier r6-dangling \
+         r6-scoped-author r6-scoped-list r6-named-row r6-named-nested r6-dot-token-line; do
   cx "$c"; run_mr; has_id mission-edges-missing; has_fail mission-grammar "never shortens or reorders"
   v=$(printf '%s' "$JS" | jget 'd["mission"]["withdrawn"][-1]["applies"]'); [ "$v" = false ] || fail "$c: the token applies"
 done
 today r6-positive; has_fail mission-grammar "withdrawn=$WM" "unknown token"; has_id mission-edges-missing
-pass "a planned freeze never written is withdrawn by the dropping entry, by an entry appended after it, and stays withdrawn for later entries; an existing, scoped (also under a --scope-root or on an unparsed decisions line), not-last, reordered, repairs-named, still-listed or unlisted manifest, no decisions source and no own scope= refused; the original and the earlier dropping entry stay refused; the installed rule refuses the positive"
+pass "a planned freeze never written is withdrawn by the dropping entry, by an entry appended after it, and stays withdrawn for later entries (a later void token keeps it); an existing (also a dangling link or behind an unreadable folder), scoped (any role, a list scope, any field, under a --scope-root, through a link or on an unparsed decisions line), not-last, reordered, repairs-named (by any entry's repairs file), repeated, still-listed or unlisted manifest, no decisions source and no own scope= refused; the original and the earlier dropping entry stay refused; the installed rule refuses the positive"

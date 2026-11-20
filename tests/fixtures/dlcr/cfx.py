@@ -363,7 +363,8 @@ def r6_mission(ln, scope, token=None, drop_scope=False):
 
 def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False, rep_side=None, mid=None,
             malformed=False, no_scope=False, still_listed=False, token_value=None, scoped_root=False, ungoverned=False,
-            scoped_link=False):
+            scoped_link=False, old_repairs=False, later_repairs=False, dangling=False, late_token=None,
+            scoped_list=False, named_row=False, nul_row=False, parent_file=False):
     """rounds(3)'s entry (14:00, m1 m2 m3) preceded by a pre-review entry at 10:30 whose scope= ends with the planned
     freeze W, never written (A1723's 4:16:48 AM entry and 124000Z); with token, the 14:00 entry carries withdrawn=W (the
     4:40:26 AM entry as the rule reads it). where: W is "last" or in the "middle" of the 10:30 list; exists: W is
@@ -375,7 +376,13 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
     row scopes W at its absolute path under the recorded root ROOT6 (the test maps ROOT6 onto the home by --scope-root);
     ungoverned: every Route: line is `Route: ungoverned`, for a lint with no decisions source; scoped_link: a review
     launch row scopes W through a directory link; mid "relisted": the 10:45 entry withdraws W (m1 m2) and a 10:50 entry
-    lists it again, last (m1 m2 W), so the 14:00 entry drops it with no token."""
+    lists it again, last (m1 m2 W), so the 14:00 entry drops it with no token. Review r23d: old_repairs: the 10:30 entry
+    names repairs=notes/missions/old.repairs.jsonl, whose row 3 names W as after (M1); later_repairs: the 14:00 entry
+    names repairs=notes/missions/new.repairs.jsonl, whose row 3 names W as after (V1, with mid "withdraws");
+    dangling: a symlink to a missing file sits at W (V2); late_token: the 14:00 entry carries withdrawn=late_token
+    even after mid "withdraws" (V5); scoped: True for a review row, or the role of the row scoping W (V9);
+    scoped_list: a review row's scope is the list [W] (L2); named_row: a launch row with no role names W in reasons
+    ("nested": in a nested field); nul_row: a row's reasons hold a NUL; parent_file: W's folder is a file."""
     M = rounds(3)
     post = M.entries[-1]
     m1, m2, m3 = (m["rel"] for m in M.mans_decl)
@@ -393,13 +400,38 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
             M.entries.insert(len(M.entries) - 1, {"ts": at(10, 50), "lines": [r6_mission(ln, [m1, m2, W_REL])
                                                                              if ln.startswith("Mission:") else ln for ln in pre]})
         token = token and mid not in ("withdraws", "relisted")
+    if late_token is not None:
+        token, token_value = True, late_token
     scope = [m2, m1, m3] if reorder else [m1, m2, W_REL, m3] if still_listed else [m1, m2, m3]
     post["lines"] = [r6_mission(ln, scope, (token_value or W_REL) if token else None, drop_scope=no_scope)
                      if ln.startswith("Mission:") else ln for ln in post["lines"]]
     if exists:
         M.manifest(W_REL, dict(M.mans_decl[1]["members"]))
     if scoped:
-        M.row(at(10, 20), OTHER, role="review", scope=W_REL, sid="0" * 64)
+        M.row(at(10, 20), OTHER, role="review" if scoped is True else scoped, scope=W_REL, sid="0" * 64)
+    if scoped_list:                      # written after resign (which reads string scopes only): scope is the list [W]
+        r = M.row(at(10, 20), OTHER, role="review", scope=W_REL, sid="0" * 64)
+        M.rows.remove(r)
+        M.extra_dec = [json.dumps(dict(r, scope=[W_REL]))]
+    if named_row == "nested":
+        M.row(at(10, 20), OTHER, plan={"freeze": W_REL})
+    elif named_row:
+        M.row(at(10, 20), OTHER, reasons=W_REL)
+    if nul_row:
+        M.row(at(10, 20), OTHER, reasons="a\u0000b")
+    if parent_file:                      # nothing can be at W: its folder notes/snapshots/mw is a file
+        M.files[os.path.dirname(W_REL)] = "a file where W's folder would be\n"
+    for flag, at_entry, rel in ((old_repairs, pre, "notes/missions/old.repairs.jsonl"),
+                                (later_repairs, None, "notes/missions/new.repairs.jsonl")):
+        if flag:                         # another repairs file, named by one entry only, whose row 3 names W as after
+            rows = copy.deepcopy(M.rep_rows[:2]) + [dict(M.rep_rows[-1], finding="F9", before=m2, after=W_REL)]
+            M.files[rel] = repairs_text(rows)
+            lines = at_entry if at_entry is not None else post["lines"]
+            lines[:] = [ln.replace(f" repairs={M.rep_rel}", f" repairs={rel}") if ln.startswith("Mission:") else ln
+                        for ln in lines]
+            assert any(f" repairs={rel}" in ln for ln in lines), "no repairs= token to replace"
+    if dangling:
+        M.links = [(W_REL, "absent-target.sha256")]
     if scoped_root:
         M.row(at(10, 20), OTHER, role="review", scope=f"{ROOT6}/{W_REL}", sid="0" * 64)
     if scoped_link:                      # the row names W through notes/snaplink, a directory link to notes/snapshots
@@ -486,6 +518,20 @@ CASES = {
     "r6-no-scope": lambda: r6_base(no_scope=True),
     "r6-still-listed": lambda: r6_base(still_listed=True),
     "r6-not-listed": lambda: r6_base(token_value="notes/snapshots/mz/mz.sha256"),
+    "r6-repairs-earlier": lambda: r6_base(old_repairs=True),
+    "r6-repairs-earlier-control": lambda: r6_base(old_repairs=True, token=False),
+    "r6-repairs-later": lambda: r6_base(mid="withdraws", later_repairs=True),
+    "r6-dangling": lambda: r6_base(dangling=True),
+    "r6-repeated": lambda: r6_base(token_value=f"{W_REL},{W_REL}"),
+    "r6-later-void": lambda: r6_base(mid="withdraws", late_token=f"{W_REL},notes/snapshots/mz/mz.sha256"),
+    "r6-dot-token-line": lambda: r6_base(token_value=f"./{W_REL}", malformed=True),
+    "r6-dot-token": lambda: r6_base(token_value=f"./{W_REL}"),
+    "r6-scoped-author": lambda: r6_base(scoped="author"),
+    "r6-scoped-list": lambda: r6_base(scoped_list=True),
+    "r6-named-row": lambda: r6_base(named_row=True),
+    "r6-named-nested": lambda: r6_base(named_row="nested"),
+    "r6-nul-row": lambda: r6_base(nul_row=True),
+    "r6-parent-file": lambda: r6_base(parent_file=True),
 }
 for _k, _v in (("id", "F9"), ("class", "authority-bypass"), ("counterexample", "another counterexample"),
                ("correction", "another correction"), ("control", "another control")):
@@ -506,7 +552,8 @@ def main(argv):
     if getattr(M, "extra_dec", None):        # Repair 6: decisions lines that are no JSON object
         with open(os.path.join(argv[1], "decisions.jsonl"), "a", encoding="utf-8") as fh:
             fh.write("".join(x + "\n" for x in M.extra_dec))
-    for link, target in getattr(M, "links", []):   # Repair 6: directory links inside the PRD home
+    for link, target in getattr(M, "links", []):   # Repair 6: links inside the PRD home (a directory, or a dangling W)
+        os.makedirs(os.path.dirname(os.path.join(argv[1], "home", link)), exist_ok=True)
         os.symlink(target, os.path.join(argv[1], "home", link))
     return 0
 

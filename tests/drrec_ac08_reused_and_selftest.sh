@@ -24,7 +24,8 @@ js=$(lint --json 2>/dev/null); expect_exact "$?" 1 "$js" analysis-provenance-mis
 # review log on this host, where present, before and after). The host's decisions log
 # is shared: every launcher appends to it, so it may grow while the selftest runs
 # (review r23c); it must only have been appended to, by no line of the selftest (its
-# temp dirs are drrec-selftest-*, its HOME is under $T).
+# temp dirs are drrec-selftest-*, its HOME is under $T, its rows carry reasons "selftest",
+# account "lane-x" and fixture session ids; review r23d L4).
 REALHOME=$(getent passwd "$(id -un)" | cut -d: -f6)
 RDEC="$REALHOME/.local/state/skill-routing/decisions.jsonl"
 snap() { for f in "$REALHOME/Documents/PRDs/notes/dream-log.md" "$REALHOME/.local/state/dream/review-log.jsonl"; do
@@ -35,14 +36,15 @@ after=$(snap)
 [ "$rc" = 0 ] || fail "selftest rc=$rc: $(printf '%s\n' "$st" | grep -v '^PASS' | head -20)"
 [ "$before" = "$after" ] || fail "real files changed: $before / $after"
 why=$(python3 -I - "$T/rdec.before" "$RDEC" "$T" <<'PY'
-import os, sys
+import os, re, sys
 b = open(sys.argv[1], "rb").read()
 a = open(sys.argv[2], "rb").read() if os.path.exists(sys.argv[2]) else b""
 if not a.startswith(b):
     print("rewritten, not appended to")
 else:
+    mark = re.compile(r'"reasons":\s*"selftest"|"account":\s*"lane-x"|"[0-9a-f]{8}-0000-4000-8000-0{10}[0-9a-f]{2}"')   # review r23d L4
     for ln in a[len(b):].decode("utf-8", "replace").splitlines():
-        if "drrec-selftest-" in ln or sys.argv[3] in ln:
+        if "drrec-selftest-" in ln or sys.argv[3] in ln or mark.search(ln):
             print("an appended line is the selftest's: " + ln[:200])
             break
 PY

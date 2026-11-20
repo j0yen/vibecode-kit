@@ -110,10 +110,11 @@
 #
 # Withdrawn freeze (Repair 6, the PRD author's addendum 4): withdrawn=<manifest>[,...] on a Mission: line drops a
 # planned freeze that was never written from the continuity check of every earlier entry that lists it and from this
-# entry's list comparison, when (a) its file does not exist, (b) no row of the decisions source scopes it (a line that
-# is no JSON object and names it, or no decisions source, counts as one), (c) it is the last element of the scope=
-# list of the latest earlier entry that lists it, (d) this entry's own scope= does not list it and is the previous
-# entry's list without it followed only by appended manifests, and (e) no repairs row names it as before or after.
+# entry's list comparison, when (a) nothing is at its path (a dangling link is something; a path that cannot be checked
+# may hold it), (b) no line of the decisions source scopes or names it (in a JSON row, any string value that resolves to
+# it; no decisions source counts as one), (c) it is the last element of the scope= list of the latest earlier entry that
+# lists it, (d) this entry's own scope= does not list it and is the previous entry's list without it followed only by
+# appended manifests, and (e) no row of a repairs file any entry of the Task names names it as before or after.
 # The token is the entry's own (never inherited) and applies whole: any unmet condition is mission-grammar ((e):
 # repair-scope-mismatch) and the rules apply unchanged. The JSON's mission.withdrawn lists each token of the Task.
 #
@@ -843,35 +844,50 @@ def path_keys(full):
 
 
 def withdrawn_scoped(w, resolve, dec):
-    """Repair 6 (b): why a launch row of the decisions source may have scoped manifest w, or None. Every row is read,
-    whatever its task, role or session: its `scope` as written and, for an absolute scope under a --scope-root, as
-    mapped. A decisions line that is no JSON object and names w (as written, resolved or relative to the PRD home)
-    counts as scoping it; with no decisions source read, nothing rules a row out."""
+    """Repair 6 (b): why a line of the decisions source may have scoped manifest w, or None. Every line is read,
+    whatever its task, role or session. In a JSON row, every string value (its scope, a list's items, any other field)
+    is compared as a path: as written, and for an absolute path under a --scope-root also as mapped; one that resolves
+    to w counts (review r23d L2). A line that is no JSON object counts when it names w as written, resolved or relative
+    to the PRD home. With no decisions source read, nothing rules a row out."""
     if dec is None:
         return "no decisions source was read, so a launch row scoping it cannot be ruled out"
     full = resolve(w)
     wk = path_keys(full)
     sr = getattr(resolve, "scope_roots", None)
-    for r in dec["rows"]:
-        s = r.get("scope")
-        if not isinstance(s, str) or not s.strip():
-            continue
-        forms = [resolve(s)]
-        if sr is not None and os.path.isabs(s):
-            n = os.path.normpath(s)
-            forms += [os.path.join(local, n[len(root) + 1:]) for root, local in sr.pairs if n.startswith(root + os.sep)]
-        if any(path_keys(f) & wk for f in forms):
-            return (f"the decisions row of session {r.get('session')} at {r.get('ts')} (role {r.get('role')}) scopes it, "
-                    "so it may have been reviewed")
-    names = {w, full, os.path.normpath(full), os.path.relpath(os.path.normpath(full), resolve("."))}
+    names = {w, full, os.path.relpath(os.path.normpath(full), resolve("."))} | wk
+
+    def is_w(v):
+        if not v.strip() or "\0" in v:
+            return False
+        forms = [resolve(v)]
+        if sr is not None and os.path.isabs(v):
+            m = os.path.normpath(v)
+            forms += [os.path.join(local, m[len(root) + 1:]) for root, local in sr.pairs if m.startswith(root + os.sep)]
+        return any(path_keys(f) & wk for f in forms)
+
+    def strings(v, key):
+        if isinstance(v, str):
+            yield key, v
+        elif isinstance(v, list):
+            for x in v:
+                yield from strings(x, key)
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                yield from strings(x, k)
     for n, ln in enumerate(read_text(dec["path"]).splitlines(), 1):
         if not ln.strip():
             continue
         try:
-            ok = isinstance(json.loads(ln), dict)
+            r = json.loads(ln)
         except ValueError:
-            ok = False
-        if not ok and any(x in ln for x in names):
+            r = None
+        if isinstance(r, dict):
+            for k, v in strings(r, None):
+                if is_w(v):
+                    how = "scopes it" if k == "scope" else f"names it in {k}"
+                    return (f"decisions line {n} (session {r.get('session')}, role {r.get('role')}) {how}, "
+                            "so it may have been reviewed")
+        elif any(x in ln for x in names):
             return f"decisions line {n}, which is no JSON object, names it, so a launch row scoping it cannot be ruled out"
     return None
 
@@ -880,11 +896,12 @@ def withdrawn_check(p, seq, resolve, dec):
     """Repair 6 (the PRD author's addendum 4): [(manifest, finding id, why)] for the withdrawn= token of seq[p], one
     item per unmet condition ([] when the token applies). seq is the same-Task entries carrying a Mission: line, in
     log order, the linted entry last; each item has ts, eff (tokens carried or inherited), own_scope (the line's own
-    scope= or None) and withdrawn. A manifest may be withdrawn when (a) its file does not exist; (b) no launch row of
-    the decisions source scopes it; (c) it is the last element of the scope= list of the latest earlier entry that
+    scope= or None) and withdrawn. A manifest may be withdrawn when (a) its file does not exist (nothing, not even a
+    dangling link, is at its path); (b) no line of the decisions source scopes or names it; (c) it is the last element of the scope= list of the latest earlier entry that
     lists it (only a planned freeze can be withdrawn); (d) this entry carries its own scope=, which does not list it
     and is the previous entry's list without the withdrawn manifests followed only by appended manifests; and (e) no
-    row of a repairs file named from that earlier entry on names it as before or after. A token applies only whole."""
+    row of a repairs file any entry of the Task names, up to the linted one, names it as before or after (review r23d M1).
+    A token applies only whole."""
     x, ws = seq[p], seq[p]["withdrawn"]
     tok = ",".join(ws)
 
@@ -895,13 +912,18 @@ def withdrawn_check(p, seq, resolve, dec):
         return (y["eff"].get("scope") or ([], None))[0]
     bad = []
     reps = []
-    for y in seq[p:]:
+    for y in seq:
         rp = (y["eff"].get("repairs") or (None, None))[0]
         if rp and rp not in reps:
             reps.append(rp)
     for w in ws:
-        if os.path.lexists(resolve(w)):
+        try:
+            os.lstat(resolve(w))
             bad.append((w, "mission-grammar", f"{resolve(w)} exists; only a manifest that was never written is withdrawn"))
+        except (FileNotFoundError, NotADirectoryError):
+            pass                                 # (a): only a path that is not there is absent (review r23d L1)
+        except OSError as e:
+            bad.append((w, "mission-grammar", f"{resolve(w)} cannot be checked ({e.strerror}), so it may exist"))
         why = withdrawn_scoped(w, resolve, dec)
         if why:
             bad.append((w, "mission-grammar", why))

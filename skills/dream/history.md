@@ -223,9 +223,10 @@ doubts a rule can see what it cost when it was missing. Append-only.
   4:18 AM checkpoint, so the manifest was never written. The log is append-only: keeping the name
   fails the continuity check, and dropping it fails the list comparison. A later entry may now
   carry `withdrawn=<manifest>`, which drops the manifest from both checks. It applies only when
-  the file does not exist, no launch row scopes it, it is the last element of the latest earlier
-  list naming it, no repairs row names it, and the entry's own `scope=` is the previous list
-  without it, followed only by appended manifests. Any unmet condition keeps today's findings.
+  nothing is at its path, no line of the decisions source scopes or names it, it is the last
+  element of the latest earlier list naming it, no row of any repairs file the Task names names
+  it, and the entry's own `scope=` is the previous list without it, followed only by appended
+  manifests. Any unmet condition keeps today's findings.
 - **Reading a review scope recorded on another host (2026-11-20, A1723).** A1113's nine
   chain reviews ran on Carbon, and their launch rows record `scope` under Carbon's PRD home
   (`/home/jsy/.cache/dream-a1113/prds-clone`). The continuation on RedBaron holds the same

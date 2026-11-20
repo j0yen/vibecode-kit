@@ -11,7 +11,7 @@ set -uo pipefail
 cases ac02
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; mkdir -p "$T/fakehome" "$T/cwd"; base_lint "$T/base.sh"
 uncov=(ac02-uncovered-free-text ac02-uncovered-no-failure-line)
-mapfile -t -O 2 uncov < <(python3 -I -c 'import importlib.util,sys; s=importlib.util.spec_from_file_location("d",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); [print(n) for n in m.CASES if n.startswith("ac02-r2-") and "-uncovered" in n]' "$DFX")
+mapfile -t -O 2 uncov < <(python3 -I -B -c 'import importlib.util,sys; s=importlib.util.spec_from_file_location("d",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); [print(n) for n in m.CASES if n.startswith("ac02-r2-") and "-uncovered" in n]' "$DFX")
 [ "${#uncov[@]}" -ge 18 ] || fail "only ${#uncov[@]} uncovered cases found for the 43d5b39 comparison"
 for c in "${uncov[@]}"; do
   python3 -I "$DFX" "$c" "$T/$c" || fail "fixture $c did not build"

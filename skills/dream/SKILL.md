@@ -526,11 +526,12 @@ The six record lines, each on one line (`Mission:` only on a mission run):
   the line whenever its `State:` names a member of the mission (the live header's `prds`, the
   edges copy frozen beside every `scope=` manifest, and earlier entries' `State:` slugs). A
   run without the line lints as before. A freeze named last in `scope=` before it is written,
-  and then never written, is dropped by a later entry's `withdrawn=<manifest>`: only when the
-  manifest does not exist, no launch row scopes it, it is the last element of the latest earlier
-  list that names it, no repairs row names it, and that entry's own `scope=` is the previous
-  entry's list without it, followed only by appended manifests. The token is never inherited,
-  and the earlier entries are left as written.
+  and then never written, is dropped by a later entry's `withdrawn=<manifest>`: only when
+  nothing is at the manifest's path, no line of the decisions source scopes or names it, it is
+  the last element of the latest earlier list that names it, no row of any repairs file the
+  Task's entries name names it, and that entry's own `scope=` is the previous entry's list
+  without it, followed only by appended manifests. The token is never inherited, and the
+  earlier entries are left as written.
 - Paths are relative to the PRD home or absolute.
 
 **Consuming analysis findings.** On and after the cutover date written in the lint, a note
