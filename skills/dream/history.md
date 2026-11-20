@@ -166,16 +166,19 @@ doubts a rule can see what it cost when it was missing. Append-only.
   frozen before the edges header carried `matrix`, lists the one matrix its first entry named
   while the entry first listing it named a later one. Two rules of PRD
   dream-generation-aware-mission-records are built. R1: a legacy-header manifest first listed
-  before `LEGACY_MATRIX_SINCE` = 2026-11-18T06:05:00-08:00 keeps the one matrix it lists when
+  before `LEGACY_MATRIX_SINCE` = 2026-11-18T06:04:49-08:00 keeps the one matrix it lists when
   an entry names it in `adversarial=` or its copy passes the matrix grammar at its listed
-  digest. That instant is the installation of the per-manifest matrix lint (vibecode-kit
-  43d5b39), the first time an edges header could carry `matrix`; it falls before every fixture
+  digest. That instant is the commit instant of the per-manifest matrix lint (vibecode-kit
+  43d5b39), from which an edges header could carry `matrix`; it falls before every fixture
   the trigger-record cutover re-dated onto 2026-11-18, so those families keep their side of it. R4: an entry a manifest lists by a path outside the directories of the
   manifests compared is keyed by that path, a row names it by path with a `delta` record
   checked against both manifests, a legacy row's ambiguous bare basename is listed in
   `repairs.ambiguous`, and header members, the repairs file among them, stay basename-keyed in
   every pass, so a row without `delta` may name one by path (the repairs ledger cannot carry
-  its own digest in a record). Re-linted with these rules, the A1724 home's 28,250 hash
+  its own digest in a record). In the undeclared-change pass an entry in either compared
+  manifest's directory is keyed by its basename, and one manifest listing one key at two
+  digests, or two files of one basename, one in each directory of a compared pair, is
+  `mission-scope-mismatch` (the PRD author's Q1 and Q2 rulings on A1723 source request 4). Re-linted with these rules, the A1724 home's 28,250 hash
   findings and its GEN1 `mission-scope-incomplete` clear, and two amended rows' unswept edges
   show as `sweep-missing`. R2 (sidecar schema), R3 (generation-local judgement and merged chain
   reviews), R5 (lineage) and the rest of R8 are not built.

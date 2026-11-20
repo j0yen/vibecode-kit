@@ -32,6 +32,7 @@ OLD_DAY = "2026-11-17"          # before LEGACY_MATRIX_SINCE
 DEEP = "notes/snapshots/deep/m2/m2.sha256"
 M2 = "notes/snapshots/m2/m2.sha256"
 DATA = [f"data/g{i}/graph.json" for i in range(1, 6)]
+M1DIR, M2DIR = "notes/snapshots/m1", os.path.dirname(DEEP)
 
 
 def rel_from(manifest_rel, target_rel):
@@ -206,6 +207,16 @@ def declare(M, rows=None, moved=(1, 3)):
     return r
 
 
+def _pick(pred):
+    """aux.json bytes (Y at m1, Y moved, X) whose digests stand in the order pred(Y, Y moved, X) asks."""
+    for i in range(10000):
+        y1, y2, x1 = (f'{{"y": 1, "n": {i}}}\n'.encode(), f'{{"y": 2, "n": {i}}}\n'.encode(),
+                      f'{{"x": 1, "n": {i}}}\n'.encode())
+        if pred(sha(y1), sha(y2), sha(x1)):
+            return y1, y2, x1
+    raise SystemExit("gfx.py: no aux.json bytes in the asked digest order")
+
+
 def c_paths(variant):
     def f():
         M = paths_base(last_verdict="FIX" if variant in ("amended-held", "amended-unswept-held") else "APPROVE",
@@ -213,7 +224,8 @@ def c_paths(variant):
         r = M.rep_rows[0]
         if variant in ("ok", "wrong-pair", "no-record", "delta-bare", "added-removed", "added-wrong", "changed-added",
                        "member-twice", "repairs-twice", "a1724-rows", "a1724-rows-wrong", "cross-dir-declared",
-                       "record-spelling", "member-path-unmoved") or variant.startswith("amended"):
+                       "record-spelling", "member-path-unmoved", "twin-hide", "twin-show", "twin-apart") \
+                or variant.startswith("amended"):
             declare(M)
         if variant == "wrong-pair":
             r["delta"]["changed"][1]["after"] = sha(b"not the after bytes\n")
@@ -260,6 +272,22 @@ def c_paths(variant):
             if variant == "cross-dir-declared":
                 r["changed"] = r["changed"] + [pa]
                 r["delta"]["changed"].append({"path": pa, "before": sha(a1), "after": sha(a2)})
+        elif variant in ("twin-hide", "twin-show"):     # Q1 (request 4): aux.json twice, Y beside m1 and X beside m2;
+            y1, y2, x1 = _pick((lambda a, b, c: c < a and c < b) if variant == "twin-hide"     # m1 lists Y bare and
+                               else (lambda a, b, c: c > a and c > b))     # X by path, m2 X bare and Y by path; Y moves,
+            M.m1["extra"] += [f"{sha(y1)}  aux.json", f"{sha(x1)}  {rel_from(M.m1['rel'], M2DIR + '/aux.json')}"]
+            M.m2["extra"] += [f"{sha(x1)}  aux.json", f"{sha(y2)}  {rel_from(DEEP, M1DIR + '/aux.json')}"]
+            M.files[M1DIR + "/aux.json"], M.files[M2DIR + "/aux.json"] = y2, x1     # undeclared (hide: X smallest)
+        elif variant == "twin-apart":   # over-strict control: Y beside m1, X beside m2, one basename, each manifest
+            y1 = _pick(lambda a, b, c: True)[0]      # lists only its own file (the frozen-copy shape), same bytes
+            M.m1["extra"].append(f"{sha(y1)}  aux.json")
+            M.m2["extra"].append(f"{sha(y1)}  aux.json")
+            M.files[M1DIR + "/aux.json"] = M.files[M2DIR + "/aux.json"] = y1
+        elif variant in ("dupkey-hide", "dupkey-show"):  # Q1: m2 lists g2 twice, at its bytes and (spelled with ./)
+            p = rel_from(DEEP, DATA[1]).replace("/g2/", "/./g2/")    # at m1's digest, the smaller (hide), or at a
+            dg = sha(M.v1[DATA[1]]) if variant == "dupkey-hide" else sha(b"g2 listed again\n")   # larger one (show);
+            assert (dg < sha(M.v2[DATA[1]])) == (variant == "dupkey-hide")                   # g2 and g4 move undeclared
+            M.m2["extra"].append(f"{dg}  {p}")
         elif variant == "record-spelling":      # g4's record names the same path spelled with ./
             r["delta"]["changed"][1]["path"] = r["delta"]["changed"][1]["path"].replace("/g4/", "/./g4/")
         elif variant == "member-path-unmoved":  # a row without delta names PRD-bar.md (unmoved) by path
@@ -306,7 +334,8 @@ CASES = {
 for _v in ("plain", "ok", "wrong-pair", "no-record", "legacy-bare", "legacy-path", "delta-bare", "added-removed", "added-wrong",
            "changed-added", "member-twice", "repairs-twice", "a1724-rows", "a1724-rows-wrong", "amended-unswept",
            "amended-unswept-held", "amended-swept", "amended-held", "amended-legacy-path", "member-path-unmoved",
-           "cross-dir-undeclared", "cross-dir-declared", "record-spelling"):
+           "cross-dir-undeclared", "cross-dir-declared", "record-spelling", "twin-hide", "twin-show", "twin-apart",
+           "dupkey-hide", "dupkey-show"):
     CASES["paths-" + _v] = c_paths(_v)
 
 

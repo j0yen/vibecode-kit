@@ -418,7 +418,9 @@ normalized): a row names it by path, `changed` and `added` relative to the `afte
 directory and `removed` relative to the `before` manifest's, with a `delta` record `{changed:
 [{path, before, after}], added: [{path, sha256}], removed: [{path, sha256}]}` whose digests
 equal the two manifests' (a `changed` path whose record sits under `delta.added` is served by
-it). A row without `delta` is a legacy row: its bare basenames keep the basename rule, and a
+it). In the undeclared-change pass, an entry in either compared manifest's directory is keyed by
+its basename. One manifest listing one key at two digests, or two files of one basename, one in
+each directory of a compared pair, is `mission-scope-mismatch`. A row without `delta` is a legacy row: its bare basenames keep the basename rule, and a
 basename that several entries of one manifest hold is listed in the JSON's `repairs.ambiguous`,
 never failed; a row with `delta` names such a file by path. A header member (a `prds`, `packet`
 or `contract` file, the matrix, the edges file, and the repairs file) is keyed by its basename

@@ -175,8 +175,9 @@ SCOPE_LINE_RE = re.compile(rb"[0-9a-f]{64}  [^\s]+")
 PRD_BASENAME_RE = re.compile(rb"PRD-[a-z0-9-]+\.md")
 PRD_DIRS = ("build-queue", "built-prds", "parked")
 PAGE_LINES = 40
-# PRD-dream-analysis-trigger-record (A1723) R7: R1-R5 apply to entries whose header date is on or after this cutover, the merge date written here when the
-# change lands (one ISO date, never a counter; shared with PRD-dream-finding-consumption). Earlier entries lint byte for byte as at 43d5b39.
+# PRD-dream-analysis-trigger-record (A1723) R7: R1-R5 apply to entries whose header timestamp is at or after the cutover instant, this date's midnight
+# at -08:00 (after_cutover), the merge date written here when the change lands (one ISO date, never a counter; shared with
+# PRD-dream-finding-consumption). Earlier entries lint byte for byte as at 43d5b39.
 TRIGGER_CUTOVER = "2026-11-20"
 FAILURE_CLASSES = ("recurring-failure", "failed-acceptance", "consequential-obstacle", "transient", "other")
 TRIGGER_CLASSES = ("recurring-failure", "failed-acceptance", "consequential-obstacle")
@@ -285,6 +286,22 @@ def split_keys(m, members, dirs=()):
         else:
             pk.setdefault(key, dg)
     return bk, pk
+
+
+def key_collisions(m, members, dirs=()):
+    """R4 collisions (Q1 ruling, A1723 request 4): ({key: [digests]} for one resolved key a manifest lists
+    at two or more digests, {basename: [(key, digest)]} for one basename a manifest lists for two files,
+    one in each directory of a compared pair (dirs)). Header members are left to their occurs-twice rule.
+    Either is mission-scope-mismatch; a pair compares neither (the name does not name one file)."""
+    mdirs = {os.path.normpath(os.path.dirname(m["full"]))} | set(dirs)
+    by_key, by_base = {}, {}
+    for raw, key, base, dg in m.get("entries") or []:
+        by_key.setdefault(key, set()).add(dg)
+        if base not in members and ("/" not in raw or os.path.dirname(key) in mdirs):
+            by_base.setdefault(base, {}).setdefault(key, set()).add(dg)
+    two = {k: sorted(v) for k, v in by_key.items() if len(v) > 1}
+    twins = {b: sorted((k, d) for k, ds in ks.items() for d in ds) for b, ks in by_base.items() if len(ks) > 1}
+    return two, twins
 
 
 def entry_date(e):
@@ -835,9 +852,10 @@ FINDINGS_LINE_RE = re.compile(r"^findings=(none|[0-9a-f]{64})\s*$")
 # the launch time. Set by the installing commit (A1723), the way KINDS is versioned.
 SIDECAR_BINDING_SINCE = "2026-11-16T20:00:00-08:00"
 # PRD-dream-generation-aware-mission-records R1: a legacy-header manifest first listed before this
-# instant may keep the one matrix it lists. A fixed instant no earlier than the rule's installation,
-# set by the installing commit (as SIDECAR_BINDING_SINCE was) and recorded in history.md.
-LEGACY_MATRIX_SINCE = "2026-11-18T06:05:00-08:00"
+# instant may keep the one matrix it lists. The commit instant of the per-manifest matrix lint,
+# PRD-dream-matrix-per-manifest's landing (vibecode-kit 43d5b39), from which an edges header could
+# carry `matrix` (Q4 ruling, A1723 request 5); recorded in history.md.
+LEGACY_MATRIX_SINCE = "2026-11-18T06:04:49-08:00"
 LEGACY_MATRIX_RULE = "the one matrix this legacy manifest lists, first listed before LEGACY_MATRIX_SINCE"
 MISSION_IDS = ("mission-grammar", "mission-edges-missing", "edge-grammar", "edge-unexplained",
                "edge-unknown-unowned", "edge-node-unlisted", "mission-prd-unlisted",
@@ -1051,6 +1069,26 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
                 lint_matrix(sub, cp, cp, sl)
                 for fid, d in sub.findings:
                     once(fid, f"manifest {m['path']}: {d}")
+    # generation-aware R4 (Q1): one key at two digests in one manifest, or one manifest listing a
+    # basename for a file in each directory of a compared pair, is mission-scope-mismatch
+    for k, m in enumerate(mans):
+        if m["id"] is None:
+            continue
+        mdir = os.path.dirname(m["full"])
+        for key, ds in sorted(key_collisions(m, m.get("members", set()))[0].items()):
+            once("mission-scope-mismatch", f"manifest {m['path']}: {os.path.relpath(key, mdir)} is listed at "
+                                           f"{len(ds)} digests ({', '.join(ds)}); one key names one file")
+        if k + 1 < len(mans) and mans[k + 1]["id"] is not None:
+            o = mans[k + 1]
+            mem = m.get("members", set()) | o.get("members", set())
+            pdirs = {os.path.normpath(os.path.dirname(m["full"])), os.path.normpath(os.path.dirname(o["full"]))}
+            for x, y in ((m, o), (o, m)):
+                xdir = os.path.dirname(x["full"])
+                for b, kd in sorted(key_collisions(x, mem, pdirs)[1].items()):
+                    once("mission-scope-mismatch", f"manifest {x['path']}: {b} is listed for two files, one in each "
+                                                   f"directory of the pair with {y['path']}: "
+                                                   f"{' and '.join(f'{os.path.relpath(kk, xdir)} at {d}' for kk, d in kd)}; "
+                                                   "an entry there is keyed by its basename")
     ids = [m["id"] for m in mans]
     # R2: binding, line order against manifest index, launch order within one index
     if not chain and governed and task is not None:
@@ -1734,6 +1772,10 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         pdirs = {os.path.normpath(os.path.dirname(a["full"])), bdir}
         ab, ap = split_keys(a, mem, pdirs)
         bb, bp = split_keys(b, mem, pdirs)
+        (a2, at2), (b2, bt2) = key_collisions(a, mem, pdirs), key_collisions(b, mem, pdirs)
+        cold = set(at2) | set(bt2) | {os.path.basename(x) for x in set(a2) | set(b2)
+                                      if os.path.dirname(x) in pdirs or os.path.basename(x) in mem}
+        colk = set(a2) | set(b2)
         decl, decl_m, decl_p, legacy_bare = set(), set(), set(), set()
         for x in recs:
             if x["bi"] == k and x["ai"] == k + 1:
@@ -1749,10 +1791,10 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                         if x["delta"] is None:      # a legacy row's bare name declares every path of it
                             legacy_bare.add(c)
         mxr = {a.get("matrix"), b.get("matrix")} - {None} if a.get("matrix") != b.get("matrix") else set()
-        for nm in sorted(set(ab) & set(bb)):
+        for nm in sorted(set(ab) & set(bb) - cold):
             if nm != rbase and nm not in mxr and ab[nm] != bb[nm] and nm not in decl and not (nm in mem and nm in decl_m):
                 L.fail("repair-hash-mismatch", f"{nm}: changed but undeclared between {a['path']} and {b['path']}")
-        for key in sorted(set(ap) & set(bp)):
+        for key in sorted(set(ap) & set(bp) - colk):
             if ap[key] != bp[key] and key not in decl_p and os.path.basename(key) not in legacy_bare:
                 L.fail("repair-hash-mismatch", f"{os.path.relpath(key, bdir)}: changed but undeclared between "
                                                f"{a['path']} and {b['path']}")
@@ -2156,8 +2198,9 @@ def first_lines(path, n=PAGE_LINES):
 
 
 # ---------------------------------------------------------------- trigger record (PRD-dream-analysis-trigger-record, A1723)
-# Applies to entries whose header date is on or after TRIGGER_CUTOVER (R7). A covered entry (R1) records a WWHTBT it ran, an exact reuse (R3) or a skip
-# bound to a recorded route denial (R2), and a typed Failure: line (R4) whose trigger classes need a bound 5whysandrhyme page (R5).
+# Applies to entries whose header timestamp is at or after the cutover instant (R7, after_cutover). A covered entry (R1) records a WWHTBT it ran, an
+# exact reuse (R3) or a skip bound to a recorded route denial (R2), and a typed Failure: line (R4) whose trigger classes need a bound 5whysandrhyme
+# page (R5).
 def header_date(ts):
     """R7: the ISO date (YYYY-MM-DD, zero-padded) an entry header starts with, or None when it starts with no valid such date followed by the end, `T` or
     a space (such a header counts as after the cutover; targeted review abb2e978 H1)."""
@@ -2168,6 +2211,19 @@ def header_date(ts):
         return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
     except ValueError:
         return None
+
+
+def after_cutover(ts, row_ts=False):
+    """R7 (A1723 source request 4, Q3): a header timestamp, or a bound Route row's `ts` (row_ts), is at or after the cutover instant,
+    `<TRIGGER_CUTOVER>T00:00:00-08:00`. One carrying an offset (any zone, `Z` included) is compared as an instant, so one instant written in two
+    zones falls on one side; one without a readable offset keeps the date-text comparison (a header with no readable leading date counts as after)."""
+    t = parse_iso(ts) if isinstance(ts, str) else None
+    if t is not None:
+        return t >= parse_iso(TRIGGER_CUTOVER + "T00:00:00-08:00")
+    if row_ts:
+        return str(ts)[:10] >= TRIGGER_CUTOVER
+    d = header_date(ts)
+    return d is None or d >= TRIGGER_CUTOVER
 
 
 def entry_seed_tokens(e):
@@ -2538,12 +2594,11 @@ CONS_PRD_RE = re.compile(r"PRD-[A-Za-z0-9._-]+\.md")
 
 
 def entry_post(ts, route, rows):
-    """R9 (trigger-record R7): an entry is under R1-R7 when its header date is on or after TRIGGER_CUTOVER (a header with no readable leading date
-    counts as after), or its Route: binds a dream launch row on or after it. One cutover date, shared by both PRDs."""
-    hdate = header_date(ts)
-    return (hdate is None or hdate >= TRIGGER_CUTOVER
+    """R9 (trigger-record R7): an entry is under R1-R7 when its header timestamp is at or after the cutover instant (after_cutover; a header with no
+    readable leading date counts as after), or its Route: binds a dream launch row whose `ts` is. One cutover, shared by both PRDs."""
+    return (after_cutover(ts)
             or bool(route and route.get("decision") and any(r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("session") == route["session"]
-                                                          and r.get("ts") == route["decision"] and str(r.get("ts"))[:10] >= TRIGGER_CUTOVER for r in rows or [])))
+                                                          and r.get("ts") == route["decision"] and after_cutover(r.get("ts"), row_ts=True) for r in rows or [])))
 
 
 def entry_route(e):
@@ -2936,9 +2991,10 @@ def lint_log(a):
 
     # Analysis
     an = {"wwhtbt": None, "fivewhys": None, "adversarial": None}
-    # trigger-record R7: the header date, which the author writes, or the launcher's own date: a header with no readable leading date, or a Route: bound
-    # to a dream launch row on or after the cutover, puts the entry under R1-R5 too (security review ddf46516 finding 5). Real headers carry sloppy
-    # times ('2026-09-13T16:2xZ', '2026-09-29T14:55', '2026-11-12'): only the date is read, so every earlier entry keeps 43d5b39's output.
+    # trigger-record R7: the header timestamp, which the author writes, or the launcher's own: a header with no readable leading date, or a Route: bound
+    # to a dream launch row at or after the cutover, puts the entry under R1-R5 too (security review ddf46516 finding 5). A timestamp with an offset
+    # is compared as an instant (after_cutover); real headers carry sloppy times ('2026-09-13T16:2xZ', '2026-09-29T14:55', '2026-11-12'), for which
+    # only the date is read, so every earlier entry keeps 43d5b39's output.
     post = entry_post(entry["ts"], route, rows)
     failure_lines = [ln.rstrip() for ln in entry["lines"] if ln.startswith("Failure:")] if post else []
     if "Analysis" in lines:
@@ -4276,7 +4332,7 @@ class Fx:
             line = self.cons_line or None
         elif self.cons_rows is not None:
             line = "Consumption: " + self.CONS_REL
-        elif not self.consume or not (header_date(self.ts) is None or header_date(self.ts) >= TRIGGER_CUTOVER):
+        elif not self.consume or not after_cutover(self.ts):
             return None
         else:
             line = None
@@ -5019,6 +5075,27 @@ def selftest():
     passes("datr-trigger-reuse-cited", fx)
     refuse("datr-transient-page", tfx(f="page visions/5whys.md", failure="Failure: transient run:retry-1"), "analysis-trigger-unmet", ("transient",))
     passes("datr-transient-inline", tfx(f="inline", failure="Failure: transient run:retry-1"))
+    # R7's cutover instant (Q3 of A1723 source request 4; AC 7's datr-cutover-zone twin): one instant written in two zones (-08:00 and Z; after the
+    # cutover also -10:00, whose date text is the day before), in the header and in a bound Route row's ts, just before and just after the cutover,
+    # gets one result per side: a free-text WWHTBT skip is kept before (43d5b39's output, no R6 fields) and refused after (R2)
+    prev = (datetime.date.fromisoformat(TRIGGER_CUTOVER) - datetime.timedelta(days=1)).isoformat()
+    zone = {"-08:00": "pst", "-10:00": "hst", "Z": "utc"}
+    for side, stamps in (("before", (prev + "T23:59:59-08:00", TRIGGER_CUTOVER + "T07:59:59Z")),
+                         ("after", (TRIGGER_CUTOVER + "T00:00:00-08:00", TRIGGER_CUTOVER + "T08:00:00Z", prev + "T22:00:00-10:00"))):
+        for where in ("header", "route"):
+            for ts in stamps:
+                fx = tfx(w="skipped: a wiki page would be outside this task's scope")
+                if where == "header":
+                    fx.ts = ts
+                else:                                   # a header before the cutover in every reading, its Route bound to a launch row at ts
+                    fx.ts = prev + "T23:00:00-08:00"
+                    fx.entry["Route"] = f"Route: fable-xhigh claude-fable-5-1 xhigh session={S_D} decision={ts}"
+                    fx.rows.append(row(ts, "launch", "A1", "dream", "fable-xhigh", "claude-fable-5-1", "xhigh", S_D))
+                name = f"datr-cutover-zone-{where}-{side}-{zone['Z' if ts.endswith('Z') else ts[-6:]]}"
+                if side == "before":
+                    passes(name, fx, lambda d: expect(d["analysis"] is not None and "covered" not in d["analysis"], d["analysis"]))
+                else:
+                    refuse(name, fx, "analysis-skip-refused", ("is not 'skipped: blocked decision=<ts>'",))
 
     # ---------- finding consumption (PRD-dream-finding-consumption AC 7): one dfcn-<case> line per R1-R8 refusal, each with its exact finding-id set,
     # and passing twins. The authoring cases lint a covered entry on the cutover (R9) binding visions/wwhtbt.md (falsifier plus one SPEC mechanism);

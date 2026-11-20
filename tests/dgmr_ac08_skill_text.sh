@@ -3,7 +3,8 @@
 # legacy-matrix rule (its constant, how an entry is dated, the one listed matrix kept when named or
 # passing --matrix at its digest, the fallback) in the Adversarial pass paragraph and the repair
 # row's paths, `delta`, the ambiguous listing and the repairs file as a basename-keyed header member
-# in the failure-class paragraph; history.md has one entry naming dream-generation-aware-mission-
+# in the failure-class paragraph, with the undeclared-change pass's directories and the collision rule
+# (Q1 and Q2 rulings, A1723 request 4); history.md has one entry naming dream-generation-aware-mission-
 # records whose LEGACY_MATRIX_SINCE value is the lint's; notes that follow the text lint clean, ones
 # that break it get the named finding; the drift test exits 0. Not built here: R8's `lineage` (R5),
 # the generation each entry judges (R3) and `sidecar=` (R2) items, and AC8's `Review: none` entry
@@ -28,7 +29,9 @@ for s in 'is keyed by that path' '`changed` and `added` relative to the `after` 
   '`removed` relative to the `before` manifest'"'"'s' '`delta` record `{changed: [{path, before, after}], added: [{path, sha256}], removed: [{path, sha256}]}`' \
   'sits under `delta.added` is served by it' 'A row without `delta` is a legacy row' '`repairs.ambiguous`, never failed' \
   'a row with `delta` names such a file by path' 'the edges file, and the repairs file) is keyed by its basename in every pass' \
-  'a row without `delta` that names one by path is checked by its basename'; do
+  'a row without `delta` that names one by path is checked by its basename' \
+  'In the undeclared-change pass, an entry in either compared manifest'"'"'s directory is keyed by its basename' \
+  'One manifest listing one key at two digests, or two files of one basename, one in each directory of a compared pair, is `mission-scope-mismatch`'; do
   case "$rep" in *"$s"*) ;; *) fail "Phase 3 failure-class paragraph lacks '$s'";; esac
 done
 e=$(awk '/^- \*\*/{n++} n{print n "\t" $0}' "$REPO/skills/dream/history.md" | awk -F'\t' '{a[$1]=a[$1] " " $2} END{for(k in a) print a[k]}' | grep -F 'dream-generation-aware-mission-records')
@@ -40,5 +43,6 @@ setup_mx
 for c in legacy-one-before paths-ok; do gx "$c"; run_mr; clean; done
 gx legacy-two-before; run_mr; has_fail mission-scope-incomplete "manifest notes/snapshots/m1/m1.sha256:" "lists no $(gmxb $OLD_DAY 13)"
 gx paths-delta-bare; run_mr; findings_eq '["repair-grammar"]'
+gx paths-twin-hide; run_mr; findings_eq '["mission-scope-mismatch"]'
 out=$(bash "$REPO/tests/dream_analysis_skills_ref.sh" 2>&1) || fail "dream_analysis_skills_ref.sh: $out"
 pass "Phase 3 legacy-matrix and path-key rules; history records the constant; text-following notes clean; violations named; drift test"
