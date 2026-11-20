@@ -22,6 +22,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.dont_write_bytecode = True       # no __pycache__ beside mfx.py: datr_h1_redate compares tests/fixtures/drmx byte for byte
 _spec = importlib.util.spec_from_file_location("dgmr_mfx", os.path.join(HERE, "..", "drmx", "mfx.py"))
 mfx = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mfx)
