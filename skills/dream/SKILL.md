@@ -195,7 +195,9 @@ snapshot launches as an author, which the lint refuses on a `Review:` line. Keep
 manifest until the run note is linted. A review row written on another host records that
 host's absolute `scope`. The case-11 gate reads it on this host only through the lint's
 `--scope-root <recorded root>=<PRD home>`, taken from the delivered decisions source that
-names the root, and every content check still applies.
+names the root, and every content check still applies. A recorded root of `/` (or only
+slashes), or one that holds or lies inside this run's PRD home, by the path given or its real
+path, is refused.
 
 **Mission trace and edge map (before decomposition).** When a run drafts a mission (several
 PRDs over one shared chain), write `notes/missions/<name>.edges.jsonl` under the PRD home
@@ -327,9 +329,10 @@ discriminating control and one failure class of `provenance`, `missing-producer-
 `false-green-acceptance`, written as one row of `<verdict file>.findings.jsonl`, numbered
 from the note's next free id and never re-using an id from an earlier sidecar. A sidecar is
 never rewritten: only the review's own session, resumed (a launch row with role review, its
-`scope_id` and `resume`), may write `<verdict file>.findings.corrected-<n>.jsonl`, whose first
-row is `{"corrects": <the sidecar's sha256>, "session": <that session>}` and whose other rows
-are the sidecar's, in order, changing only `prds` and `consumers`. The lint reads it for the
+`scope_id` and `resume`, later than that session's first such launch row that is not a
+resume), may write `<verdict file>.findings.corrected-<n>.jsonl`, whose first row is
+`{"corrects": <the sidecar's sha256>, "session": <that session>}` and whose other rows are
+the sidecar's, in order, changing only `prds` and `consumers`, with no key repeated in a row. The lint reads it for the
 finding grammar and the repairs rows, keeps the original's failures in the JSON's
 `findings_historical`, and refuses any other correction as `sidecar-correction-unbound`. The final
 message ends with one `findings=<sha256 of the sidecar, or none>` line, the per-PRD verdict

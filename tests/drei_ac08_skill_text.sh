@@ -17,18 +17,18 @@ para=$(printf '%s' "$p2" | grep -o 'Mission trace and edge map (before decomposi
 # shellcheck disable=SC2016
 for s in 'notes/missions/<name>.edges.jsonl' outcome invariants prds external producer consumer command trigger authority \
   effect_id recovery_owner postcondition '`known`' '`external`' '`unknown`' owner contract 'not completion'; do
-  printf '%s' "$para" | grep -qF -- "$s" || fail "Phase 2 edge-map paragraph lacks '$s'"
+  grep -qF -- "$s" <<<"$para" || fail "Phase 2 edge-map paragraph lacks '$s'"
 done
 tpl=$(section '## Phase 4 — Persist' | awk '/^```/{n++; next} n==1')
 printf '%s\n' "$tpl" | grep -A1 '^State:' | grep -q '^Mission: ' || fail "Phase 4 template: no Mission: line right after State:"
 p4=$(section '## Phase 4 — Persist' | tr '\n' ' ' | tr -s ' ')
-printf '%s' "$p4" | grep -qF 'The six record lines' || fail "Phase 4: the record-lines paragraph does not say six"
+grep -qF 'The six record lines' <<<"$p4" || fail "Phase 4: the record-lines paragraph does not say six"
 # shellcheck disable=SC2016  # literal backticks of the skill text
-printf '%s' "$p4" | grep -qF 'one `Mission:` name and one edge map' || fail "Phase 4: no continuity rule (one Mission: name and one edge map)"
+grep -qF 'one `Mission:` name and one edge map' <<<"$p4" || fail "Phase 4: no continuity rule (one Mission: name and one edge map)"
 hdr=$(sed -n '1,80p' "$LINT")
 for id in mission-grammar mission-edges-missing edge-grammar edge-unexplained edge-unknown-unowned edge-node-unlisted mission-prd-unlisted; do
-  printf '%s' "$hdr" | grep -q -- "$id" || fail "lint header finding-id list lacks $id"
-  printf '%s' "$p4" | grep -qF -- "$id" || fail "Phase 4 lint step does not name $id"
+  grep -q -- "$id" <<<"$hdr" || fail "lint header finding-id list lacks $id"
+  grep -qF -- "$id" <<<"$p4" || fail "Phase 4 lint step does not name $id"
 done
 for s in R3B3-01 R3B3-02; do grep -q "$s" "$REPO/skills/dream/history.md" || fail "history.md lacks $s"; done
 bash "$REPO/tests/dream_analysis_skills_ref.sh" >"$T_OUT" 2>&1 || fail "dream_analysis_skills_ref.sh: $(tail -3 "$T_OUT")"

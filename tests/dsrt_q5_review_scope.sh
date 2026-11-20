@@ -97,6 +97,9 @@ jt 'd["scope_roots"]["reads"] == [{"scope": "'"$XR/notes/../$SNAP"'", "read": "'
 # negative 3: exit 2
 usage2 other-home "not this run's PRD home" "$LOG" --last --prd-dir "$H" --decisions "$DEC" --scope-root "$XR=$T"
 usage2 slash-root "absolute directory below /" "$LOG" --last --prd-dir "$H" --decisions "$DEC" --scope-root "/=$H"
+usage2 double-slash-root "absolute directory below /" "$LOG" --last --prd-dir "$H" --decisions "$DEC" --scope-root "//=$H"   # review r22 L2
+mkdir -p "$TP/lex"; ln -s "$RH" "$TP/lex/home"   # review r22 L1: this run's home given through a link inside the root
+usage2 root-holds-linked-home "hold one another" "$TP/lex/home/${LOG#"$H"/}" --last --prd-dir "$TP/lex/home" --decisions "$DEC" --scope-root "$TP/lex=$TP/lex/home"
 usage2 relative-root "absolute directory below /" "$LOG" --last --prd-dir "$H" --decisions "$DEC" --scope-root "carbon/prds-clone=$H"
 usage2 no-equals "one '='" "$LOG" --last --prd-dir "$H" --decisions "$DEC" --scope-root "$XR"
 usage2 two-equals "one '='" "$LOG" --last --prd-dir "$H" --decisions "$DEC" --scope-root "$XR=$H=x"
@@ -110,4 +113,4 @@ usage2 scope-id-mode "nothing else" --scope-id "$H/$SNAP" --scope-root "$XR=$H"
 usage2 edges-mode "--edges takes" --edges "$H/$SNAP" --scope-root "$XR=$H"
 usage2 matrix-mode "--matrix and --states" --matrix "$H/$SNAP" --states a=linted --scope-root "$XR=$H"
 usage2 consumption-mode "--consumption" --consumption "$H/$SNAP" --task RS-ROWS --scope-root "$XR=$H"
-pass "Q5 review scope: positive (two spellings, .. under the root), literal-path over-strict, differing manifest, no recorded root (three ways), exit 2 (15 ways), unchanged without the option"
+pass "Q5 review scope: positive (two spellings, .. under the root), literal-path over-strict, differing manifest, no recorded root (three ways), exit 2 (17 ways), unchanged without the option"

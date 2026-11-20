@@ -200,6 +200,12 @@ doubts a rule can see what it cost when it was missing. Append-only.
   `consolidates` earlier ones of its pair, judged for duplicates in their place with theirs kept
   in `repairs_historical` (`repair-consolidation-mismatch` otherwise). Each falls back to the
   existing finding when its conditions fail, and no recorded row or sidecar is rewritten.
+  Review r21 then executed two gaps in the correction rule. A review session whose only launch
+  row was itself marked `resume`, or whose resume row was stamped before its review launch, had
+  its correction read, though nothing showed a resumption after the review. And a corrected row
+  repeating a key compared equal as parsed, while a first-wins reader saw the other value. The
+  resume row must now be later than the session's first review launch that is not a resume, and
+  a repeated key is refused.
 - **Reading a review scope recorded on another host (2026-11-20, A1723).** A1113's nine
   chain reviews ran on Carbon, and their launch rows record `scope` under Carbon's PRD home
   (`/home/jsy/.cache/dream-a1113/prds-clone`). The continuation on RedBaron holds the same
@@ -212,4 +218,7 @@ doubts a rule can see what it cost when it was missing. Append-only.
   root is read at the same relative path under the local home. Both paths are recorded, in
   `scope_roots` and the review's `scope_read`. Every content check stands, and the sweep and
   pin checks take a mapped read only when it canonicalizes to the row's `scope_id`. A scope
-  under no recorded root is read as before.
+  under no recorded root is read as before. Review r22 found the containment check reading
+  only the home's real path (a home given through a link gave a false refusal) and a root of
+  `//` accepted; both halves now check the home as given and its real path, and refuse a root
+  that is only slashes.

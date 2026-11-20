@@ -129,6 +129,33 @@ def corrected(M, session=None, corrects=None, change=None, resume_row=True):
     return M
 
 
+def r2_resume_only_row():
+    """review r21 L1: r1's only review launch row is itself the resume row; nothing shows a resumption after it."""
+    M = corrected(r2_base(), resume_row=False)
+    r = [x for x in M.rows if x.get("session") == S["R1"] and x.get("role") == "review"]
+    assert len(r) == 1
+    r[0]["resume"] = True
+    return M
+
+
+def r2_resume_before():
+    """review r21 L1: the only resume row of r1's session is stamped before r1's review launch."""
+    M = corrected(r2_base(), resume_row=False)
+    m1 = M.mans_decl[0]
+    M.row(at(9, 30), S["R1"], role="review", scope=m1["rel"], sid=M.sid(m1), resume=True)
+    return M
+
+
+def r2_dupkey():
+    """review r21 L2: the corrected row repeats "class"; a parsed row keeps the last (the original's) value."""
+    M = corrected(r2_base())
+    lines = M.files[CORR_REL].decode().split("\n")
+    assert lines[1].startswith("{")
+    lines[1] = '{"class": "authority-bypass", ' + lines[1][1:]
+    M.files[CORR_REL] = "\n".join(lines).encode()
+    return M
+
+
 # ---------------------------------------------------------------- Repair 3
 def r3_base(consolidate=True, **kw):
     """rounds(3) plus amended rows 3-5 of (m1, m2): 3 names foo and the edge map, 4 foo, 5 the edge map (rows 3/4 and
@@ -192,6 +219,9 @@ CASES = {
     "r2-other-reviewer": lambda: corrected(r2_base(), session=S["R2"], resume_row=False),
     "r2-no-resume-row": lambda: corrected(r2_base(), resume_row=False),
     "r2-wrong-digest": lambda: corrected(r2_base(), corrects=hashlib.sha256(b"other sidecar bytes\n").hexdigest()),
+    "r2-resume-only-row": r2_resume_only_row,
+    "r2-resume-before": r2_resume_before,
+    "r2-dupkey": r2_dupkey,
     "r3-original": lambda: r3_base(consolidate=False),
     "r3-positive": lambda: r3_base(),
     "r3-other-pair": r3_other_pair,

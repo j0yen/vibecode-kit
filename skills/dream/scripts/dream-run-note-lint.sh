@@ -290,14 +290,15 @@ def scope_roots(vals, home):
         if v.count("=") != 1:
             usage(f"--scope-root {v!r}: not <recorded root>=<this run's PRD home> (one '=')")
         root, local = v.split("=")
-        if not os.path.isabs(root) or os.path.normpath(root) == "/":
+        if not os.path.isabs(root) or os.path.normpath(root).strip("/") == "":
             usage(f"--scope-root {v!r}: the recorded root is not an absolute directory below /")
         if not local or os.path.realpath(local) != os.path.realpath(home):
             usage(f"--scope-root {v!r}: maps onto {local!r}, not this run's PRD home {home}")
         root, hp = os.path.normpath(root), os.path.realpath(home)
-        if root != hp and (hp.startswith(root + os.sep) or root.startswith(hp + os.sep)):
-            usage(f"--scope-root {v!r}: the recorded root {root} and this run's PRD home {hp} hold one another, so a "
-                  "scope written on this host would be read at another path")
+        for h in sorted({hp, os.path.abspath(home)}):      # the home as given and its real path (review r22 L1)
+            if root != h and (h.startswith(root + os.sep) or root.startswith(h + os.sep)):
+                usage(f"--scope-root {v!r}: the recorded root {root} and this run's PRD home {h} hold one another, so a "
+                      "scope written on this host would be read at another path")
         for r0, _ in pairs:
             if r0 == root or r0.startswith(root + os.sep) or root.startswith(r0 + os.sep):
                 usage(f"--scope-root {v!r}: the recorded root {root} overlaps {r0}")
@@ -1141,11 +1142,34 @@ def sc_rows(c, rows_sc, sc, prset, exts, ids_seen, fail, live):
 CORRECTED_RE = re.compile(r"\.findings\.corrected-([1-9][0-9]*)\.jsonl$")
 
 
+def dup_keys(data):
+    """[(line number, key)] for each key repeated inside one JSON object of a JSONL file, at any depth (review r21 L2: a
+    parsed row keeps the last of two equal keys, so value equality would pass a byte change a first-wins reader sees)."""
+    out = []
+    for n, ln in enumerate(data.decode("utf-8", "replace").split("\n"), 1):
+        if not ln.strip():
+            continue
+
+        def hook(pairs, n=n):
+            seen = set()
+            for k, _ in pairs:
+                if k in seen:
+                    out.append((n, k))
+                seen.add(k)
+            return dict(pairs)
+        try:
+            json.loads(ln, object_pairs_hook=hook)
+        except ValueError:
+            pass
+    return out
+
+
 def corrected_sidecar(L, c, f, full, sbytes, rows_sc, rows, task):
     """Producer-contract Repair 2 (A1723 decision 3): <verdict>.findings.corrected-<n>.jsonl beside the sidecar. Its first
     row is {"corrects": <the original sidecar's sha256>, "session": <the chain review's session>}, written by that session
-    resumed (a launch row of the task with skill dream, role review, the review's scope_id and resume true); its other
-    rows are the original's, in order, each changing only prds and consumers. Each refused file is
+    resumed (a launch row of the task with skill dream, role review, the review's scope_id and resume true, later than that
+    session's first such row without resume; review r21 L1); its other rows are the original's, in order, each changing
+    only prds and consumers, with no key repeated in any row (review r21 L2). Each refused file is
     sidecar-correction-unbound. -> (shown path, rows) of the highest valid n, or None."""
     d, base = os.path.dirname(full), os.path.basename(full)
     try:
@@ -1160,11 +1184,16 @@ def corrected_sidecar(L, c, f, full, sbytes, rows_sc, rows, task):
         shown = os.path.join(os.path.dirname(f), nm) if os.path.dirname(f) else nm
         try:
             with open(os.path.join(d, nm), "rb") as fh:
-                got = sidecar_rows(fh.read())
+                raw = fh.read()
+            got = sidecar_rows(raw)
         except OSError as e:
             L.fail("sidecar-correction-unbound", f"{shown}: unreadable ({e.strerror or type(e).__name__})")
             continue
         why = []
+        dups = dup_keys(raw)
+        if dups:
+            why.append("a key repeated in one row (" + ", ".join(f"row {n}: {k}" for n, k in dups) + "): rows are "
+                       "compared as parsed, so a repeated key could hide a byte change")
         head = got[0][1] if got else None
         if not (isinstance(head, dict) and set(head) == {"corrects", "session"}):
             why.append("its first row is not {\"corrects\": <sha256>, \"session\": <session>}")
@@ -1173,10 +1202,19 @@ def corrected_sidecar(L, c, f, full, sbytes, rows_sc, rows, task):
                 why.append(f"corrects {head['corrects']!r} is not the original sidecar's sha256 {orig_sha}")
             if head["session"] != sess:
                 why.append(f"written by session {head['session']!r}, not the chain review's own session {sess}")
-            elif not any(r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("task_id") == task
-                         and r.get("session") == sess and r.get("role") == "review" and r.get("scope_id") == sid
-                         and r.get("resume") is True for r in rows):
-                why.append(f"no launch row resumes session {sess} with role review and scope_id {sid}")
+            else:
+                mine = [r for r in rows if r.get("decision") == "launch" and r.get("skill") == "dream"
+                        and r.get("task_id") == task and r.get("session") == sess and r.get("role") == "review"
+                        and r.get("scope_id") == sid]
+                first = [t for t in (parse_iso(r.get("ts")) for r in mine if r.get("resume") is not True) if t]
+                if not any(r.get("resume") is True for r in mine):
+                    why.append(f"no launch row resumes session {sess} with role review and scope_id {sid}")
+                elif not first:
+                    why.append(f"session {sess} has no review launch row with scope_id {sid} that is not a resume, so "
+                               "no row shows a resumption after the review")
+                elif not any(r.get("resume") is True and (parse_iso(r.get("ts")) or min(first)) > min(first) for r in mine):
+                    why.append(f"no launch row resuming session {sess} is later than its review launch at "
+                               f"{min(first).isoformat()}")
         body = got[1:]
         if len(body) != len(rows_sc):
             why.append(f"{len(body)} finding rows, the original has {len(rows_sc)}")
