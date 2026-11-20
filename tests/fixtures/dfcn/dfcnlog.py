@@ -261,13 +261,18 @@ case("ac04-an-earlier-finding-still-on-the-page-is-not-lifted-by-a-partial-recor
                                                     prd="PRD-x.md"))),
                 setattr(fx, "cons_rows", fx.cons_rows + [test_fal(fx, PG2, "n-fal"), mech(fx, 2, PG2, "n-m2")]),
                 fx)[-1])
-# review r15 L2: an entry whose Task: line cannot be read holds every State: slug (no earlier record of its Task can be checked); the route row's
-# task_id A1 then differs from the note's (none), route-provenance-mismatch
+# review r15 L2: a Task: line short of the full grammar (line-missing; the route row's task_id A1 then differs from the note's, route-provenance-mismatch)
+# still names the Task its earlier records are read by, as entry_task reads every earlier entry; a line naming no Task holds every State: slug
+def task_line(line):
+    return lambda fx: (earlier(fx, rows=old_rows(fx, crow("e-m1", "mechanism:1", "residual", PG2, owner="ctl", evidence=["ledger:A1"],
+                                                          accepted_by="rv-nobody", prd="PRD-x.md"))),
+                       fx.entry.__setitem__("Task", line), fx)[-1]
+
+
+case("ac04-a-task-line-short-of-the-grammar-keeps-its-earlier-holds", 1, ["consumption-blocked", "line-missing", "route-provenance-mismatch"], ["x"],
+     f"held by entry {PREV_TS}: row e-m1")(task_line("Task: A1 Consumer:hermes"))
 case("ac04-an-unreadable-task-line-holds-every-slug", 1, ["consumption-blocked", "line-missing", "route-provenance-mismatch"], ["x", "y"],
-     "the entry's Task: line cannot be read")(
-    lambda fx: (earlier(fx, rows=old_rows(fx, crow("e-m1", "mechanism:1", "residual", PG2, owner="ctl", evidence=["ledger:A1"], accepted_by="rv-nobody",
-                                                    prd="PRD-x.md"))),
-                fx.entry.__setitem__("Task", "Task: A1 Consumer:hermes"), fx)[-1])
+     "the entry's Task: line cannot be read")(task_line("Task:A1   Consumer: hermes"))
 
 
 def wwhtbt_skip(fx):

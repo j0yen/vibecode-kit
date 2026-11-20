@@ -2515,6 +2515,9 @@ def cons_log(L, entries, ei, cur, rows, dec_path, home, resolve):
     readings. Earlier entries' records are read apart (their refusals are not this entry's findings); only their holds reach this entry.
     -> the `consumption` JSON block."""
     task = cur["task"]
+    if task is None:                     # review r15 L2: a Task: line short of the full grammar still names the Task earlier records are read by
+        task = entry_task(entries[ei])   # (entry_task, as for every earlier entry); line-missing reports the grammar
+        cur = dict(cur, task=task)
     pages = cons_entry_pages(cur["an"])
     got = cons_read_entry(L, cur, rows, dec_path, home)
     path, obj, st = got if got else (None, None, None)
@@ -2552,8 +2555,8 @@ def cons_log(L, entries, ei, cur, rows, dec_path, home, resolve):
     for it in cons_items(cur, st, home):                                                                                       # R7
         for s in cons_hold(it, cur, home):
             held.setdefault(s, []).append(cons_item_text(it))
-    if task is None and any(ln.startswith("Task:") for ln in entries[ei]["lines"]):      # review r15 L2: an unreadable Task: line hides earlier records
-        for s in cur["states"]:
+    if task is None and any(ln.startswith("Task:") for ln in entries[ei]["lines"]):      # review r15 L2: no Task can be read, so none of its earlier
+        for s in cur["states"]:                                                                 # records can be checked: every State: slug is held
             held.setdefault(s, []).append("the entry's Task: line cannot be read, so no earlier record of its Task can be checked")
     for slug, vals in cur["states"].items():
         if "eligible" in vals and slug in held:
