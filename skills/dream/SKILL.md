@@ -322,7 +322,13 @@ asks for a counterexample, the affected consumers, the minimal correction, a
 discriminating control and one failure class of `provenance`, `missing-producer-runner`,
 `authority-bypass`, `unreachable-transition`, `semantic-incompatibility`,
 `false-green-acceptance`, written as one row of `<verdict file>.findings.jsonl`, numbered
-from the note's next free id and never re-using an id from an earlier sidecar. The final
+from the note's next free id and never re-using an id from an earlier sidecar. A sidecar is
+never rewritten: only the review's own session, resumed (a launch row with role review, its
+`scope_id` and `resume`), may write `<verdict file>.findings.corrected-<n>.jsonl`, whose first
+row is `{"corrects": <the sidecar's sha256>, "session": <that session>}` and whose other rows
+are the sidecar's, in order, changing only `prds` and `consumers`. The lint reads it for the
+finding grammar and the repairs rows, keeps the original's failures in the JSON's
+`findings_historical`, and refuses any other correction as `sidecar-correction-unbound`. The final
 message ends with one `findings=<sha256 of the sidecar, or none>` line, the per-PRD verdict
 lines and one `mission=<APPROVE|FIX|REJECT> <session>` line verbatim, and the `result=`
 capture carries those same lines. The run note's `Mission:` line gains `scope=` (the
@@ -412,7 +418,14 @@ of this run's author lineage (an author launch row under the `Task:`). Compare e
 contract and every affected consumer against the actual `before` and `after` hashes: `before`
 and `after` are consecutive `scope=` manifests, every basename that moved between two listed
 manifests is in some row's `changed`, and every consumer of a changed producer appears at its
-`after` digest in a later review's manifest. A file a manifest lists by a relative path outside
+`after` digest in a later review's manifest. A repaired row's `before` may also be a listed
+manifest later than its issuing review's when no chain review is bound to a manifest after
+that review's, up to `before`, and each of those is the `after` of some repairs row (a partial
+repair frozen without a review). A later `amended` row may carry `consolidates: [<row numbers>]`
+naming earlier `amended` rows of its pair by the same author: its `changed` and `sweep` are
+their union, no row is consolidated twice, and the duplicate check judges it in their place,
+keeping their duplicates in the JSON's `repairs_historical`; anything else is
+`repair-consolidation-mismatch`. A file a manifest lists by a relative path outside
 its own directory is keyed by that path (resolved against the manifest's directory and
 normalized): a row names it by path, `changed` and `added` relative to the `after` manifest's
 directory and `removed` relative to the `before` manifest's, with a `delta` record `{changed:
@@ -549,13 +562,15 @@ After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md
 `mission-edges-missing`, `edge-grammar`, `edge-unexplained`, `edge-unknown-unowned`,
 `edge-node-unlisted` and `mission-prd-unlisted`, and one whose line carries `scope=` for
 `mission-scope-mismatch`, `mission-scope-incomplete`, `mission-review-missing`,
-`mission-verdict-missing`, `mission-finding-incomplete`, `mission-snapshot-stale` and
+`mission-verdict-missing`, `mission-finding-incomplete`, `sidecar-correction-unbound`,
+`mission-snapshot-stale` and
 `mission-approval-blocked` (the last also without `scope=`, for a member reaching
 `eligible`), and for its repairs (`repairs=`, or a finding followed by a later chain review,
 or a digest moving between two listed manifests) for `repair-grammar`,
 `mission-repairs-missing`, `repair-duplicate`, `repair-missing`, `repair-class-mismatch`,
 `sweep-missing`, `repair-author-mismatch`, `repair-hash-mismatch`, `repair-scope-mismatch`,
-`affected-consumer-unreviewed` and `repair-declined-unaccepted`. A note on or after the cutover
+`affected-consumer-unreviewed`, `repair-declined-unaccepted` and
+`repair-consolidation-mismatch`. A note on or after the cutover
 is also checked for `consumption-missing`, `consumption-grammar`, `consumption-binding-invalid`,
 `consumption-binding-not-discriminating`, `consumption-repair-unbound`,
 `consumption-repair-unproven`, `consumption-residual-unaccepted`, `consumption-pending-overdue`,

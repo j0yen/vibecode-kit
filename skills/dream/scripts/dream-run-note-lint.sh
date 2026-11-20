@@ -59,7 +59,8 @@
 #   mission-approval-blocked
 #   repair-grammar mission-repairs-missing repair-duplicate repair-missing repair-class-mismatch
 #   sweep-missing repair-author-mismatch repair-hash-mismatch repair-scope-mismatch
-#   affected-consumer-unreviewed repair-declined-unaccepted
+#   affected-consumer-unreviewed repair-declined-unaccepted repair-consolidation-mismatch
+#   sidecar-correction-unbound
 #
 # Mission (PRD-dream-mission-edge-map): opt-in. A Mission: line names the mission's edge map
 # (notes/missions/<name>.edges.jsonl: a header {mission, outcome, invariants, prds, external,
@@ -860,7 +861,7 @@ LEGACY_MATRIX_RULE = "the one matrix this legacy manifest lists, first listed be
 MISSION_IDS = ("mission-grammar", "mission-edges-missing", "edge-grammar", "edge-unexplained",
                "edge-unknown-unowned", "edge-node-unlisted", "mission-prd-unlisted",
                "mission-scope-mismatch", "mission-scope-incomplete", "mission-review-missing",
-               "mission-verdict-missing", "mission-finding-incomplete", "mission-snapshot-stale",
+               "mission-verdict-missing", "mission-finding-incomplete", "mission-snapshot-stale", "sidecar-correction-unbound",
                "mission-approval-blocked")
 
 
@@ -973,6 +974,137 @@ def header_contracts(hd):
                 if isinstance(y, str) and y.strip():
                     out.append((x.get("name"), y))
     return out
+
+
+def sidecar_rows(data):
+    """A findings sidecar's rows: [(line number, JSON value or None)] for each non-blank line."""
+    out = []
+    for n, ln in enumerate(data.decode("utf-8", "replace").split("\n"), 1):
+        if ln.strip():
+            try:
+                out.append((n, json.loads(ln)))
+            except ValueError:
+                out.append((n, None))
+    return out
+
+
+def sc_rows(c, rows_sc, sc, prset, exts, ids_seen, fail, live):
+    """Chain-review R4 on one sidecar's rows: each failure goes to fail(id, detail). `live` reads the rows as the
+    review's findings (ids_seen, named, findings, advisory); a historical pass (Repair 2's original) only records."""
+    mine = set()
+    for n, r in rows_sc:
+        def bad(field, why, n=n):
+            fail("mission-finding-incomplete", f"{sc}: row {n}: field {field}: {why}")
+        if not isinstance(r, dict):
+            bad("(not a JSON object)", "each sidecar row is one JSON object")
+            continue
+        ok = True
+        adv_row = "accepts" in r
+        rid = r.get("id")
+        if not isinstance(rid, str) or not rid.strip():
+            bad("id", "absent or empty")
+            ok = False
+        elif rid in mine:
+            bad("id", f"{rid} repeats in this sidecar")
+            ok = False
+        else:
+            mine.add(rid)
+            if live and rid in ids_seen:
+                fail("mission-finding-incomplete", f"finding id {rid} in {ids_seen[rid]} and {sc}: an id names its "
+                                                   "issuing review; a re-raised finding takes a new id")
+                ok = False
+        cls = r.get("class")
+        if cls not in FINDING_CLASSES:
+            bad("class", f"{cls!r} is not one of {', '.join(FINDING_CLASSES)}")
+            ok = False
+        elif adv_row and cls != "provenance":
+            bad("class", "an advisory accepts row is class provenance")
+            ok = False
+        for k in ("counterexample", "correction", "control"):
+            if not (isinstance(r.get(k), str) and r[k].strip()):
+                bad(k, "absent or empty")
+                ok = False
+        pr, co = r.get("prds"), r.get("consumers")
+        if not isinstance(pr, list) or (not adv_row and not pr) or not all(x in prset for x in pr):
+            bad("prds", "not a non-empty list of mission prds members" if not adv_row else "not a list of mission prds members")
+            ok = False
+        if (not isinstance(co, list) or not all(x in prset or (isinstance(x, str) and x.startswith("external:")
+                                                                and x[9:] in exts) for x in co)
+                or (not co and not adv_row and cls != "provenance")):
+            bad("consumers", "not a list of prds members or declared external:<name> (empty only for class provenance)")
+            ok = False
+        if adv_row:
+            ac = r.get("accepts")
+            if not isinstance(ac, list) or not ac or not all(isinstance(x, str) and x.strip() for x in ac):
+                bad("accepts", "not a non-empty list of finding ids")
+                ok = False
+        if not live:
+            continue
+        if isinstance(rid, str) and rid.strip() and rid not in ids_seen:
+            ids_seen[rid] = sc
+            if not adv_row:
+                c["named"].append(r)
+        if ok:
+            (c["advisory"] if adv_row else c["findings"]).append(r)
+
+
+CORRECTED_RE = re.compile(r"\.findings\.corrected-([1-9][0-9]*)\.jsonl$")
+
+
+def corrected_sidecar(L, c, f, full, sbytes, rows_sc, rows, task):
+    """Producer-contract Repair 2 (A1723 decision 3): <verdict>.findings.corrected-<n>.jsonl beside the sidecar. Its first
+    row is {"corrects": <the original sidecar's sha256>, "session": <the chain review's session>}, written by that session
+    resumed (a launch row of the task with skill dream, role review, the review's scope_id and resume true); its other
+    rows are the original's, in order, each changing only prds and consumers. Each refused file is
+    sidecar-correction-unbound. -> (shown path, rows) of the highest valid n, or None."""
+    d, base = os.path.dirname(full), os.path.basename(full)
+    try:
+        names = sorted((int(m.group(1)), nm) for nm in os.listdir(d or ".")
+                       for m in [CORRECTED_RE.search(nm)] if m and nm[:m.start()] == base)
+    except OSError:
+        names = []
+    sess, sid = c["rv"]["session"], c["row"].get("scope_id")
+    orig_sha = hashlib.sha256(sbytes).hexdigest()
+    best = None
+    for _, nm in names:
+        shown = os.path.join(os.path.dirname(f), nm) if os.path.dirname(f) else nm
+        try:
+            with open(os.path.join(d, nm), "rb") as fh:
+                got = sidecar_rows(fh.read())
+        except OSError as e:
+            L.fail("sidecar-correction-unbound", f"{shown}: unreadable ({e.strerror or type(e).__name__})")
+            continue
+        why = []
+        head = got[0][1] if got else None
+        if not (isinstance(head, dict) and set(head) == {"corrects", "session"}):
+            why.append("its first row is not {\"corrects\": <sha256>, \"session\": <session>}")
+        else:
+            if head["corrects"] != orig_sha:
+                why.append(f"corrects {head['corrects']!r} is not the original sidecar's sha256 {orig_sha}")
+            if head["session"] != sess:
+                why.append(f"written by session {head['session']!r}, not the chain review's own session {sess}")
+            elif not any(r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("task_id") == task
+                         and r.get("session") == sess and r.get("role") == "review" and r.get("scope_id") == sid
+                         and r.get("resume") is True for r in rows):
+                why.append(f"no launch row resumes session {sess} with role review and scope_id {sid}")
+        body = got[1:]
+        if len(body) != len(rows_sc):
+            why.append(f"{len(body)} finding rows, the original has {len(rows_sc)}")
+        for (cn, cr), (on, orw) in zip(body, rows_sc):
+            if not (isinstance(cr, dict) and isinstance(orw, dict)):
+                why.append(f"row {cn}: not a JSON object row against original row {on}")
+                continue
+            keep = lambda r: {k: v for k, v in r.items() if k not in ("prds", "consumers")}
+            if cr.get("id") != orw.get("id"):
+                why.append(f"row {cn}: id {cr.get('id')!r} is not original row {on}'s {orw.get('id')!r}")
+            elif keep(cr) != keep(orw):
+                diff = sorted(k for k in set(keep(cr)) | set(keep(orw)) if cr.get(k) != orw.get(k))
+                why.append(f"row {cn} ({cr.get('id')}): changes {', '.join(diff)}; only prds and consumers may change")
+        if why:
+            L.fail("sidecar-correction-unbound", f"{shown}: {'; '.join(why)}")
+        else:
+            best = (shown, body)
+    return best
 
 
 def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, reviews, home, resolve):
@@ -1113,6 +1245,7 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
     # R3 verdict lines and the sidecar binding; R4 the findings sidecar
     since = parse_iso(SIDECAR_BINDING_SINCE)
     ids_seen = {}
+    findings_hist = []      # Repair 2: an original sidecar's failures a corrected sidecar answers (never dropped)
     for c in chain:
         f, res = c["rv"]["file"], c["rv"]["result"]
         c["verdict"], c["findings"], c["advisory"], c["sidecar_bound"] = None, [], [], False
@@ -1172,72 +1305,24 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
                 read = None          # a sidecar that differs from a carried digest is read by nothing
                 L.fail("mission-finding-incomplete", f"{f}: result {res}: findings={want} but the sidecar {sc} is "
                                                      f"{'absent' if sbytes is None else 'sha256 ' + got}")
-        rows_sc = []
-        if read is not None:
-            for n, ln in enumerate(read.decode("utf-8", "replace").split("\n"), 1):
-                if ln.strip():
-                    try:
-                        rows_sc.append((n, json.loads(ln)))
-                    except ValueError:
-                        rows_sc.append((n, None))
+        rows_sc = sidecar_rows(read) if read is not None else []
         if fv in ("FIX", "REJECT") and not rows_sc and (read is not None or sbytes is None):
             L.fail("mission-finding-incomplete", f"{sc}: absent, unreadable or empty under mission={fv}")
         fh = mans[c["idx"]]["frozen"] or hd
         prset = set(fh["prds"]) if fh else set()
         exts = set(fh["external_names"]) if fh else set()
-        mine = set()
-        for n, r in rows_sc:
-            def bad(field, why, n=n):
-                L.fail("mission-finding-incomplete", f"{sc}: row {n}: field {field}: {why}")
-            if not isinstance(r, dict):
-                bad("(not a JSON object)", "each sidecar row is one JSON object")
-                continue
-            ok = True
-            adv_row = "accepts" in r
-            rid = r.get("id")
-            if not isinstance(rid, str) or not rid.strip():
-                bad("id", "absent or empty")
-                ok = False
-            elif rid in mine:
-                bad("id", f"{rid} repeats in this sidecar")
-                ok = False
-            else:
-                mine.add(rid)
-                if rid in ids_seen:
-                    L.fail("mission-finding-incomplete", f"finding id {rid} in {ids_seen[rid]} and {sc}: an id names its "
-                                                         "issuing review; a re-raised finding takes a new id")
-                    ok = False
-            cls = r.get("class")
-            if cls not in FINDING_CLASSES:
-                bad("class", f"{cls!r} is not one of {', '.join(FINDING_CLASSES)}")
-                ok = False
-            elif adv_row and cls != "provenance":
-                bad("class", "an advisory accepts row is class provenance")
-                ok = False
-            for k in ("counterexample", "correction", "control"):
-                if not (isinstance(r.get(k), str) and r[k].strip()):
-                    bad(k, "absent or empty")
-                    ok = False
-            pr, co = r.get("prds"), r.get("consumers")
-            if not isinstance(pr, list) or (not adv_row and not pr) or not all(x in prset for x in pr):
-                bad("prds", "not a non-empty list of mission prds members" if not adv_row else "not a list of mission prds members")
-                ok = False
-            if (not isinstance(co, list) or not all(x in prset or (isinstance(x, str) and x.startswith("external:")
-                                                                    and x[9:] in exts) for x in co)
-                    or (not co and not adv_row and cls != "provenance")):
-                bad("consumers", "not a list of prds members or declared external:<name> (empty only for class provenance)")
-                ok = False
-            if adv_row:
-                ac = r.get("accepts")
-                if not isinstance(ac, list) or not ac or not all(isinstance(x, str) and x.strip() for x in ac):
-                    bad("accepts", "not a non-empty list of finding ids")
-                    ok = False
-            if isinstance(rid, str) and rid.strip() and rid not in ids_seen:
-                ids_seen[rid] = sc
-                if not adv_row:
-                    c["named"].append(r)
-            if ok:
-                (c["advisory"] if adv_row else c["findings"]).append(r)
+        # producer-contract Repair 2 (A1723 decision 3): a corrected sidecar written by this review's own session,
+        # resumed, may change prds and consumers; it is read for finding grammar and the sweep, the original's failures
+        # are kept as findings_historical, and findings= still binds the original bytes
+        corr = corrected_sidecar(L, c, f, resolve(c["rv"]["file"]), sbytes, rows_sc, rows, task) \
+            if read is not None and sbytes is not None else None
+        if corr is not None:
+            c["sidecar_corrected"] = corr[0]
+            sc_rows(c, rows_sc, sc, prset, exts, ids_seen, lambda fid_, d: findings_hist.append(
+                {"id": fid_, "detail": d, "corrected_by": corr[0]}), False)
+            sc_rows(c, corr[1], corr[0], prset, exts, ids_seen, L.fail, True)
+        else:
+            sc_rows(c, rows_sc, sc, prset, exts, ids_seen, L.fail, True)
     # the mission verdict: the last chain review, in line (launch) order, of the last listed manifest
     vr = None
     if order_ok and chain and chain[-1]["idx"] == last:
@@ -1323,9 +1408,13 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
     fields = {"scope_ids": ids, "scope_id": ids[-1] if ids else None,
               "chain_reviews": [{"session": c["rv"]["session"], "verdict": c["verdict"] if order_ok else None,
                                  "file": c["rv"]["file"], "scope_id": ids[c["idx"]], "scope_index": c["idx"],
-                                 "launch_ts": c["row"].get("ts"), "sidecar_bound": c["sidecar_bound"]} for c in chain],
+                                 "launch_ts": c["row"].get("ts"), "sidecar_bound": c["sidecar_bound"],
+                                 **({"sidecar_corrected": c["sidecar_corrected"]} if c.get("sidecar_corrected") else {})}
+                                for c in chain],
               "verdict": verdict, "findings": len(vr["findings"]) if vr else 0,
               "unlisted_review_sessions": unlisted}
+    if findings_hist:
+        fields["findings_historical"] = findings_hist
     return fields, deps, vr
 
 
@@ -1342,7 +1431,8 @@ def approval(L, mrec, deps, verdict, states):
 
 SWEEP_IDS = ("repair-grammar", "mission-repairs-missing", "repair-duplicate", "repair-missing",
              "repair-class-mismatch", "sweep-missing", "repair-author-mismatch", "repair-hash-mismatch",
-             "repair-scope-mismatch", "affected-consumer-unreviewed", "repair-declined-unaccepted")
+             "repair-scope-mismatch", "affected-consumer-unreviewed", "repair-declined-unaccepted",
+             "repair-consolidation-mismatch")
 REPAIR_FIELDS = ("finding", "class", "author_session", "before", "after", "changed", "sweep", "disposition")
 DISPOSITIONS = ("repaired", "declined", "amended")
 
@@ -1384,6 +1474,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         return None
     out = {"file": tok, "rows": 0, "repaired": 0, "declined": [], "amended": [], "pending_after": False,
            "changed": [], "swept_edges": 0, "edges_added": [], "edges_removed": []}
+    hist = []               # Repair 3: duplicates a consolidation row answers (JSON repairs_historical; never dropped)
     if not tok and need:                 # R2 (r4 F27): the check never waits for the token
         for p, f in need:
             L.fail("repair-missing", f"finding {f['id']} of {chain[p]['rv']['file']}: no repairs= token on the "
@@ -1503,13 +1594,55 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         if seq not in (["repaired"], ["declined"], ["declined", "repaired"]):
             L.fail("repair-duplicate", f"finding {fid}: rows {', '.join(str(x['n']) for x in xs)} ({', '.join(seq)}); "
                                        "one row, or one declined row followed by one repaired row")
+    # producer-contract Repair 3 (A1723 addendum 1): a later amended row may consolidate earlier amended rows of its
+    # manifest pair; the duplicate check then judges it in their place, and their duplicates become historical
+    cons_of = {}
+    for x in recs:
+        if "consolidates" not in x["r"]:
+            continue
+        lst, why = x["r"]["consolidates"], []
+        pair = (x["r"].get("before"), x["r"].get("after"))
+        listed = []
+        if x["disp"] != "amended":
+            why.append("only an amended row consolidates")
+        if not (isinstance(lst, list) and lst and all(isinstance(v, int) and not isinstance(v, bool) for v in lst)):
+            why.append("consolidates is not a non-empty list of row numbers")
+        else:
+            byn = {y["n"]: y for y in recs}
+            for v in lst:
+                y = byn.get(v)
+                if y is None or v >= x["n"]:
+                    why.append(f"row {v} is no earlier row of this file")
+                    continue
+                listed.append(y)
+                if y["disp"] != "amended" or (y["r"].get("before"), y["r"].get("after")) != pair:
+                    why.append(f"row {v} is not an amended row of ({pair[0]}, {pair[1]})")
+                if y["r"].get("author_session") != x["r"].get("author_session"):
+                    why.append(f"row {v}'s author_session {y['r'].get('author_session')} is not this row's")
+                if v in cons_of:
+                    why.append(f"row {v} is consolidated by row {cons_of[v]['n']} already")
+            for k in ("changed", "sweep"):
+                want = sorted(set().union(*(set(y[k]) for y in listed))) if listed else []
+                if sorted(set(x[k])) != want:
+                    why.append(f"{k} {sorted(set(x[k]))} is not the union of the listed rows' {k} {want}")
+        if why:
+            L.fail("repair-consolidation-mismatch", f"row {x['n']}: consolidates {lst}: {'; '.join(why)}")
+        else:
+            for y in listed:
+                cons_of[y["n"]] = x
     ams = [x for x in recs if x["disp"] == "amended"]
     for i, x in enumerate(ams):
         for y in ams[i + 1:]:
             if (x["r"].get("before"), x["r"].get("after")) == (y["r"].get("before"), y["r"].get("after")):
+                if cons_of.get(x["n"]) is y or cons_of.get(y["n"]) is x:
+                    continue                # a consolidation row and a row it lists
                 for b in sorted(set(x["changed"]) & set(y["changed"])):
-                    L.fail("repair-duplicate", f"amended rows {x['n']} and {y['n']} of ({x['r'].get('before')}, "
-                                               f"{x['r'].get('after')}) both name {b}")
+                    d = f"amended rows {x['n']} and {y['n']} of ({x['r'].get('before')}, {x['r'].get('after')}) both name {b}"
+                    if x["n"] in cons_of or y["n"] in cons_of:
+                        hist.append({"id": "repair-duplicate", "detail": d,
+                                     "consolidated_by": sorted({cons_of[v]["n"] for v in (x["n"], y["n"]) if v in cons_of})})
+                    else:
+                        L.fail("repair-duplicate", d)
     sup = {fid for fid, xs in byf.items() if [x["disp"] for x in xs] == ["declined", "repaired"]}
     # R1: the repairs file is listed in every manifest later than any row's before
     bis = [x["bi"] for x in recs if x["bi"] is not None]
@@ -1685,7 +1818,20 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             iss = chain[anchor]
             okids = ([ids[c["idx"]] for c in chain[anchor + 1:]] if x["disp"] == "repaired" and fid in sup
                      else [ids[iss["idx"]]])
-            if cb[0] not in okids:
+            # producer-contract Repair 1 (A1723 decision 3): a repaired row's before may be a later listed manifest B when no
+            # chain review is bound to a manifest in (issuer, B] and each of those is the after of some repairs row
+            late = x["disp"] == "repaired" and cb[0] not in okids and bi > iss["idx"]
+            between = range(iss["idx"] + 1, bi + 1) if late else range(0)
+            reviewed = [cc for cc in chain if iss["idx"] < cc["idx"] <= bi] if late else []
+            undeclared = [j for j in between if not any(y["ai"] == j for y in recs)]
+            if cb[0] in okids or (late and not reviewed and not undeclared):
+                pass
+            elif late and not reviewed:
+                L.fail("repair-scope-mismatch", f"row {n} (finding {fid}): before {r['before']} is later than the issuing "
+                                                f"review's manifest ({ids[iss['idx']]}, {iss['rv']['file']}); "
+                                                f"{', '.join(mans[j]['path'] for j in undeclared)} between them "
+                                                "is the after of no repairs row")
+            else:
                 L.fail("repair-scope-mismatch", f"row {n} (finding {fid}): before {r['before']} canonicalizes to {cb[0]}; "
                                                 f"the issuing review {iss['rv']['file']} is bound to {ids[iss['idx']]}")
         same_ok = x["disp"] == "declined" and ai is not None and ai == bi and fol is not None and fol["idx"] == ai
@@ -1837,6 +1983,8 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
     out["edges_added"], out["edges_removed"] = sorted(added), sorted(removed)
     if amb:
         out["ambiguous"] = amb
+    if hist:
+        out["historical"] = hist
     return out
 
 
@@ -3342,6 +3490,8 @@ def lint_log(a):
             repairs = repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei, route, vr, deps,
                                    home, resolve)
             if repairs is not None:
+                if "historical" in repairs:         # producer-contract Repair 3: kept, never dropped
+                    mfields["repairs_historical"] = repairs.pop("historical")
                 mfields["repairs"] = repairs
         else:                       # R9: Mission: without scope= is a pre-freeze record
             for b in mrec["header"]["prds"]:

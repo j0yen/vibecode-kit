@@ -182,3 +182,18 @@ doubts a rule can see what it cost when it was missing. Append-only.
   findings and its GEN1 `mission-scope-incomplete` clear, and two amended rows' unswept edges
   show as `sweep-missing`. R2 (sidecar schema), R3 (generation-local judgement and merged chain
   reviews), R5 (lineage) and the rest of R8 are not built.
+- **Producer-contract repairs for an append-only mission record (2026-11-20, A1723).** The
+  A1723 mission record could not be corrected where its own history was wrong: rows 111-114
+  repaired their findings after a partial repair was frozen with no chain review (round 11b),
+  so their `before` was not the issuing review's manifest; review 12's sidecar row R12-F3 named
+  no PRD and an undeclared external, bound by its `findings=` line; and three `amended` rows of
+  one manifest pair named the same files. The repairs file and sidecars are append-only, so
+  three rules were added (the A1723 supervisor's decision 3, specified by the PRD author with
+  negative, positive and over-strict controls). A repaired row's `before` may be a later listed
+  manifest when every manifest between is unreviewed and the `after` of a repairs row. The
+  review's own session, resumed, may write `<verdict>.findings.corrected-<n>.jsonl` changing
+  only `prds` and `consumers`, read in the original's place with its failures kept in
+  `findings_historical` (`sidecar-correction-unbound` otherwise). A later `amended` row may
+  `consolidates` earlier ones of its pair, judged for duplicates in their place with theirs kept
+  in `repairs_historical` (`repair-consolidation-mismatch` otherwise). Each falls back to the
+  existing finding when its conditions fail, and no recorded row or sidecar is rewritten.
