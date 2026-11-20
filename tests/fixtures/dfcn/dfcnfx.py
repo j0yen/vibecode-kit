@@ -24,6 +24,8 @@ import subprocess
 import sys
 
 PAGE = "notes/analysis/fx-wwhtbt.md"
+P1724 = "2026-11-18-mission-analysis-consistency-wwhtbt.md"
+PAGE2 = "notes/analysis/fx2-wwhtbt.md"
 BASE = "fx-wwhtbt.md"
 AUTHOR = "a-1"
 TASK = "A1"
@@ -41,8 +43,9 @@ def write(p, text, mode=0o644):
 
 
 class Fx:
-    def __init__(self, T):
+    def __init__(self, T, lint):
         self.T = T
+        self.lint_path = lint
         self.home = os.path.join(T, "home")
         self.repo = os.path.join(T, "repo")
         self.reviews = os.path.join(T, "reviews")
@@ -63,25 +66,34 @@ class Fx:
                 % sha(self.kill))
         write(os.path.join(self.home, PAGE), page)
         self.page_sha = sha(page)
+        page2 = ("# Weakest link\n\nNo command here.\n\n# Mechanisms\n\n1. First — ⚙ a — owner A1723 author — state SPEC (A1723)\n\n"
+                 "```\n# a shell comment inside a fenced block\n```\n\n2. Second — ⚙ b — owner ctl — state SPEC (A1300)\n")   # review r14 L1
+        write(os.path.join(self.home, PAGE2), page2)
+        self.page2_sha = sha(page2)
         write(os.path.join(self.home, "build-queue", "PRD-fx-a.md"),
               "# PRD-fx-a\n\n## Acceptance criteria\n\n"
               "1. P0 — Given %s#falsifier, When `bash scripts/kill-fx.sh` runs on a record missing a row, Then it prints `KILL-FX` "
               "(re-expressed by `bash scripts/rx-fx.sh`).\n"
               "2. P0 — Given %s#mechanism:1, When `tests/fx_ac02.sh` runs its negative control, Then a record without the row exits 1.\n"
               "3. P0 — Given %s#mechanism:1, When a reader looks, Then the row is described in prose only.\n"
-              "4. P0 — Given %s#falsifier, When `bash scripts/other-kill.sh` runs, Then it prints OTHER.\n" % (BASE, BASE, BASE, BASE))
+              "4. P0 — Given %s#falsifier, When `bash scripts/other-kill.sh` runs, Then it prints OTHER.\n"
+              "5. P0 — Given `%s#mechanism:1`, When a reader looks, Then nothing runs.\n" % (BASE, BASE, BASE, BASE, BASE))
+        write(os.path.join(T, "outside-rx.sh"), "#!/bin/sh\necho KILL-FX\n", 0o755)
         os.makedirs(os.path.join(self.repo, "tests"))
         write(os.path.join(self.repo, "tests", "bind.sh"), "# exercises %s#falsifier,mechanism:1,mechanism:2\n" % BASE)
         write(os.path.join(self.repo, "tests", "plain.sh"), "# names no finding\n")
+        write(os.path.join(self.repo, "tests", "bind2.sh"), "# exercises fx2-wwhtbt.md#falsifier,mechanism:1,mechanism:2\n")
+        write(os.path.join(self.repo, "t2", "%s#mechanism:2.sh" % BASE), "# a file name that names the finding, inside a tree\n")
         env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", HOME=self.fakehome)
         for c in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "fixture"]):
             subprocess.run(["git", "-C", self.repo] + c, check=True, env=env, capture_output=True)
         self.commit = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True, check=True, env=env).stdout.strip()
         rows = [("rv-ok", TASK, "review"), (AUTHOR, TASK, "author"), (AUTHOR, TASK, "review"), ("rv-norole", TASK, None), ("rv-noline", TASK, "review"),
-                ("rv-other", "A9", "review")]
+                ("rv-other", "A9", "review"), ("a-2", TASK, "review"), ("a-2", TASK, "author"), ("rv-x", TASK, "review", "other-skill"),
+                ("rv-cited", TASK, "review"), ("rv-citer", TASK, None)]
         with open(self.dec, "w") as f:
-            for i, (s, t, role) in enumerate(rows):
-                r = {"ts": "2026-11-19T10:%02d:00-08:00" % i, "decision": "launch", "task_id": t, "skill": "dream", "route": "opus-xhigh",
+            for i, (s, t, role, *sk) in enumerate(rows):
+                r = {"ts": "2026-11-19T10:%02d:00-08:00" % i, "decision": "launch", "task_id": t, "skill": sk[0] if sk else "dream", "route": "opus-xhigh",
                      "model": "claude-opus-5-5", "effort": "xhigh", "session": s}
                 if role:
                     r["role"] = role
@@ -90,12 +102,39 @@ class Fx:
                            ("verdict-author.md", "Review session %s\naccepts c-res\n## VERDICT: APPROVE\n" % AUTHOR),
                            ("verdict-norole.md", "Review session rv-norole\naccepts c-res\n## VERDICT: APPROVE\n"),
                            ("verdict-noline.md", "Review session rv-noline\nthe residual is fine, accepts c-res in spirit\n## VERDICT: APPROVE\n"),
-                           ("verdict-other.md", "Review session rv-other\naccepts c-res\n## VERDICT: APPROVE\n")):
+                           ("verdict-other.md", "Review session rv-other\naccepts c-res\n## VERDICT: APPROVE\n"),
+                           ("verdict-a2.md", "Review session a-2\naccepts c-res\n## VERDICT: APPROVE\n"),
+                           ("verdict-rvx.md", "Review session rv-x\naccepts c-res\n## VERDICT: APPROVE\n"),
+                           ("verdict-cited.md", "Review session rv-cited\nno acceptance here\n## VERDICT: APPROVE\n"),
+                           ("verdict-citer.md", "Review session rv-citer, re-reviewing rv-cited's verdict\naccepts c-res\n## VERDICT: APPROVE\n")):
             write(os.path.join(self.reviews, name), text)
         with open(self.policy, "w") as f:
             json.dump({"evidence": {"ref_pattern": "^(ledger|file|pr|run|commit|page):[^\\s]{2,200}$",
                                     "placeholders": ["none", "n/a", "na", "tbd", "todo", "unknown", "x", "xx"], "min_refs": 1}}, f)
         self.ids = {}
+
+    def home1724(self):
+        """Review r14 M5: a home holding the A1724 WWHTBT page copy (no frontmatter falsifier; its weakest-link section cites a fixture generator in
+        backticks), the cited generator, and a PRD whose AC 1 runs that generator; the page's eight mechanisms bind by test rows."""
+        h = os.path.join(self.T, "home1724")
+        if os.path.isdir(h):
+            return h
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "2026-11-18-mission-analysis-consistency-wwhtbt.md")
+        text = open(src, encoding="utf-8").read()
+        write(os.path.join(h, "notes", "analysis", P1724), text)
+        self.p1724_sha = sha(text)
+        gen = "design/gen8-repair/out/work/tools/gen_controls_gen8.rdy.py"
+        write(os.path.join(h, gen), "print('KILLX')\n")
+        self.gen = (gen, sha(open(os.path.join(h, gen)).read()))
+        write(os.path.join(h, "build-queue", "PRD-fx-b.md"), "# PRD-fx-b\n\n## Acceptance criteria\n\n1. P0 — Given %s#falsifier, When `python3 %s` runs, "
+              "Then it prints `KILLX`.\n" % (P1724, gen))
+        r2 = os.path.join(self.T, "repo1724")
+        write(os.path.join(r2, "tests", "bind.sh"), "# exercises %s#%s\n" % (P1724, ",".join("mechanism:%d" % n for n in range(1, 9))))
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", HOME=self.fakehome)
+        for c in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "fixture"]):
+            subprocess.run(["git", "-C", r2] + c, check=True, env=env, capture_output=True)
+        self.repo1724 = (r2, subprocess.run(["git", "-C", r2, "rev-parse", "HEAD"], capture_output=True, text=True, check=True, env=env).stdout.strip())
+        return h
 
     # ---- the temp canonical store ----
     def canonical(self):
@@ -106,14 +145,19 @@ class Fx:
         os.makedirs(store_home, exist_ok=True)
         os.makedirs(self.shim_dir, exist_ok=True)
         write(os.path.join(self.shim_dir, "wm-asks"), "#!/bin/sh\nexec env WM_DECIDE_STATE='%s' HOME='%s' '%s' \"$@\"\n" % (self.state, store_home, wd), 0o755)
-        for key, owner, what in (("repair", "ctl", "repair %s#mechanism:2 (the canonical repair)" % BASE),
-                                 ("succ", "hermes", "successor S closes-after=row:{repair}"),
-                                 ("loose", "hermes", "a successor without the closes-after text")):
+        rec = os.path.join(self.home, "record.jsonl")
+        lintcheck = "bash %s --consumption %s --task {me} --require-closed" % (self.lint_path, rec)
+        for key, me, owner, what, chk in (("repair", "A1", "ctl", "repair %s#mechanism:2 (the canonical repair)" % BASE, "true"),
+                                          ("succ", "A2", "hermes", "successor S closes-after=row:A1", lintcheck),
+                                          ("loose", "A3", "hermes", "a successor without the closes-after text", lintcheck),
+                                          ("nolint", "A4", "hermes", "successor closes-after=row:A1 whose check lacks the lint", "true"),
+                                          ("prefix", "A5", "hermes", "successor closes-after=row:A13 (another row)", lintcheck)):
             p = subprocess.run([os.path.join(self.shim_dir, "wm-asks"), "asks", "add", "--by", "t-author", "--owner", owner, "--due", "2026-12-31T09:00",
-                                "--what", what.format(**self.ids), "--check", "true"], capture_output=True, text=True)
-            if p.returncode != 0:
-                raise SystemExit("FAIL dfcnfx: seeding the temp canonical store: %s%s" % (p.stdout, p.stderr))
-            self.ids[key] = p.stdout.strip().split()[-1]
+                                "--what", what, "--check", chk.format(me=me)], capture_output=True, text=True)
+            got = p.stdout.strip().split()[-1] if p.returncode == 0 and p.stdout.strip() else None
+            if got != me:
+                raise SystemExit("FAIL dfcnfx: seeding the temp canonical store gave %r for %s, want %s: %s%s" % (got, key, me, p.stdout, p.stderr))
+            self.ids[key] = me
         return self.ids
 
     # ---- rows ----
@@ -137,7 +181,7 @@ class Fx:
         os.makedirs(d, exist_ok=True)
         sc = os.path.join(self.T, "scenario.json")
         with open(sc, "w") as f:
-            json.dump(scenario, f)
+            f.write(json.dumps(scenario).replace("{RECORD}", os.path.join(self.home, "record.jsonl")).replace("{LINT}", self.lint_path))
         write(os.path.join(d, "wm-asks"), """#!/usr/bin/env python3
 import json, sys
 sc = json.load(open(%r))
@@ -152,8 +196,9 @@ else:
 """ % sc, 0o755)
         return d
 
-    def lint(self, lint, rows, drop=(), wm_asks=True, task=TASK, require_closed=False, shim=None):
-        rec = os.path.join(self.home, "record.jsonl")          # at the home's root: without --prd-home, row paths resolve against the record's directory
+    def lint(self, lint, rows, drop=(), wm_asks=True, task=TASK, require_closed=False, shim=None, home=None, page=PAGE, nopage=False):
+        home = home or self.home
+        rec = os.path.join(home, "record.jsonl")               # at the home's root: without --prd-home, row paths resolve against the record's directory
         with open(rec, "w") as f:
             for r in rows:
                 f.write(json.dumps(r) + "\n")
@@ -162,8 +207,8 @@ else:
             path = (shim or self.shim_dir) + os.pathsep + path
         else:
             path = os.pathsep.join(d for d in path.split(os.pathsep) if not os.path.exists(os.path.join(d, "wm-asks")))
-        args = ["bash", lint, "--consumption", rec, "--task", task, "--page", PAGE, "--json"] + (["--require-closed"] if require_closed else [])
-        for flag, val in (("--prd-home", self.home), ("--reviews", self.reviews), ("--decisions", self.dec)):
+        args = ["bash", lint, "--consumption", rec, "--task", task, "--json"] + ([] if nopage else ["--page", page]) + (["--require-closed"] if require_closed else [])
+        for flag, val in (("--prd-home", home), ("--reviews", self.reviews), ("--decisions", self.dec)):
             if flag not in drop:
                 args += [flag, val]
         env = dict(os.environ, HOME=self.fakehome, PATH=path, SKILL_ROUTING_POLICY=self.policy)
@@ -179,10 +224,14 @@ else:
 CASES = {}
 
 
-def case(name, rc, findings, needles=(), drop=(), unconsumed=None, scenario=None):
+def case(name, rc, findings, needles=(), drop=(), unconsumed=None, scenario=None, plain=False, task=None, require_closed=None, home=None, nopage=False,
+         pending=None, page=None):
+    """scenario: the canonical rows come from that scenario (a fake wm-asks), linted for successor A102 with --require-closed unless `plain`.
+    home: "1724" lints the A1724 page copy's home. pending: the JSON `pending` list the case expects."""
     def deco(fn):
         CASES[name] = {"fn": fn, "rc": rc, "findings": sorted(findings), "needles": list(needles), "drop": drop, "unconsumed": unconsumed,
-                       "scenario": scenario}
+                       "scenario": scenario, "plain": plain, "task": task, "require_closed": require_closed, "home": home, "nopage": nopage,
+                       "pending": pending, "page": page}
         return fn
     return deco
 
@@ -197,7 +246,7 @@ def rows_with(fx, **repl):
 case("ac02-valid-requirement-and-test", 0, [], unconsumed=[])(lambda fx: rows_with(fx))
 case("ac02-valid-repair", 0, [], unconsumed=[])(lambda fx: rows_with(fx, **{"mechanism:2": fx.row(
     "c-rep", "mechanism:2", "repair", ask=fx.ids["repair"], owner="ctl", successor=fx.ids["succ"])}))
-case("ac02-valid-pending", 0, [], unconsumed=[])(lambda fx: rows_with(fx, **{"mechanism:2": fx.row(
+case("ac02-valid-pending", 0, [], unconsumed=[], pending=[BASE + "#mechanism:2"])(lambda fx: rows_with(fx, **{"mechanism:2": fx.row(
     "c-pen", "mechanism:2", "pending", owner="ctl", due="2099-01-01T00:00:00+00:00", ask=fx.ids["repair"], successor=fx.ids["succ"])}))
 case("ac02-valid-residual", 0, [], unconsumed=[])(lambda fx: rows_with(fx, **{"mechanism:2": fx.row(
     "c-res", "mechanism:2", "residual", owner="hermes", evidence=["ledger:A1723"], accepted_by="rv-ok")}))
@@ -222,7 +271,7 @@ case("ac02-test-without-commit", 1, ["consumption-binding-invalid"], ["row c-m2 
     lambda fx: rows_with(fx, **{"mechanism:2": {k: v for k, v in fx.base()["mechanism:2"].items() if k != "commit"}}))
 case("ac02-test-without-path", 1, ["consumption-binding-invalid"], ["row c-m2 (%s#mechanism:2)" % BASE, "missing path"])(
     lambda fx: rows_with(fx, **{"mechanism:2": {k: v for k, v in fx.base()["mechanism:2"].items() if k != "path"}}))
-case("ac02-test-path-not-at-the-commit", 1, ["consumption-binding-invalid"], ["row c-m2 (%s#mechanism:2)" % BASE, "key path: tests/absent.sh is not in"])(
+case("ac02-test-path-not-at-the-commit", 1, ["consumption-binding-invalid"], ["row c-m2 (%s#mechanism:2)" % BASE, "key path: tests/absent.sh is not a file in"])(
     lambda fx: rows_with(fx, **{"mechanism:2": dict(fx.base()["mechanism:2"], path="tests/absent.sh")}))
 case("ac02-test-blob-names-no-finding", 1, ["consumption-binding-invalid"], ["row c-m2 (%s#mechanism:2)" % BASE, "key path: tests/plain.sh does not name"])(
     lambda fx: rows_with(fx, **{"mechanism:2": dict(fx.base()["mechanism:2"], path="tests/plain.sh")}))
@@ -238,6 +287,40 @@ case("ac02-second-unparted-row-beside-a-binding", 1, ["consumption-grammar"], ["
 case("ac02-part-residual-unaccepted-beside-a-binding", 1, ["consumption-residual-unaccepted"], ["row c-res2 (%s#mechanism:2)" % BASE, "accepted_by rv-noline"])(
     lambda fx: rows_with(fx) + [fx.row("c-res2", "mechanism:2", "residual", owner="hermes", evidence=["ledger:A1723"], accepted_by="rv-noline",
                                        part="the documentation half")])
+
+# ---------------------------------------------------------------- review r14 (finding consumption stages 1-2): each fails at 6735eef
+case("ac02-r14m1-successor-check-lacks-the-lint", 1, ["consumption-repair-unproven"],
+     ["row c-rep (%s#mechanism:2)" % BASE, "successor A4's done-check (or a closes-after row's) does not run dream-run-note-lint.sh"])(
+    lambda fx: rows_with(fx, **{"mechanism:2": fx.row("c-rep", "mechanism:2", "repair", ask="A1", owner="ctl", successor="A4")}))
+case("ac02-r14m1-closed-repair-without-proof-in-plain-mode", 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE, "shows no accept FAIL"],
+     plain=True, scenario={"rows": [{"ask_id": "A101", "owner": "ctl", "what": "repair %s#mechanism:2" % BASE, "status": "closed", "check": "true"},
+                                    {"ask_id": "A102", "owner": "hermes", "what": "successor S closes-after=row:A101", "status": "open",
+                                     "check": "bash {LINT} --consumption {RECORD} --task A102 --require-closed"}],
+                           "events": {"A101": [{"op": "accept", "detail": {"result": "PASS", "sha": "a" * 64, "mode": "attested"}}]}})(
+    lambda fx: rows_with(fx, **{"mechanism:2": fx.row("c-rep", "mechanism:2", "repair", ask="A101", owner="ctl", successor="A102")}))
+case("ac02-r14m2-closes-after-prefix-is-not-the-ask", 1, ["consumption-repair-unbound"], ["row c-rep (%s#mechanism:2)" % BASE, "closes-after=row:A1)"])(
+    lambda fx: rows_with(fx, **{"mechanism:2": fx.row("c-rep", "mechanism:2", "repair", ask="A1", owner="ctl", successor="A5")}))
+case("ac02-r14m5-a1724-page-names-no-falsifier-command", 1, ["consumption-binding-not-discriminating"], ["row c-fal (%s#falsifier)" % P1724,
+     "the page names no falsifier script"], home="1724")(
+    lambda fx: [{"id": "c-fal", "page": "notes/analysis/" + P1724, "page_sha256": fx.p1724_sha, "finding": "falsifier", "binding": "requirement",
+                 "author_session": AUTHOR, "prd": "PRD-fx-b.md", "ac": 1, "kill": {"script": fx.gen[0], "sha256": fx.gen[1], "string": "KILLX"}}]
+    + [{"id": "c-m%d" % n, "page": "notes/analysis/" + P1724, "page_sha256": fx.p1724_sha, "finding": "mechanism:%d" % n, "binding": "test",
+        "author_session": AUTHOR, "repo": fx.repo1724[0], "commit": fx.repo1724[1], "path": "tests/bind.sh"} for n in range(1, 9)])
+case("ac02-r14l1-a-fenced-comment-does-not-end-the-mechanisms", 1, ["consumption-finding-unbound"], ["fx2-wwhtbt.md#mechanism:2: no binding row"],
+     unconsumed=["fx2-wwhtbt.md#mechanism:2"], page=PAGE2)(
+    lambda fx: [{"id": "c2-%s" % f.replace(":", "-"), "page": PAGE2, "page_sha256": fx.page2_sha, "finding": f, "binding": "test", "author_session": AUTHOR,
+                 "repo": fx.repo, "commit": fx.commit, "path": "tests/bind2.sh"} for f in ("falsifier", "mechanism:1")])
+case("ac02-r14l2-ac-whose-only-backticks-name-the-finding", 1, ["consumption-binding-invalid"], ["row c-m1 (%s#mechanism:1)" % BASE, "carries no backticked command"])(
+    lambda fx: rows_with(fx, **{"mechanism:1": dict(fx.base()["mechanism:1"], ac=5)}))
+case("ac02-r14l3-a-tree-is-no-test-file", 1, ["consumption-binding-invalid"], ["row c-m2 (%s#mechanism:2)" % BASE, "key path: t2 is not a file"])(
+    lambda fx: rows_with(fx, **{"mechanism:2": dict(fx.base()["mechanism:2"], path="t2")}))
+case("ac02-r14l4-reexpression-outside-the-home", 1, ["consumption-binding-invalid"], ["row c-fal (%s#falsifier)" % BASE, "not under the PRD home"])(
+    lambda fx: rows_with(fx, falsifier=dict(fx.base()["falsifier"], reexpression={"script": "../outside-rx.sh",
+                                                                                  "sha256": sha(open(os.path.join(fx.T, "outside-rx.sh")).read())})))
+case("ac02-r14l5-an-empty-record-without-page", 1, ["consumption-grammar"], ["has no row and no --page"], nopage=True)(lambda fx: [])
+case("ac02-r14l5-require-closed-with-no-row-for-the-task", 1, ["consumption-repair-unbound"], ["no repair or pending row", "names successor A999"],
+     task="A999", require_closed=True)(lambda fx: rows_with(fx))
+
 
 # ---------------------------------------------------------------- AC 3: residual acceptance, receipts, check-mode context
 
@@ -257,6 +340,13 @@ case("ac03-residual-review-of-another-task", 1, ["consumption-residual-unaccepte
 case("ac03-residual-without-an-accepts-line", 1, ["consumption-residual-unaccepted"],
      ["row c-res (%s#mechanism:2)" % BASE, "accepted_by rv-noline: no verdict file", "holds `accepts c-res`"], unconsumed=[BASE + "#mechanism:2"])(
     lambda fx: residual(fx, "rv-noline"))
+case("ac03-r14m3-review-launch-followed-by-an-author-launch", 1, ["consumption-residual-unaccepted"],
+     ["row c-res (%s#mechanism:2)" % BASE, "accepted_by a-2: no review launch row under A1 outside the author lineage"], unconsumed=[BASE + "#mechanism:2"])(
+    lambda fx: residual(fx, "a-2"))
+case("ac03-r14m3-review-launch-of-another-skill", 1, ["consumption-residual-unaccepted"],
+     ["row c-res (%s#mechanism:2)" % BASE, "accepted_by rv-x: no review launch row"], unconsumed=[BASE + "#mechanism:2"])(lambda fx: residual(fx, "rv-x"))
+case("ac03-r14m4-a-later-file-citing-the-session-is-not-its-own", 1, ["consumption-residual-unaccepted"],
+     ["row c-res (%s#mechanism:2)" % BASE, "accepted_by rv-cited: no verdict file"], unconsumed=[BASE + "#mechanism:2"])(lambda fx: residual(fx, "rv-cited"))
 case("ac03-residual-with-a-placeholder-ref", 1, ["consumption-binding-invalid"], ["row c-res (%s#mechanism:2)" % BASE, "key evidence"])(
     lambda fx: rows_with(fx, **{"mechanism:2": fx.row("c-res", "mechanism:2", "residual", owner="hermes", evidence=["ledger:tbd"], accepted_by="rv-ok")}))
 case("ac03-receipt-only-session", 1, ["consumption-receipt-only"], ["row 'c-rcpt'", "its only target is a receipt (session)"])(
@@ -288,7 +378,8 @@ PLAIN_ADD = ev("add", owner="ctl", due="2026-12-31T09:00")
 
 def scen(status, events):
     rows = [{"ask_id": "A101", "owner": "ctl", "what": "repair %s#mechanism:2 (the canonical repair)" % BASE, "status": status, "check": "true"},
-            {"ask_id": "A102", "owner": "hermes", "what": "successor S closes-after=row:A101", "status": "open", "check": "true"}]
+            {"ask_id": "A102", "owner": "hermes", "what": "successor S closes-after=row:A101", "status": "open",
+             "check": "bash {LINT} --consumption {RECORD} --task A102 --require-closed"}]
     return {"rows": rows, "events": {"A101": events}}
 
 
@@ -327,7 +418,7 @@ def nodrift(lint, T, sd):
     on closed, intake-accepted-but-open, intake-cancelled and open rows, each carrying a valid proof."""
     sys.path.insert(0, sd)
     from wm_decide import asks as close_gate          # noqa: E402  (the predicate's one owner)
-    fx = Fx(T)
+    fx = Fx(T, lint)
     bad = 0
     for name, (sc, row) in H5_STATES.items():
         want = bool(close_gate._satisfied(row))
@@ -339,7 +430,7 @@ def nodrift(lint, T, sd):
 
 
 def run(prefix, lint, T):
-    fx = Fx(T)
+    fx = Fx(T, lint)
     if not prefix.startswith("h5p"):
         fx.canonical()
     bad = 0
@@ -349,10 +440,18 @@ def run(prefix, lint, T):
         return 1
     for n in names:
         c = CASES[n]
+        kw = {"drop": c["drop"], "nopage": c["nopage"]}
         if c["scenario"] is not None:
-            rc, d, err = fx.lint(lint, c["fn"](fx), drop=c["drop"], task="A102", require_closed=True, shim=fx.fake_canonical(c["scenario"]))
-        else:
-            rc, d, err = fx.lint(lint, c["fn"](fx), drop=c["drop"])
+            kw.update(task=TASK if c["plain"] else "A102", require_closed=not c["plain"], shim=fx.fake_canonical(c["scenario"]))
+        if c["task"] is not None:
+            kw["task"] = c["task"]
+        if c["require_closed"] is not None:
+            kw["require_closed"] = c["require_closed"]
+        if c["home"] == "1724":
+            kw.update(home=fx.home1724(), page="notes/analysis/" + P1724)
+        if c["page"] is not None:
+            kw["page"] = c["page"]
+        rc, d, err = fx.lint(lint, c["fn"](fx), **kw)
         fails = [l for l in err.splitlines() if l.startswith("FAIL ")]
         probs = []
         if rc != c["rc"]:
@@ -364,6 +463,8 @@ def run(prefix, lint, T):
                 probs.append("no FAIL line carries %r" % nd)
         if c["unconsumed"] is not None and d.get("unconsumed") != c["unconsumed"]:
             probs.append("unconsumed=%s want %s" % (d.get("unconsumed"), c["unconsumed"]))
+        if c["pending"] is not None and d.get("pending") != c["pending"]:
+            probs.append("pending=%s want %s" % (d.get("pending"), c["pending"]))
         if "Traceback" in err:
             probs.append("traceback")
         if probs:

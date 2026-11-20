@@ -2,7 +2,7 @@
 # PRD-dream-finding-consumption AC 1 (R5, R8): the A1724 WWHTBT page (a falsifier and eight SPEC mechanisms) with records binding 0 to 9 of its
 # findings, checked by `--consumption`: every partial record exits 1 with consumption-finding-unbound naming exactly the unbound findings
 # (`2026-11-18-mission-analysis-consistency-wwhtbt.md#mechanism:5` and the like); the full record exits 0; an edited page gives
-# consumption-page-stale; a page without its `# Mechanisms` heading gives consumption-page-unparsed. Bindings are `test` rows on a scratch git repo
+# consumption-page-stale; a page without its `# Mechanisms` heading gives consumption-page-unparsed; both leave all nine findings unconsumed (R5). Bindings are `test` rows on a scratch git repo
 # whose blob names each finding.
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; repo="$(dirname "$here")"
@@ -59,13 +59,14 @@ for k in range(0, 10):
         die("the full record: rc %s unconsumed %s\n%s" % (rc, d.get("unconsumed"), err))
 open(os.path.join(home, page), "ab").write(b"\nedited\n")
 rc, d, err = check(record(9, sha))
-if rc != 1 or "consumption-page-stale" not in (d.get("findings") or []) or d.get("unconsumed") != []:
-    die("an edited page: rc %s findings %s (want consumption-page-stale)\n%s" % (rc, d.get("findings"), err))
+ALL = sorted(NAME + "#" + f for f in FIND)
+if rc != 1 or "consumption-page-stale" not in (d.get("findings") or []) or d.get("unconsumed") != ALL:      # R5: every finding unconsumed (review r14 M6)
+    die("an edited page: rc %s findings %s unconsumed %s (want consumption-page-stale, all 9 unconsumed)\n%s" % (rc, d.get("findings"), d.get("unconsumed"), err))
 bare = data.replace(b"\n# Mechanisms\n", b"\n# Mechanism list\n")
 assert bare != data
 open(os.path.join(home, page), "wb").write(bare)
 rc, d, err = check(record(9, hashlib.sha256(bare).hexdigest()))
-if rc != 1 or d.get("findings") != ["consumption-page-unparsed"]:
-    die("a page without its # Mechanisms heading: rc %s findings %s (want consumption-page-unparsed)\n%s" % (rc, d.get("findings"), err))
+if rc != 1 or d.get("findings") != ["consumption-page-unparsed"] or d.get("unconsumed") != ALL:
+    die("a page without its # Mechanisms heading: rc %s findings %s unconsumed %s (want consumption-page-unparsed, all 9 unconsumed)\n%s" % (rc, d.get("findings"), d.get("unconsumed"), err))
 print("PASS dfcn_ac01_coverage.sh: records binding 0-8 of 9 findings name exactly the unbound ones; the full record exits 0; edited page stale; sectionless page unparsed")
 PY

@@ -131,7 +131,7 @@ exit 2
 # The Python below sits in a no-op heredoc so the file stays valid bash (bash -n, shellcheck).
 : <<'#__PYTHON_END__'
 #__PYTHON__
-import os, re, sys, json, subprocess, tempfile, shutil, datetime, hashlib
+import os, re, sys, json, subprocess, tempfile, shutil, datetime, hashlib, shlex
 
 # State vocabulary: the DREAMCA1 persist distinctions. When A1301's run state machine
 # (explore -> draft -> validated -> reviewed -> admitted) lands, this array is replaced
@@ -2845,6 +2845,7 @@ CONS_FINDING_RE = re.compile(r"falsifier|mechanism:[1-9][0-9]*")
 CONS_ASK_RE = re.compile(r"A[0-9]+")
 CONS_HEX64 = re.compile(r"[0-9a-f]{64}")
 CONS_HEX40 = re.compile(r"[0-9a-f]{40}")
+CONS_TOKEN_RE = re.compile(r"(waits-on|closes-after)=row:([A-Za-z0-9_,-]+)")                                        # the close gate's TOKEN_RE
 
 
 def cons_page_findings(text):
@@ -2859,8 +2860,13 @@ def cons_page_findings(text):
         return None, "no falsifier section (`# Weakest link` or `WWHTBT (the weakest link):`)"
     if start is None:
         return None, "no `# Mechanisms` heading"
-    need, n = ["falsifier"], 0
+    need, n, fence = ["falsifier"], 0, False
     for l in lines[start + 1:]:
+        if l.startswith("```"):                                     # review r14 L1: a fenced block is neither a heading nor an item
+            fence = not fence
+            continue
+        if fence:
+            continue
         if l.startswith("#"):
             break
         if re.match(r"^(- |[0-9]+\. )", l):
@@ -2872,8 +2878,10 @@ def cons_page_findings(text):
 
 
 def cons_page_falsifier(text):
-    """R3: the falsifier script the page itself names: its frontmatter `falsifier: <path> sha256=<64 hex>` (path and digest), else the first `.sh` or
-    `.py` path in a backticked command of its `# Weakest link` section (path only). -> (path, sha256 or None) or (None, None)."""
+    """R3: the falsifier script the page itself names: its frontmatter `falsifier: <path> sha256=<64 hex>` (path and digest), else the script the first
+    backticked command of its `# Weakest link` section runs (path only), read from the section's `**Falsifier` paragraph onward when it has one. A
+    command is a span whose first word is a runner (`bash`, `sh`, `python3`, `python`) followed by a `.sh`/`.py` path, or a `./…` `.sh`/`.py` path; a
+    path cited in backticks is not a command (review r14 M5). -> (path, sha256 or None) or (None, None)."""
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     if m:
         for l in m.group(1).split("\n"):
@@ -2881,10 +2889,14 @@ def cons_page_falsifier(text):
             if fm:
                 return fm.group(1), fm.group(2)
     sec = re.search(r"^#\s+Weakest link\s*$(.*?)(?=^#\s|\Z)", text, re.S | re.M)
-    for cmd in re.findall(r"`([^`]+)`", sec.group(1) if sec else ""):
-        for tok in cmd.split():
-            if re.search(r"\.(sh|py)$", tok):
-                return tok, None
+    body = sec.group(1) if sec else ""
+    fp = re.search(r"^\*\*Falsifier", body, re.M)
+    for cmd in re.findall(r"`([^`]+)`", body[fp.start():] if fp else body):
+        toks = cmd.split()
+        if len(toks) >= 2 and toks[0] in ("bash", "sh", "python3", "python") and re.search(r"\.(sh|py)$", toks[1]):
+            return toks[1], None
+        if toks and toks[0].startswith("./") and re.search(r"\.(sh|py)$", toks[0]):
+            return toks[0], None
     return None, None
 
 
@@ -2985,6 +2997,10 @@ def cons_check(a):
     if a["page"] and a["page"] not in by_page:
         by_page[a["page"]] = []                  # R8 --page: the record must bind that page's findings; each one it does not is named
     pages = list(by_page)
+    if not rows and not a["page"]:
+        L.fail("consumption-grammar", f"record {rec} has no row and no --page names a page it must bind (review r14 L5)")
+    if a["require_closed"] and not any(r["binding"] in ("repair", "pending") and r.get("successor") == task for r in rows):
+        L.fail("consumption-repair-unbound", f"--require-closed: no repair or pending row of {rec} names successor {task} (review r14 L5)")
     consumed = {}                                                                                                               # (page, finding) -> bool
     page_info = {}
     for pg in pages:
@@ -2995,6 +3011,8 @@ def cons_check(a):
         except OSError:
             L.fail("consumption-page-unparsed", f"page {pg}: cannot be read")
             page_info[pg] = None
+            for f in sorted({r["finding"] for r in prs}):
+                consumed[(pg, f)] = False
             continue
         dig = hashlib.sha256(text.encode("utf-8")).hexdigest()
         stale = sorted({r["id"] for r in prs if r["page_sha256"] != dig})
@@ -3004,6 +3022,9 @@ def cons_check(a):
         if need is None:
             L.fail("consumption-page-unparsed", f"page {pg}: {why}")
         page_info[pg] = None if (stale or need is None) else (text, need)
+        if page_info[pg] is None:                # R5: a stale or unparsed page leaves every finding of it unconsumed (review r14 M6)
+            for f in (need or sorted({r["finding"] for r in prs})):
+                consumed[(pg, f)] = False
     for pg in pages:
         info = page_info.get(pg)
         if info is None:
@@ -3030,6 +3051,7 @@ def cons_check(a):
             consumed[(pg, f)] = ok
     obj = {"schema": "dream-finding-consumption-check.v1", "record": rec, "task": task, "trust": "same-uid",
            "rows": len(rows), "pages": pages, "unconsumed": sorted(f"{os.path.basename(p)}#{f}" for (p, f), ok in consumed.items() if not ok),
+           "pending": sorted({f"{os.path.basename(r['page'])}#{r['finding']}" for r in rows if r["binding"] == "pending"}),             # review r14 L6
            "findings": L.ids()}
     return L, obj, f"OK consumption {rec} task={task} rows={len(rows)}"
 
@@ -3059,7 +3081,7 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
             return bad("consumption-binding-invalid", f"key ac: {prd} has no AC {ac}")
         if not cons_names(line, base, f):
             return bad("consumption-binding-invalid", f"key ac: AC {ac} of {prd} does not name {base}#{f}")
-        if not (re.search(r"`[^`]+`", line) or "tests/" in line):
+        if not (any(not re.fullmatch(re.escape(base) + r"#[a-z0-9:,]+", sp) for sp in re.findall(r"`([^`]+)`", line)) or "tests/" in line):   # r14 L2
             return bad("consumption-binding-invalid", f"key ac: AC {ac} of {prd} carries no backticked command and no tests/ path")
         if f == "falsifier":
             k = r.get("kill")
@@ -3078,7 +3100,10 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
             if rx is not None:
                 if not (isinstance(rx, dict) and isinstance(rx.get("script"), str) and isinstance(rx.get("sha256"), str) and not os.path.isabs(rx["script"])):
                     return bad("consumption-binding-invalid", "key reexpression: not {script, sha256} with a path under the PRD home")
-                if file_sha(os.path.join(a["prd_home"], rx["script"])) != rx["sha256"] or os.path.basename(rx["script"]) not in line:
+                rxp = os.path.realpath(os.path.join(a["prd_home"], rx["script"]))
+                if os.path.commonpath([rxp, os.path.realpath(a["prd_home"])]) != os.path.realpath(a["prd_home"]):         # review r14 L4
+                    return bad("consumption-binding-invalid", "key reexpression: the script is not under the PRD home")
+                if file_sha(rxp) != rx["sha256"] or os.path.basename(rx["script"]) not in line:
                     return bad("consumption-binding-invalid", "key reexpression: the script does not hash to its sha256 or AC does not carry its basename")
         elif not (isinstance(r.get("control"), str) and r["control"].strip()):
             return bad("consumption-binding-not-discriminating", "a mechanism row needs the control its AC's test runs")
@@ -3086,12 +3111,15 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
     if b == "test":
         if not (isinstance(r["commit"], str) and CONS_HEX40.fullmatch(r["commit"])):
             return bad("consumption-binding-invalid", "key commit: not 40 hex")
-        try:
-            p = subprocess.run(["git", "-C", resolve(r["repo"]), "show", f"{r['commit']}:{r['path']}"], capture_output=True, text=True, timeout=60)
+        obj = f"{r['commit']}:{r['path']}"
+        try:                                                                    # R3 `git cat-file`, and a blob, never a tree (review r14 L3)
+            t = subprocess.run(["git", "-C", resolve(r["repo"]), "cat-file", "-t", obj], capture_output=True, text=True, timeout=60)
+            p = subprocess.run(["git", "-C", resolve(r["repo"]), "cat-file", "blob", obj], capture_output=True, text=True, timeout=60) \
+                if t.returncode == 0 and t.stdout.strip() == "blob" else t
         except (OSError, subprocess.SubprocessError) as e:
-            return bad("consumption-binding-invalid", f"key path: git show failed ({e})")
-        if p.returncode != 0:
-            return bad("consumption-binding-invalid", f"key path: {r['path']} is not in {r['repo']} at {r['commit'][:12]}")
+            return bad("consumption-binding-invalid", f"key path: git cat-file failed ({e})")
+        if t.returncode != 0 or t.stdout.strip() != "blob" or p.returncode != 0:
+            return bad("consumption-binding-invalid", f"key path: {r['path']} is not a file in {r['repo']} at {r['commit'][:12]}")
         if not cons_names(p.stdout, base, f):
             return bad("consumption-binding-invalid", f"key path: {r['path']} does not name {base}#{f}")
         return True
@@ -3109,10 +3137,13 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
         if not os.path.isfile(dec):
             return bad("consumption-context-missing", f"no decisions log at {dec} to find {acc}'s review launch row")
         drows, _ = load_decisions(dec)
-        rv = [x for x in drows if x.get("session") == acc and x.get("decision") == "launch" and x.get("role") == "review" and x.get("task_id") == task]
-        if not rv or acc in authors:
-            return bad("consumption-residual-unaccepted", f"accepted_by {acc}: no review launch row under {task} outside the author lineage")
-        if not cons_accepts_line(a["reviews"], acc, rid):
+        dream = [x for x in drows if x.get("decision") == "launch" and x.get("skill") == "dream" and x.get("task_id") == task and x.get("session")]
+        lineage = set(authors) | {x["session"] for x in dream if x.get("role", "author") == "author"}     # the R4 lineage (role author or none)
+        m4 = [x for x in dream if x["session"] == acc]
+        if not m4 or m4[-1].get("role") != "review" or acc in lineage:                  # review r14 M3: the latest dream launch row, bind_reviews' rule
+            return bad("consumption-residual-unaccepted", f"accepted_by {acc}: no review launch row under {task} outside the author lineage "
+                                                          f"(its latest dream launch row under {task} must be role review)")
+        if not cons_accepts_line(a["reviews"], acc, rid, drows, task):
             return bad("consumption-residual-unaccepted", f"accepted_by {acc}: no verdict file under {a['reviews']} naming it holds `accepts {rid}`")
         return True
     # repair, pending: the canonical ledger (R3)
@@ -3129,25 +3160,35 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
         raise Exit2(f"canonical-unavailable: wm-asks is not installed here; row {rid} ({b}) needs the canonical ledger")
     byid = {x.get("ask_id") or x.get("id"): x for x in got if isinstance(x, dict)}
     ask, succ = byid.get(r["ask"]), byid.get(r["successor"])
-    if not ask or not succ or (ask.get("owner") != r["owner"]) or not cons_names(ask.get("what") or "", base, f) \
-            or f"closes-after=row:{r['ask']}" not in (succ.get("what") or ""):
+    closes = [i for m in CONS_TOKEN_RE.finditer((succ or {}).get("what") or "") if m.group(1) == "closes-after" for i in m.group(2).split(",") if i]
+    if not ask or not succ or (ask.get("owner") != r["owner"]) or not cons_names(ask.get("what") or "", base, f) or r["ask"] not in closes:   # r14 M2
         return bad("consumption-repair-unbound", f"ask {r['ask']} (owner {r['owner']}, naming {base}#{f}) and successor {r['successor']} "
                                                  f"(closes-after=row:{r['ask']}) are not both in the canonical ledger as bound")
-    if not a["require_closed"] or r["successor"] != task:
-        return True
-    if b == "pending":
-        return bad("consumption-repair-open", f"pending row for successor {task}: unconsumed until a revision replaces it")
+    # R3 in every mode (review r14 M1): the successor's done-check, or the check of a row its text names in closes-after=row:, runs this lint on this
+    # record for the successor with --require-closed; a closed repair ask carries its proof
+    checks = [succ.get("check")]
+    if not cons_runs_lint(succ.get("check"), a["consumption"], r["successor"]):
+        more = cons_wm_asks(["query", "--ids", ",".join(closes), "--status", "all", "--json"]) or []
+        checks += [x.get("check") for x in more if isinstance(x, dict)]
+    if not any(cons_runs_lint(c, a["consumption"], r["successor"]) for c in checks):
+        return bad("consumption-repair-unproven", f"successor {r['successor']}'s done-check (or a closes-after row's) does not run dream-run-note-lint.sh "
+                                                  f"--consumption {os.path.basename(a['consumption'])} --task {r['successor']} --require-closed")
     ev = cons_wm_asks(["events", r["ask"], "--json"]) or []
     istate = cons_intake_state(ev)
     if istate == "cancelled":            # the close gate's predicate (Hermes H5 reading 6, chain review 11 R11-F2): a cancelled repair never satisfies
         return bad("consumption-repair-unproven", f"repair ask {r['ask']} was intake-cancelled; a cancelled repair never satisfies its successor")
-    if not cons_satisfied(ask, istate):
-        return bad("consumption-repair-open", f"repair ask {r['ask']} is still open (neither closed nor intake-accepted)")
+    satisfied = cons_satisfied(ask, istate)
     acc = [cons_detail(e) for e in ev if isinstance(e, dict) and e.get("op") == "accept"]
     proved = any(x.get("result") == "FAIL" and any(y.get("result") == "PASS" and y.get("sha") == x.get("sha") and y.get("mode") == "run"
                                                   for y in acc[i + 1:]) for i, x in enumerate(acc))
-    if not proved:
+    if satisfied and not proved:
         return bad("consumption-repair-unproven", f"closed repair ask {r['ask']} shows no accept FAIL followed by a run PASS at one sha")
+    if not a["require_closed"] or r["successor"] != task:
+        return True
+    if b == "pending":
+        return bad("consumption-repair-open", f"pending row for successor {task}: unconsumed until a revision replaces it")
+    if not satisfied:
+        return bad("consumption-repair-open", f"repair ask {r['ask']} is still open (neither closed nor intake-accepted)")
     return True
 
 
@@ -3185,17 +3226,42 @@ def cons_satisfied(ask, istate):
     return (ask.get("status") or ask.get("section")) in ("closed", "done") or istate == "accepted"
 
 
-def cons_accepts_line(reviews, session, rid):
-    """A verdict file under --reviews that names the session and holds the line `accepts <rid>` (the accepted-decline read, R3 residual)."""
-    for d, _, files in os.walk(reviews):
+def cons_accepts_line(reviews, session, rid, rows, task):
+    """A verdict file under --reviews that is the session's own and holds the line `accepts <rid>` (R3 residual). A file is credited to one session:
+    of the dream-launched sessions its first lines name as whole tokens (this Task's first), the latest launched, the rule failure_floor uses
+    (review r14 M4: a re-review that names an earlier review's session never counts for it)."""
+    sess = [x for x in rows if x.get("decision") == "launch" and x.get("skill") == "dream" and x.get("session")]
+
+    def launched(x):
+        t = parse_iso(x.get("ts") or "")
+        return (t is not None, t.timestamp() if t else 0.0, x["session"])
+    for d, ds, files in os.walk(reviews):
+        ds.sort()
         for fn in sorted(files):
             try:
                 t = read_text(os.path.join(d, fn))
             except (OSError, UnicodeDecodeError):
                 continue
-            if session in t and any(l.strip() == f"accepts {rid}" for l in t.split("\n")):
+            head = "\n".join(t.split("\n")[:PAGE_LINES])
+            named = [x for x in sess if re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(x["session"]), head)]
+            named = [x for x in named if x.get("task_id") == task] or named
+            if named and max(named, key=launched)["session"] == session and any(l.strip() == f"accepts {rid}" for l in t.split("\n")):
                 return True
     return False
+
+
+def cons_runs_lint(check, record, successor):
+    """R3: a done-check that runs `dream-run-note-lint.sh --consumption <this record> --task <successor> --require-closed` (the record named by its path,
+    or by its basename when the check gives a relative path, whose directory is the check's own)."""
+    try:
+        toks = shlex.split(check or "")
+    except ValueError:
+        toks = (check or "").split()
+    after = lambda flag: [toks[i + 1] for i, t in enumerate(toks[:-1]) if t == flag]
+    recs = [x for x in after("--consumption")
+            if os.path.basename(x) == os.path.basename(record) and (not os.path.isabs(x) or os.path.realpath(x) == os.path.realpath(record))]
+    return (any(os.path.basename(t) == "dream-run-note-lint.sh" for t in toks) and bool(recs) and successor in after("--task")
+            and "--require-closed" in toks)
 
 
 def main(argv):
