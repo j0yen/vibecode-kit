@@ -6,7 +6,8 @@ A case is one PRD home, a private decisions log and a routing policy under <outd
 (Fx, row, mx_file), loaded from skills/dream/scripts/dream-run-note-lint.sh as
 tests/fixtures/drmx/mfx.py does, and date the entry under test on the lint's TRIGGER_CUTOVER (R7).
 Mission cases copy the checked-in drfc fixture (the base or one variant, as tests/drfc_lib.sh `use`
-does), whose entries are dated after the cutover, and edit its last entry.
+does), re-date the copy from the fixture's day (2026-11-18, before the cutover) onto the cutover day with
+tests/fixtures/redate.py, so its entries are dated after the cutover, and edit its last entry.
 
 Every case states its expected exit, its exact finding-id set and, where the AC asks for more, a
 predicate on the --json object. `--run` lints each case's last entry with the lint under test (a
@@ -18,6 +19,7 @@ Usage: dfx.py --list [<prefix>]                 case names and expectations
        dfx.py <case> <outdir>                   build one case
        dfx.py --run <prefix> <lint> [<report>]  build and lint every case of <prefix> (ac02, ac03, ...)
 """
+import datetime
 import hashlib
 import json
 import os
@@ -30,6 +32,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 LINT = os.path.join(REPO, "skills", "dream", "scripts", "dream-run-note-lint.sh")
 DRFC = os.path.join(REPO, "tests", "fixtures", "drfc")
+DRFC_DAY = "2026-11-18"                                  # the checked-in drfc fixture's one day (re-dated before the cutover, H1)
+REDATE = os.path.join(REPO, "tests", "fixtures", "redate.py")
 
 
 def lint_helpers(path=LINT):
@@ -45,6 +49,7 @@ H = lint_helpers()
 Fx, row, CUT = H["Fx"], H["row"], H["TRIGGER_CUTOVER"]
 S_W, S_5, M_REL = H["S_W"], H["S_5"], H["M_REL"]
 T_TS, OUT_TS, LATE_TS = CUT + "T02:00:00-08:00", CUT + "T00:30:00-08:00", CUT + "T01:00:00-08:00"
+DAY_BEFORE_CUT = (datetime.date.fromisoformat(CUT) - datetime.timedelta(days=1)).isoformat()
 S_F, S_G, S_R0 = ("bbbbbbbb-0000-4000-8000-0000000000%02d" % i for i in (9, 10, 11))
 AN = "Analysis: wwhtbt={w} 5whys={f} adversarial=" + M_REL + " uncovered=1"
 POLICY = {"evidence": {"ref_pattern": "^(ledger|file|pr|run|commit|page):[^\\s]{2,200}$", "placeholders": ["none", "n/a", "tbd", "todo", "x"]}}
@@ -130,7 +135,8 @@ def trig_snapshot(out, w):
 
 
 def drfc_mission(out, variant, w):
-    """The checked-in drfc mission (Task FC-1, entries dated 2027-02-01, after the cutover): its last entry with the wwhtbt value `w` and a Failure: line."""
+    """The checked-in drfc mission (Task FC-1), its copy re-dated from DRFC_DAY onto the cutover day (so after the cutover, R7): its last
+    entry with the wwhtbt value `w` and a Failure: line."""
     home = os.path.join(out, "home")
     shutil.copytree(os.path.join(DRFC, "home"), home)
     dec = os.path.join(DRFC, "decisions.jsonl")
@@ -138,6 +144,10 @@ def drfc_mission(out, variant, w):
         shutil.copytree(os.path.join(DRFC, "variants", variant, "home"), home, dirs_exist_ok=True)
         dec = os.path.join(DRFC, "variants", variant, "decisions.jsonl")
     shutil.copy(dec, os.path.join(out, "decisions.jsonl"))
+    p = subprocess.run([sys.executable, "-I", REDATE, "--map", f"{DRFC_DAY}={CUT}", "--also", os.path.join(out, "decisions.jsonl"), home],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        raise SystemExit("drfc fixture: re-date onto the cutover day failed: " + (p.stderr or p.stdout).strip())
     log = os.path.join(home, "notes", "dream-log.md")
     lines = open(log, encoding="utf-8").read().split("\n")
     last = max(i for i, ln in enumerate(lines) if ln.startswith("## "))
@@ -154,7 +164,7 @@ def drfc_mission(out, variant, w):
     return None
 
 
-M_OUT, M_LATE = "2027-02-01T12:00:00-08:00", "2027-02-01T12:30:00-08:00"
+M_OUT, M_LATE = CUT + "T12:00:00-08:00", CUT + "T12:30:00-08:00"      # after every row of the re-dated mission copy
 
 
 def add_rows(out, rows):
@@ -235,6 +245,48 @@ case("ac02-outage-policy-missing-caller-env", 1, ["analysis-skip-refused"], deta
     lambda out: skip_fx(out, "policy-missing: SKILL_ROUTE_POLICY names no readable file"))
 case("ac02-outage-policy-missing-caller-arg", 1, ["analysis-skip-refused"], detail="not a route outage")(
     lambda out: skip_fx(out, "policy-missing: --policy names no readable file"))
+# R2 as amended (Hermes H2, 2026-11-19): each of the resolver's own outage texts, whole, is accepted; near misses are not.
+for _n, _r in (("policy-is-malformed", "policy is malformed"), ("malformed-policy-json", "malformed policy JSON: JSONDecodeError"),
+               ("ledger-lookup-unavailable", "ledger lookup unavailable; cannot verify ledger:A1 (fail closed)"),
+               ("require-permission-mode", "wwhtbt: policy require_permission_mode must be a non-empty string (fail closed)")):
+    case("ac02-outage-text-" + _n, 0, [])((lambda r: lambda out: skip_fx(out, r))(_r))
+for _n, _r in (("policy-missing-other", "policy-missing: datr fixture"), ("malformed-request-json", "malformed request JSON: JSONDecodeError"),
+               ("malformed-policy-prefix", "malformed policy: expected object"),
+               ("ledger-lookup-extra", "ledger lookup unavailable; cannot verify ledger:A1 (fail closed) after a PATH change"),
+               ("require-permission-mode-other-skill", "dream: policy require_permission_mode must be a non-empty string (fail closed)"),
+               ("white-space-around", " policy file not found\n"),                                       # review r10 LOW-1: whole, unstripped
+               ("ledger-id-outside-grammar", "ledger lookup unavailable; cannot verify ledger:a(b (fail closed)")):   # LOW-2: the resolver's id grammar
+    case("ac02-outage-near-miss-" + _n, 1, ["analysis-skip-refused"], detail="not a route outage")((lambda r: lambda out: skip_fx(out, r))(_r))
+
+
+# R2 as amended for chain review 11 (R11-F5): AC 2 and AC 5 test each R2-accepted text, corroborated and not, and each R2-refused text one by one;
+# AC 2 also lints an uncovered entry skipping on each accepted text (uncovered entries keep today's rules).
+R2_ACCEPTED = (("policy-file-not-found", "policy file not found"), ("malformed-policy-json", "malformed policy JSON: JSONDecodeError"),
+               ("policy-is-malformed", "policy is malformed"), ("policy-error-form", POLICY_ERROR),
+               ("require-permission-mode", "{}: policy require_permission_mode must be a non-empty string (fail closed)"),
+               ("ledger-lookup-unavailable", "ledger lookup unavailable; cannot verify ledger:A1 (fail closed)"))
+R2_REFUSED = (("policy-missing-env", "policy-missing: SKILL_ROUTE_POLICY names no readable file"),
+              ("policy-missing-arg", "policy-missing: --policy names no readable file"),
+              ("unanchored-policy-error", INJECTED), ("malformed-request-json", "malformed request JSON: JSONDecodeError"))
+
+
+def uncovered_skip(out, reasons, rows=()):
+    fx = earlier(tfx(out, w=f"skipped: blocked decision={OUT_TS}"))
+    fx.rows += [denied("wwhtbt", reasons)] + list(rows)
+    fx.build()
+    policy(out)
+
+
+for _n, _r in R2_ACCEPTED:
+    case("ac02-r2-accepted-%s-corroborated" % _n, 0, [])((lambda r: lambda out: skip_fx(out, r.format("wwhtbt")))(_r))
+    case("ac02-r2-accepted-%s-uncorroborated" % _n, 1, ["analysis-skip-refused"], detail="falls between")(
+        (lambda r: lambda out: skip_fx(out, r.format("wwhtbt"), rows=[later("wwhtbt")]))(_r))
+    case("ac02-r2-accepted-%s-uncovered" % _n, 0, [], "d['analysis'].get('covered') == 'none'")((lambda r: lambda out: uncovered_skip(out, r.format("wwhtbt")))(_r))
+    case("ac02-r2-accepted-%s-uncovered-uncorroborated" % _n, 0, [], "d['analysis'].get('covered') == 'none'")(       # review r13 MEDIUM-1
+        (lambda r: lambda out: uncovered_skip(out, r.format("wwhtbt"), rows=[later("wwhtbt")]))(_r))
+for _n, _r in R2_REFUSED:
+    case("ac02-r2-refused-%s" % _n, 1, ["analysis-skip-refused"], detail="not a route outage")((lambda r: lambda out: skip_fx(out, r.format("wwhtbt")))(_r))
+    case("ac02-r2-refused-%s-uncovered" % _n, 0, [], "d['analysis'].get('covered') == 'none'")((lambda r: lambda out: uncovered_skip(out, r.format("wwhtbt")))(_r))
 
 
 @case("ac02-denial-after-header", 1, ["analysis-skip-refused"], detail="is not before the entry header")
@@ -270,7 +322,7 @@ def _(out):
 @case("ac02-backdated-header-route-after-cutover", 1, ["analysis-skip-refused"], "d['analysis'].get('covered') == 'new-material'")
 def _(out):
     fx = tfx(out, w=FREE)
-    fx.ts = "2026-11-19T23:59:00-08:00"
+    fx.ts = DAY_BEFORE_CUT + "T23:59:00-08:00"                # the last minute before the cutover day
     dts = CUT + "T00:10:00-08:00"
     fx.entry["Route"] = f"Route: fable-xhigh claude-fable-5-1 xhigh session={H['S_D']} decision={dts}"
     fx.rows.append(row(dts, "launch", "A1", "dream", "fable-xhigh", "claude-fable-5-1", "xhigh", H["S_D"]))
@@ -546,6 +598,16 @@ for _c in ("recurring-failure", "failed-acceptance", "consequential-obstacle"):
 case("ac05-transient-inline", 0, [])(lambda out: five_fx(out, "transient", "inline", refs="run:retry-1"))
 case("ac05-transient-skipped-transient", 0, [])(lambda out: five_fx(out, "transient", "skipped: transient", refs="run:retry-1"))
 case("ac05-transient-page", 1, ["analysis-trigger-unmet"])(lambda out: five_fx(out, "transient", PAGE5, refs="run:retry-1"))
+
+
+for _n, _r in R2_ACCEPTED:                       # R11-F5: each R2-accepted text, corroborated and not, and each R2-refused text, on the R5 trigger
+    case("ac05-r2-accepted-%s-corroborated" % _n, 0, [])((lambda r: lambda out: five_fx(out, "failed-acceptance", f"skipped: blocked decision={OUT_TS}",
+                                                                                          [denied("5whysandrhyme", r.format("5whysandrhyme"))]))(_r))
+    case("ac05-r2-accepted-%s-uncorroborated" % _n, 1, ["analysis-trigger-unmet"], detail="falls between")((lambda r: lambda out: five_fx(
+        out, "failed-acceptance", f"skipped: blocked decision={OUT_TS}", [denied("5whysandrhyme", r.format("5whysandrhyme")), later("5whysandrhyme")]))(_r))
+for _n, _r in R2_REFUSED:
+    case("ac05-r2-refused-%s" % _n, 1, ["analysis-trigger-unmet"], detail="not a route outage")((lambda r: lambda out: five_fx(
+        out, "failed-acceptance", f"skipped: blocked decision={OUT_TS}", [denied("5whysandrhyme", r.format("5whysandrhyme"))]))(_r))
 
 
 case("ac05-skip-infix-in-caller-text", 1, ["analysis-trigger-unmet"], detail="not a route outage")(

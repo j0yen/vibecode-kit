@@ -165,12 +165,15 @@ its review row's `scope_id`, counts as changed). The entry's date is its header'
 launch row's when that is later. A covered entry records a page it ran, an exact reuse as above
 (the manifest is written with the page and reused unchanged: one regenerated at reuse proves
 nothing), or `skipped: blocked decision=<ts>`: the decisions log holds a `denied` row of that
-skill and Task at that `ts`, before the entry's header, whose reasons name a route outage the
-caller cannot cure in the resolver's own words (they start `policy-missing`, `policy file not
-found`, `malformed policy` or `ledger lookup unavailable`, or are its policy-error form
-`<skill>: policy ... (policy error, fail closed)`; the `policy-missing:` texts for a policy file
-the caller named, `SKILL_ROUTE_POLICY` or `--policy`, and that infix inside caller text the
-resolver quotes are the caller's to cure), and no launch row of that skill, for any task, falls
+skill and Task at that `ts`, before the entry's header, whose whole reasons are one of the
+resolver's own outage texts (`policy file not found`, `policy is malformed`, `malformed policy
+JSON: <Error>`, `ledger lookup unavailable; cannot verify ledger:<id> (fail closed)`,
+`<skill>: policy require_permission_mode must be a non-empty string (fail closed)`, or its
+policy-error form `<skill>: policy ... (policy error, fail closed)`; the `policy-missing:` texts
+for a policy file the caller named, `SKILL_ROUTE_POLICY` or `--policy`, and that infix inside
+caller text the resolver quotes are the caller's to cure, and a denial the caller induced, such as
+a malformed policy it chose or a `PATH` without `wm-asks`, excuses no skip even when its text is
+an outage's: corroborating that is A1300's producer), and no launch row of that skill, for any task, falls
 between that row and the entry's header, both ends included (a launch row without a readable
 timestamp counts). A request the caller can fix, a live-worker denial (the
 analysis is running; reuse its page when it lands) or an uncorroborated outage is refused, and so
