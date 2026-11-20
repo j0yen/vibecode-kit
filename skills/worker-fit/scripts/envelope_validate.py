@@ -2187,7 +2187,23 @@ def _plurals(low):
     return [low[:-len(x)] for x in "es|s|z".split("|") if low.endswith(x) and len(low) - len(x) >= 2]
 
 
+_NOUN_RULE_CACHE = {}
+
+
 def _noun_by_rule(low):
+    """_noun_by_rule_eval, evaluated once per distinct word: the rule is a pure function of `low` over frozen module data, so a word
+    repeated through a long input costs one evaluation (repair 15 recovery: the DEF-F readings made redact() of 'hooks.slack.com/
+    services/' x 20000 spend ~11 s re-reading the same four words). Bounded like _MISSPELT_CACHE: past 8192 words it is emptied, never
+    answered from stale data."""
+    hit = _NOUN_RULE_CACHE.get(low, _NOUN_RULE_CACHE)
+    if hit is _NOUN_RULE_CACHE:
+        if len(_NOUN_RULE_CACHE) > 8192:
+            _NOUN_RULE_CACHE.clear()
+        hit = _NOUN_RULE_CACHE[low] = _noun_by_rule_eval(low)
+    return hit
+
+
+def _noun_by_rule_eval(low):
     """N1 plurals, N2, N3 (misspelt or sign-on after a qualifier), N4, N5 and N6 (a strong noun glued to a value tail) for one lower-case
     alphabetic part: _RULE_NAME or None."""
     if low in _EDIT_ENGLISH:
