@@ -202,10 +202,72 @@ case("ac04-pending-naming-x-holds-x", 1, ["consumption-blocked"], ["x"], "row c-
 case("ac04-unconsumed-row-naming-neither-holds-every-slug", 1, ["consumption-binding-invalid", "consumption-blocked"], ["x", "y"],
      "slug y=eligible while held by row c-m2")(
     lambda fx: swap(fx, 2, crow("c-m2", "mechanism:2", "test", repo=fx.repo, commit=fx.commit, path="tests/missing.sh")))
-case("ac04-overdue-pending-with-a-successor-holds-no-slug", 1, ["consumption-pending-overdue"], [], "row c-m2")(
-    lambda fx: swap(fx, 2, pending(due="2020-01-01T00:00:00+00:00")))
+case("ac04-overdue-pending-whose-successor-is-gated-holds-no-slug", 1, ["consumption-pending-overdue"], [], "row c-m2")(
+    lambda fx: ledger(swap(fx, 2, pending(due="2020-01-01T00:00:00+00:00")), 2))
+case("ac04-overdue-pending-whose-successor-is-not-gated-holds-every-slug", 1, ["consumption-blocked", "consumption-pending-overdue"], ["x", "y"],
+     "slug y=eligible while held by row c-m2")(
+    lambda fx: (swap(fx, 2, pending(due="2020-01-01T00:00:00+00:00")), setattr(fx, "no_asks", True), fx)[-1])
 case("ac04-overdue-pending-naming-x-holds-x", 1, ["consumption-blocked", "consumption-pending-overdue"], ["x"], "slug x=eligible while held by row c-m2")(
     lambda fx: swap(fx, 2, pending(prd="PRD-x.md", due="2020-01-01T00:00:00+00:00")))
+
+
+# review r15 M1: a row whose successor's ledger gate is not verified, or whose prd is none of the run's, holds every State: slug
+case("ac04-a-repair-row-whose-successor-is-not-in-the-ledger-holds-every-slug", 1, ["consumption-blocked", "consumption-repair-unbound"], ["x", "y"],
+     "slug x=eligible while held by row c-m2")(
+    lambda fx: ledger(swap(fx, 2, crow("c-m2", "mechanism:2", "repair", owner="ctl", ask="A1", successor="A777")), 2))
+case("ac04-a-repair-row-without-wm-asks-holds-every-slug", 1, ["canonical-unavailable", "consumption-blocked"], ["x", "y"],
+     "slug x=eligible while held by row c-m2")(
+    lambda fx: (swap(fx, 2, crow("c-m2", "mechanism:2", "repair", owner="ctl", ask="A1", successor="A2")), setattr(fx, "no_asks", True), fx)[-1])
+case("ac04-an-earlier-repair-row-whose-successor-is-not-in-the-ledger-holds-every-slug", 1, ["consumption-blocked"], ["x", "y"],
+     f"held by entry {PREV_TS}: row e-m1")(
+    lambda fx: ledger(earlier(fx, rows=old_rows(fx, crow("e-m1", "mechanism:1", "repair", PG2, owner="ctl", ask="A1", successor="A777"))), 2,
+                      names="old-wwhtbt.md#mechanism:1"))
+case("ac04-a-row-naming-a-prd-outside-the-run-holds-every-slug", 1, ["consumption-blocked", "consumption-residual-unaccepted"], ["x", "y", "zzz"],
+     "slug x=eligible while held by row c-m1")(
+    lambda fx: swap(fx, 1, crow("c-m1", "mechanism:1", "residual", owner="ctl", evidence=["ledger:A1"], accepted_by="rv-nobody", prd="PRD-zzz.md")))
+
+
+def cycle(fx):
+    """x and y each Depends-on the other: no member is first (review r15 M2)."""
+    fx.files["build-queue/PRD-x.md"] = PRD_X.replace("- Depends-on: none", "- Depends-on: PRD-y.md")
+    return fx
+
+
+def lived(fx):
+    """visions/old-wwhtbt.md after its mechanism 1 went LIVE: its findings are the falsifier and mechanism 2 (review r15 M3)."""
+    fx.files[PG2] = page().replace("1. First — state SPEC", "1. First — state LIVE")
+    return fx
+
+
+def at(r, text):
+    return dict(r, page_sha256=sha(text))
+
+
+case("ac04-a-depends-on-cycle-wwhtbt-skip-holds-every-member", 1, ["consumption-blocked"], ["x", "y"], "a covered entry's WWHTBT skip")(
+    lambda fx: wwhtbt_skip(cycle(fx)))
+case("ac04-a-depends-on-cycle-unbound-falsifier-holds-every-member", 1, ["consumption-blocked", "consumption-finding-unbound"], ["x", "y"],
+     "wwhtbt.md#falsifier unbound")(
+    lambda fx: swap(cycle(fx), 0, None))
+# review r15 M3: an earlier row for a finding the page no longer has is lifted by a later record binding the page whole at its current bytes
+case("ac04-an-earlier-finding-the-page-no-longer-has-is-lifted", 0, [], [])(
+    lambda fx: (earlier(fx, rows=old_rows(fx, crow("e-m1", "mechanism:1", "residual", PG2, owner="ctl", evidence=["ledger:A1"], accepted_by="rv-nobody",
+                                                    prd="PRD-x.md"))),
+                lived(fx),
+                setattr(fx, "cons_rows", fx.cons_rows + [at(test_fal(fx, PG2, "n-fal"), fx.files[PG2]), at(mech(fx, 2, PG2, "n-m2"), fx.files[PG2])]),
+                fx)[-1])
+case("ac04-an-earlier-finding-still-on-the-page-is-not-lifted-by-a-partial-record", 1, ["consumption-blocked", "consumption-finding-unbound"],
+     ["x", "y"], f"held by entry {PREV_TS}: row e-m1")(
+    lambda fx: (earlier(fx, rows=old_rows(fx, crow("e-m1", "mechanism:1", "residual", PG2, owner="ctl", evidence=["ledger:A1"], accepted_by="rv-nobody",
+                                                    prd="PRD-x.md"))),
+                setattr(fx, "cons_rows", fx.cons_rows + [test_fal(fx, PG2, "n-fal"), mech(fx, 2, PG2, "n-m2")]),
+                fx)[-1])
+# review r15 L2: an entry whose Task: line cannot be read holds every State: slug (no earlier record of its Task can be checked); the route row's
+# task_id A1 then differs from the note's (none), route-provenance-mismatch
+case("ac04-an-unreadable-task-line-holds-every-slug", 1, ["consumption-blocked", "line-missing", "route-provenance-mismatch"], ["x", "y"],
+     "the entry's Task: line cannot be read")(
+    lambda fx: (earlier(fx, rows=old_rows(fx, crow("e-m1", "mechanism:1", "residual", PG2, owner="ctl", evidence=["ledger:A1"], accepted_by="rv-nobody",
+                                                    prd="PRD-x.md"))),
+                fx.entry.__setitem__("Task", "Task: A1 Consumer:hermes"), fx)[-1])
 
 
 def wwhtbt_skip(fx):
@@ -238,7 +300,7 @@ case("ac04-an-earlier-trigger-class-5whys-skip-is-lifted-by-a-later-page", 0, []
                         rows=old_rows(fx, mech(fx, 1, PG2, "e-m1")), extra=["Failure: recurring-failure ledger:A1"]))[-1])
 case("ac04-a-falsifier-on-ac-3", 1, ["consumption-blocked", "falsifier-not-first"], ["x"], "row c-fal (wwhtbt.md#falsifier): PRD-x.md AC 3")(
     lambda fx: swap(fx, 0, fal(ac=3)))
-case("ac04-a-falsifier-on-ac-1-of-y-which-depends-on-x", 1, ["consumption-blocked", "falsifier-not-first"], ["y"], "PRD-y.md AC 1 is not AC 1 of a first PRD")(
+case("ac04-a-falsifier-on-ac-1-of-y-which-depends-on-x", 1, ["consumption-blocked", "falsifier-not-first"], ["x", "y"], "PRD-y.md AC 1 is not AC 1 of a first PRD")(
     lambda fx: swap(fx, 0, fal(prd="PRD-y.md")))
 case("ac04-an-unbound-falsifier-holds-the-first-prd", 1, ["consumption-blocked", "consumption-finding-unbound"], ["x"], "wwhtbt.md#falsifier unbound")(
     lambda fx: swap(fx, 0, None))
@@ -328,9 +390,10 @@ def run(prefix, lint, T):
             json.dump(POLICY, fh)
         fake = os.path.join(out, "fakehome")
         os.makedirs(fake, exist_ok=True)
-        path = os.environ.get("PATH", "/usr/bin:/bin")
-        if fx.path:
-            path = fx.path + os.pathsep + path
+        dirs = os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep)
+        if getattr(fx, "no_asks", False):                # as the lint's selftest fx_env: a PATH without any wm-asks (canonical-unavailable)
+            dirs = [d for d in dirs if not os.path.exists(os.path.join(d, "wm-asks"))]
+        path = os.pathsep.join(([fx.path] if fx.path else []) + dirs)
         env = dict(os.environ, HOME=fake, PATH=path, SKILL_ROUTING_POLICY=os.path.join(out, "policy.json"))
         env.pop("SKILL_ROUTING_DECISIONS", None)
         p = subprocess.run(["bash", lint, os.path.join(fx.home, "notes", "dream-log.md"), "--last", "--prd-dir", fx.home, "--decisions", fx.dec, "--json"],

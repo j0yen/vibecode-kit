@@ -2413,8 +2413,8 @@ def cons_items(v, st, home):
     read), a covered entry's WWHTBT skip and a 5whys skip under a trigger class."""
     items = []
     if st is not None:
-        items += [{"kind": "row", "row": r, "state": "refused", "resolve": st["resolve"]} for r in st["refused"]]
-        items += [{"kind": "row", "row": r, "state": "pending", "resolve": st["resolve"]} for r in st["pending"]]
+        items += [{"kind": "row", "row": r, "state": "refused", "resolve": st["resolve"], "gated": id(r) in st["gated"]} for r in st["refused"]]
+        items += [{"kind": "row", "row": r, "state": "pending", "resolve": st["resolve"], "gated": id(r) in st["gated"]} for r in st["pending"]]
         items += [{"kind": "unbound", "page": pg, "finding": f, "resolve": st["resolve"]} for pg, f in st["unbound"]]
     else:
         def res(p):
@@ -2444,27 +2444,43 @@ def cons_item_text(it):
     return "a covered entry's WWHTBT skip (an unbound falsifier)" if k == "wwhtbt-skip" else "a 5whys skip under a trigger-class Failure:"
 
 
+def cons_first_hold(v, home):
+    """The slugs an unbound falsifier holds (R7): the run's first PRDs, members whose dependencies are unknown counting as first; when a Depends-on
+    cycle leaves no member first, every member (review r15 M2)."""
+    first, unknown = first_prds(home, v["members"])
+    return [b[len("PRD-"):-len(".md")] for b in (first + unknown or list(v["members"]))]
+
+
 def cons_hold(it, v, home):
-    """R7: the slugs one unconsumed item holds. A row naming `prd` holds that slug; a row naming a canonical successor (and no prd) holds the successor
-    through the ledger gate and no slug; any other row, an unbound mechanism and a trigger-class 5whys skip hold every slug of the entry's State:
-    line; an unbound falsifier and a WWHTBT skip hold the first PRDs (members whose dependencies are unknown count as first)."""
+    """R7: the slugs one unconsumed item holds. A row naming `prd` holds that slug, and every slug of the entry's State: line too when that PRD is
+    none of the run's (review r15 M1); a row whose successor's ledger gate is verified (cons_ledger_gate: bound in the canonical ledger, its done-check
+    running this lint) and that names no prd holds the successor through that gate and no slug; any other row, an unbound mechanism and a
+    trigger-class 5whys skip hold every State: slug; an unbound falsifier, a refused falsifier row (review r15 L1) and a WWHTBT skip hold the first
+    PRDs (cons_first_hold)."""
     k = it["kind"]
     if k == "row":
         r = it["row"]
+        states = list(v["states"])
+        held = []
         if isinstance(r.get("prd"), str) and CONS_PRD_RE.fullmatch(r["prd"]):
-            return [r["prd"][len("PRD-"):-len(".md")]]
-        if isinstance(r.get("successor"), str) and CONS_ASK_RE.fullmatch(r["successor"]):
-            return []
-        return list(v["states"])
+            s = r["prd"][len("PRD-"):-len(".md")]
+            ours = set(states) | {b[len("PRD-"):-len(".md")] for b in v["members"]}
+            held = [s] + ([] if s in ours else states)
+        elif not it.get("gated"):
+            held = states
+        if r.get("finding") == "falsifier" and it["state"] == "refused":
+            held += cons_first_hold(v, home)
+        return list(dict.fromkeys(held))
     if k == "wwhtbt-skip" or k == "unbound" and it["finding"] == "falsifier":
-        first, unknown = first_prds(home, v["members"])
-        return [b[len("PRD-"):-len(".md")] for b in first + unknown]
+        return cons_first_hold(v, home)
     return list(v["states"])
 
 
 def cons_lifts(it, later):
-    """R7: whether a later entry of the Task lifts one earlier item: a record binding the same page and finding as consumed (not pending), a later
-    `wwhtbt=ran|reused` for a WWHTBT skip, a later bound 5whysandrhyme page for a trigger-class 5whys skip. later: [(view, st)]."""
+    """R7: whether a later entry of the Task lifts one earlier item: a record binding the same page and finding as consumed (not pending), or binding
+    that page whole at its current bytes (every current finding consumed, none pending or unbound) when the finding is no longer on it (review r15
+    M3: a mechanism since marked LIVE), a later `wwhtbt=ran|reused` for a WWHTBT skip, a later bound 5whysandrhyme page for a trigger-class 5whys skip.
+    later: [(view, st)]."""
     k = it["kind"]
     if k == "wwhtbt-skip":
         return any(v["an"].get("wwhtbt") and v["an"]["wwhtbt"][0] in ("ran", "reused") for v, _ in later)
@@ -2483,10 +2499,13 @@ def cons_lifts(it, later):
             continue
         pend = {(x["page"], x["finding"]) for x in st["pending"]}
         got = [(f, ok and (pg, f) not in pend) for (pg, f), ok in st["consumed"].items() if os.path.realpath(st["resolve"](pg)) == key]
+        whole = bool(got) and all(ok for _, ok in got) and not any(os.path.realpath(st["resolve"](pg)) == key for pg, _ in st["unbound"])
         if finding == "*":
-            if got and all(ok for _, ok in got) and not any(os.path.realpath(st["resolve"](pg)) == key for pg, _ in st["unbound"]):
+            if whole:
                 return True
         elif any(f == finding and ok for f, ok in got):
+            return True
+        elif whole and finding not in {f for f, _ in got}:
             return True
     return False
 
@@ -2533,6 +2552,9 @@ def cons_log(L, entries, ei, cur, rows, dec_path, home, resolve):
     for it in cons_items(cur, st, home):                                                                                       # R7
         for s in cons_hold(it, cur, home):
             held.setdefault(s, []).append(cons_item_text(it))
+    if task is None and any(ln.startswith("Task:") for ln in entries[ei]["lines"]):      # review r15 L2: an unreadable Task: line hides earlier records
+        for s in cur["states"]:
+            held.setdefault(s, []).append("the entry's Task: line cannot be read, so no earlier record of its Task can be checked")
     for slug, vals in cur["states"].items():
         if "eligible" in vals and slug in held:
             L.fail("consumption-blocked", f"slug {slug}=eligible while held by {'; '.join(held[slug][:5])}")
@@ -3250,9 +3272,12 @@ def cons_record(L, a, pages=(), mode="check"):
     `pages`: the pages the record must bind (check mode's --page; authoring mode, the pages the entry's Analysis: line binds). In authoring mode an
     unreadable record is `consumption-missing` and a canonical read that cannot be made is the refusal `canonical-unavailable` (check mode: exit 2).
     -> (obj, st), obj the check-mode JSON object and st what R7 reads: grammar-valid rows, refused rows (any refusal, including every row of a stale
-    or unreadable page), valid pending rows, unbound findings ((page, finding), finding `*` for a page whose findings cannot be read) and the
-    consumed map; (None, None) when an authoring-mode record cannot be read."""
+    or unreadable page), valid pending rows, unbound findings ((page, finding), finding `*` for a page whose findings cannot be read), the
+    consumed map and `gated`, the ids (id()) of the repair and pending rows whose successor's ledger gate was verified (cons_ledger_gate: the ask and
+    the successor bound in the canonical ledger, the successor's done-check running this lint); (None, None) when an authoring-mode record cannot be
+    read."""
     L.repairs = []
+    L.gated = set()
     rec, task = a["consumption"], a["task"]
     try:
         raw = read_text(rec)
@@ -3265,7 +3290,7 @@ def cons_record(L, a, pages=(), mode="check"):
 
     def resolve(p):
         return p if os.path.isabs(p) else os.path.join(base_dir, p)
-    st = {"rows": [], "refused": [], "pending": [], "unbound": [], "consumed": {}, "resolve": resolve}
+    st = {"rows": [], "refused": [], "pending": [], "unbound": [], "consumed": {}, "resolve": resolve, "gated": L.gated}
 
     def refuse_row(r):
         if not any(x is r for x in st["refused"]):
@@ -3527,14 +3552,16 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
         if due is None:
             return bad("consumption-binding-invalid", "key due: not an ISO timestamp")
         if due < datetime.datetime.now(datetime.timezone.utc):
+            try:                         # review r15 M1: an overdue row holds no slug only when its successor's ledger gate is verified
+                g = cons_ledger_gate(a, r, base, f)
+                if g["bound"] and g["ok"]:
+                    L.gated.add(id(r))
+            except Exit2:
+                pass
             return bad("consumption-pending-overdue", f"due {r['due']} has passed")
-    got = cons_wm_asks(["query", "--ids", f"{r['ask']},{r['successor']}", "--status", "all", "--json"])
-    if got is None:
-        raise Exit2(f"canonical-unavailable: wm-asks is not installed here; row {rid} ({b}) needs the canonical ledger")
-    byid = {x.get("ask_id") or x.get("id"): x for x in got if isinstance(x, dict)}
-    ask, succ = byid.get(r["ask"]), byid.get(r["successor"])
-    closes = [i for m in CONS_TOKEN_RE.finditer((succ or {}).get("what") or "") if m.group(1) == "closes-after" for i in m.group(2).split(",") if i]
-    if not ask or not succ or (ask.get("owner") != r["owner"]) or not cons_names(ask.get("what") or "", base, f) or r["ask"] not in closes:   # r14 M2
+    g = cons_ledger_gate(a, r, base, f)
+    ask = g["ask"]
+    if not g["bound"]:
         return bad("consumption-repair-unbound", f"ask {r['ask']} (owner {r['owner']}, naming {base}#{f}) and successor {r['successor']} "
                                                  f"(closes-after=row:{r['ask']}) are not both in the canonical ledger as bound")
     ev = cons_wm_asks(["events", r["ask"], "--json"]) or []
@@ -3542,20 +3569,11 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
     satisfied = cons_satisfied(ask, istate)
     L.repairs.append({"row": r["id"], "ask": r["ask"], "successor": r["successor"], "intake_state": istate,         # review r14c L2: every bound row read
                       "status": ask.get("status") or ask.get("section"), "satisfied": satisfied})
-    # R3 in every mode (review r14 M1): the successor's done-check, or the check of a row its text names in closes-after=row:, runs this lint on this
-    # record for the successor with --require-closed; a closed repair ask carries its proof
-    ok, why = cons_runs_lint(succ.get("check"), a["consumption"], r["successor"])
-    whys = [f"successor {r['successor']}: {why}"] if not ok else []
-    if not ok:
-        for x in cons_wm_asks(["query", "--ids", ",".join(closes), "--status", "all", "--json"]) or []:
-            if isinstance(x, dict):
-                ok2, why2 = cons_runs_lint(x.get("check"), a["consumption"], r["successor"])
-                ok = ok or ok2
-                whys.append(f"closes-after row {x.get('ask_id') or x.get('id')}: {why2}")
-    if not ok:
+    if not g["ok"]:
         return bad("consumption-repair-unproven", f"successor {r['successor']}'s done-check (or a closes-after row's) does not run dream-run-note-lint.sh "
                                                   f"--consumption {os.path.basename(a['consumption'])} --task {r['successor']} --require-closed: "
-                                                  + "; ".join(whys))
+                                                  + "; ".join(g["whys"]))
+    L.gated.add(id(r))                   # R7: the ledger gate holds the successor (its done-check runs this lint), so this row holds no slug unless it names prd
     if istate == "cancelled":            # the close gate's predicate (Hermes H5 reading 6, chain review 11 R11-F2): a cancelled repair never satisfies
         return bad("consumption-repair-unproven", f"repair ask {r['ask']} was intake-cancelled; a cancelled repair never satisfies its successor")
     acc = [cons_detail(e) for e in ev if isinstance(e, dict) and e.get("op") == "accept"]
@@ -3570,6 +3588,33 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
     if not satisfied:
         return bad("consumption-repair-open", f"repair ask {r['ask']} is still open (neither closed nor intake-accepted)")
     return True
+
+
+def cons_ledger_gate(a, r, base, f):
+    """R3's canonical reads for a repair or pending row: `bound` when the ask and the successor are in the canonical ledger as bound (the ask owned by
+    `owner` and naming `<base>#<f>`, the successor's text carrying closes-after=row:<ask>; review r14 M2), and `ok` when the successor's done-check, or
+    the check of a row its text names in closes-after=row:, runs this lint on this record for the successor with --require-closed (review r14 M1; `whys`
+    each checked row's reason). Raises Exit2 when a canonical read cannot be made (canonical-unavailable)."""
+    got = cons_wm_asks(["query", "--ids", f"{r['ask']},{r['successor']}", "--status", "all", "--json"])
+    if got is None:
+        raise Exit2(f"canonical-unavailable: wm-asks is not installed here; row {r['id']} ({r['binding']}) needs the canonical ledger")
+    byid = {x.get("ask_id") or x.get("id"): x for x in got if isinstance(x, dict)}
+    ask, succ = byid.get(r["ask"]), byid.get(r["successor"])
+    closes = [i for m in CONS_TOKEN_RE.finditer((succ or {}).get("what") or "") if m.group(1) == "closes-after" for i in m.group(2).split(",") if i]
+    g = {"ask": ask, "succ": succ, "bound": False, "ok": False, "whys": []}
+    if not ask or not succ or (ask.get("owner") != r["owner"]) or not cons_names(ask.get("what") or "", base, f) or r["ask"] not in closes:
+        return g
+    g["bound"] = True
+    ok, why = cons_runs_lint(succ.get("check"), a["consumption"], r["successor"])
+    if not ok:
+        g["whys"].append(f"successor {r['successor']}: {why}")
+        for x in cons_wm_asks(["query", "--ids", ",".join(closes), "--status", "all", "--json"]) or []:
+            if isinstance(x, dict):
+                ok2, why2 = cons_runs_lint(x.get("check"), a["consumption"], r["successor"])
+                ok = ok or ok2
+                g["whys"].append(f"closes-after row {x.get('ask_id') or x.get('id')}: {why2}")
+    g["ok"] = ok
+    return g
 
 
 def cons_detail(e):
