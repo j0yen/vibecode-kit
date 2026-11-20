@@ -19,6 +19,7 @@ Usage: dfcnlog.py --run <prefix> <lint> <scratch dir>   (exit 0 when every case 
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -384,9 +385,10 @@ def cancelled_successor(fx, overdue):
     intake_successor(fx)
     close_through_gate(fx, "A1")
     q = json.loads(wa(fx, "asks", "query", "--ids", "A2", "--status", "all", "--json") or "[]")
+    said = ""
     if q:
         env = {"authorized_by": "hermes", "text": "cancel successor", "request_type": "cancel", "target_ask": "A2", "target_rev": q[0]["rev"]}
-        wa(fx, "intake", "submit", "--envelope", json.dumps(env), "--change", "{}")
+        said = wa(fx, "intake", "submit", "--envelope", json.dumps(env), "--change", "{}")
     try:
         ev = json.loads(wa(fx, "asks", "events", "A2", "--json") or "[]")
     except ValueError:
@@ -394,8 +396,14 @@ def cancelled_successor(fx, overdue):
     if any(isinstance(e, dict) and e.get("op") == "cancel" for e in ev):        # cancelled: its check never runs, every slug held
         fx.expect = {"rc": 1, "findings": ["consumption-blocked", "consumption-pending-overdue" if overdue else "consumption-repair-unproven"],
                      "held": ["x", "y"], "needle": "slug x=eligible while held by row c-m2"}
-    else:                                                                         # the store refused the cancel: the open successor's gate holds the row
-        fx.expect = {"rc": 1 if overdue else 0, "findings": ["consumption-pending-overdue"] if overdue else [], "held": [], "needle": None}
+        return fx
+    # the store refused the cancel: the open successor's gate holds the row. That stands only for a store that refuses with A1 closed and names the
+    # close gate's R5 peer A1 (review r15d L1): a store that left A1 open (close_through_gate no longer closing it) would pass this case untested
+    a1 = status(fx, "A1").get("A1")
+    if a1 != "closed" or not re.search(r"\brefused\b.*\bA1\b", said):
+        raise SystemExit("FAIL dfcnlog: the store took no cancel of A2, and its refusal is not the R5 one with A1 closed (A1 %s; intake said %r)"
+                         % (a1, said.strip()[:300]))
+    fx.expect = {"rc": 1 if overdue else 0, "findings": ["consumption-pending-overdue"] if overdue else [], "held": [], "needle": None}
     return fx
 
 
