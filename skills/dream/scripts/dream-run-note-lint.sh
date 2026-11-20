@@ -723,7 +723,8 @@ def post_review_reuse(entries, ei, adv, mrec, rows, task, reviews_raw, resolve):
     pscope = (mrec["earlier"][-1]["eff"].get("scope") or ([], None))[0]
     if [os.path.normpath(resolve(x)) for x in pscope] != [os.path.normpath(resolve(x)) for x in mrec["scope"]]:
         return False                                                             # (b)
-    old = [ln.rstrip() for ln in prev["lines"] if ln.startswith("Review:")]
+    old = [ln.rstrip() for ln in prev["lines"] if ln.startswith("Review:")
+           and not re.fullmatch(r"Review:\s+none\s*", ln)]                    # review r23 L2: `Review: none` is no line
     cur = [ln.rstrip() for ln in reviews_raw]
     new = [ln for ln in cur if ln not in old]
     if not new or any(ln not in cur for ln in old):
@@ -1260,7 +1261,7 @@ def corrected_sidecar(L, c, f, full, sbytes, rows_sc, rows, task):
     row is {"corrects": <the original sidecar's sha256>, "session": <the chain review's session>}, written by that session
     resumed (a launch row of the task with skill dream, role review, the review's scope_id and resume true, later than that
     session's first such row without resume; review r21 L1); its other rows are the original's, in order, each changing
-    only prds and consumers, with no key repeated in any row (review r21 L2). Each refused file is
+    only prds and consumers, with no key repeated in any row of either file (review r21 L2, r23 L1). Each refused file is
     sidecar-correction-unbound. -> (shown path, rows) of the highest valid n, or None."""
     d, base = os.path.dirname(full), os.path.basename(full)
     try:
@@ -1285,6 +1286,10 @@ def corrected_sidecar(L, c, f, full, sbytes, rows_sc, rows, task):
         if dups:
             why.append("a key repeated in one row (" + ", ".join(f"row {n}: {k}" for n, k in dups) + "): rows are "
                        "compared as parsed, so a repeated key could hide a byte change")
+        odups = dup_keys(sbytes)
+        if odups:                        # review r23 L1: the original it is compared with, too
+            why.append("the original sidecar repeats a key in one row (" + ", ".join(f"row {n}: {k}" for n, k in odups)
+                       + "): rows are compared as parsed, so a repeated key could hide a byte change")
         head = got[0][1] if got else None
         if not (isinstance(head, dict) and set(head) == {"corrects", "session"}):
             why.append("its first row is not {\"corrects\": <sha256>, \"session\": <session>}")

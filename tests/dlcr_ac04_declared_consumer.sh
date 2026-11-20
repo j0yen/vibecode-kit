@@ -29,11 +29,11 @@ cx r4-reviewer-row; run_mr; has_fail mission-finding-incomplete "$MSG"
 # two undeclared external names, only one of them declared at the next freeze: the whole row stays a failure
 cx r4-two-names; run_mr; findings_eq '["mission-finding-incomplete"]'; has_fail mission-finding-incomplete "$MSG"
 # a row by a session with no author launch row, by another round's reviewer, or for another manifest pair
-for c in r4-foreign-row r4-other-reviewer-row r4-wrong-before r4-wrong-after; do
+for c in r4-foreign-row r4-other-reviewer-row r4-wrong-before r4-wrong-after r4-other-task-author; do
   cx "$c"; run_mr; has_fail mission-finding-incomplete "$MSG"
 done
-for c in r4-later-only r4-live-only r4-no-row r4-reviewer-row r4-two-names r4-foreign-row r4-other-reviewer-row r4-wrong-before r4-wrong-after; do
+for c in r4-later-only r4-live-only r4-no-row r4-reviewer-row r4-two-names r4-foreign-row r4-other-reviewer-row r4-wrong-before r4-wrong-after r4-other-task-author; do
   cx "$c"; run_mr; jtrue '"findings_historical" not in d["mission"]' "$c: nothing historical"
 done
 today r4-positive; findings_eq '["mission-finding-incomplete"]'
-pass "review-13 sidecar shape refused; a consumer declared at the next freeze by the author's edges row accepted and kept historical; two manifests later, live header only, no row, the reviewer's row (the reviewer also an admitted author), a second undeclared name, a row by a non-author session, by another round's reviewer, or for another manifest pair refused; the installed rule refuses the positive"
+pass "review-13 sidecar shape refused; a consumer declared at the next freeze by the author's edges row accepted and kept historical; two manifests later, live header only, no row, the reviewer's row (the reviewer also an admitted author), a second undeclared name, a row by a non-author session, by another round's reviewer, by an author of another task, or for another manifest pair refused; the installed rule refuses the positive"

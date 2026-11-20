@@ -302,6 +302,51 @@ def r5_base(prev_all=False, scope_extra=False, other_scope_id=False, prev_uncove
     return M
 
 
+# ---------------------------------------------------------------- review r23 (L1, L2, L4)
+def r2_dup_in_original():
+    """r2-positive whose original sidecar row 1 repeats the key class (the findings= binding re-signed over it)."""
+    M = r2_base()
+    orig = M.files[SC_REL].decode().rstrip("\n").split("\n")
+    orig[0] = '{"class": "authority-bypass", ' + orig[0][1:]
+    sb = ("\n".join(orig) + "\n").encode()
+    rv1 = M.review("notes/reviews/r1", S["R1"], [("foo", "FIX"), ("bar", "APPROVE")], "FIX", findings=[{}], sidecar_bytes=sb)
+    lines = entry_lines(M)
+    for i, ln in enumerate(lines):
+        if ln.startswith("Review: notes/reviews/r1/"):
+            lines[i] = rv1
+    return corrected(rewrite_repairs(M))
+
+
+def r4_other_task_author():
+    """r4 whose only edges row is by a session whose author launch row is of another task."""
+    x = "cccccccc-0000-4000-8000-0000000000ee"
+    M = r4_base(row_author=x)
+    M.row(at(9, 10), x, role="author", task_id="OTHER-TASK")
+    return M
+
+
+def r5_later_row(**kw):
+    """r5-positive plus a later launch row of r3's session that is not of this task's dream (another task or skill)."""
+    M = r5_base()
+    M.row(at(10, 55), S["R3"], role="author", **kw)
+    return M
+
+
+def r5_first_round(keep_none=False):
+    """rounds(1): a pre-review entry at 13:00 with `Review: none`, then the post-review entry with r1's review of m1 (the
+    last manifest), both naming the same matrix; keep_none: the post entry keeps `Review: none` too."""
+    M = mfx.rounds(1)
+    post = M.entries[-1]
+    pre = [ln for ln in post["lines"] if not ln.startswith("Review:")]
+    i = next(k for k, ln in enumerate(pre) if ln.startswith("State:"))
+    pre.insert(i, "Review: none")
+    M.entries.insert(len(M.entries) - 1, {"ts": at(13), "lines": pre})
+    if keep_none:
+        j = next(k for k, ln in enumerate(post["lines"]) if ln.startswith("Review:"))
+        post["lines"].insert(j, "Review: none")
+    return M
+
+
 CASES = {
     "r1-positive": lambda: r1_base(),
     "r1-intermediate-reviewed": lambda: r1_base(intermediate_reviewed=True),
@@ -316,6 +361,7 @@ CASES = {
     "r2-resume-only-row": r2_resume_only_row,
     "r2-resume-before": r2_resume_before,
     "r2-dupkey": r2_dupkey,
+    "r2-dup-in-original": r2_dup_in_original,
     "r3-original": lambda: r3_base(consolidate=False),
     "r3-positive": lambda: r3_base(),
     "r3-other-pair": r3_other_pair,
@@ -333,6 +379,7 @@ CASES = {
     "r4-other-reviewer-row": lambda: r4_base(row_author=S["R2"]),
     "r4-wrong-before": lambda: r4_base(pair=(1, 1)),
     "r4-wrong-after": lambda: r4_base(pair=(0, 0)),
+    "r4-other-task-author": r4_other_task_author,
     "r5-positive": lambda: r5_base(),
     "r5-scope-added": lambda: r5_base(scope_extra=True),
     "r5-no-new-review": lambda: r5_base(prev_all=True),
@@ -343,6 +390,10 @@ CASES = {
     "r5-new-line-author-role": lambda: r5_base(new_author_role=True),
     "r5-prev-other-task": lambda: r5_base(prev_task="MX-2"),
     "r5-scope-dropped": lambda: r5_base(prev_scope_drop=True),
+    "r5-later-other-task-row": lambda: r5_later_row(task_id="OTHER-TASK"),
+    "r5-later-non-dream-row": lambda: r5_later_row(skill="other"),
+    "r5-first-round-review-none": lambda: r5_first_round(),
+    "r5-first-round-keeps-none": lambda: r5_first_round(keep_none=True),
 }
 for _k, _v in (("id", "F9"), ("class", "authority-bypass"), ("counterexample", "another counterexample"),
                ("correction", "another correction"), ("control", "another control")):

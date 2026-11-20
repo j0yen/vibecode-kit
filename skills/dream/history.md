@@ -214,8 +214,10 @@ doubts a rule can see what it cost when it was missing. Append-only.
   is kept in `findings_historical` with `declared_by`. Review 14's post-review entry (1:53:07 AM)
   named the matrix of the pre-review entry (1:22:59 AM) for the same round, which the recency
   rule read as an earlier run's matrix. A post-review entry may now carry the previous entry's
-  matrix forward when the matrix path, `uncovered=` and `scope=` are unchanged and it adds at
-  least one review of the last listed manifest.
+  matrix forward when the previous entry is of the same task, the matrix path, `uncovered=` and
+  `scope=` are unchanged, and it keeps the previous entry's `Review:` lines (`Review: none`
+  counts as none) and adds at least one, each new line's session having as its latest launch row
+  for the task a review of the last listed manifest (review r23 L2, L3).
 - **Reading a review scope recorded on another host (2026-11-20, A1723).** A1113's nine
   chain reviews ran on Carbon, and their launch rows record `scope` under Carbon's PRD home
   (`/home/jsy/.cache/dream-a1113/prds-clone`). The continuation on RedBaron holds the same
