@@ -17,7 +17,7 @@ S_F1=eeeeeeee-0000-4000-8000-000000000004    # chain review r1 (before)
 S_F2=eeeeeeee-0000-4000-8000-000000000005    # chain review r2 (after)
 S_F3=eeeeeeee-0000-4000-8000-000000000006    # chain review r3 (third, or a same-manifest re-review)
 S_FB=eeeeeeee-0000-4000-8000-000000000007    # a bounded re-review (AC 5)
-FC_E1_TS=2027-02-01T08:20:00-08:00
+FC_E1_TS=2026-11-18T08:20:00-08:00
 BEF=notes/snapshots/before/before.sha256
 AFT=notes/snapshots/after/after.sha256
 THR=notes/snapshots/third/third.sha256
@@ -25,7 +25,7 @@ R1D=notes/reviews/r1; R2D=notes/reviews/r2; R3D=notes/reviews/r3
 FC_EB=drfc-mission.edges.jsonl
 FC_RB=drfc-mission.repairs.jsonl
 FC_RP=notes/missions/$FC_RB
-FC_MXB=2027-02-01T08:30:00-08:00-adversarial.md
+FC_MXB=2026-11-18T08:30:00-08:00-adversarial.md
 ST2_ALL="a=linted a=reviewed:FIX a=reviewed:APPROVE a=eligible b=linted b=reviewed:FIX b=reviewed:APPROVE b=eligible c=linted c=reviewed:FIX c=reviewed:APPROVE c=eligible d=linted d=reviewed:APPROVE d=reviewed:APPROVE d=eligible"
 setup_fc() { setup_mr; }
 # use <base|variant>: a fresh copy of the passing fixture, the named variant overlaid

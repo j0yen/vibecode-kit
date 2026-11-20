@@ -53,7 +53,7 @@ def scope_id(text):
 
 S = {k: f"cccccccc-0000-4000-8000-0000000000{n:02d}" for n, k in enumerate(
     ["A", "A2", "R1", "R2", "R3", "R4", "R5", "R6", "X1", "X2", "X3", "N", "N0", "U", "F", "C"], 1)}
-DAY = "2027-03-01"
+DAY = "2026-11-18"
 
 
 def at(hh, mm=0):
@@ -355,7 +355,7 @@ def _rebuild_repairs(M):
 def c_live_differs(**kw):
     """The live edges header names another matrix than adversarial= after the last freeze."""
     M = rounds(3)
-    M.files[M.edges_rel] = M.edges(matrix="2027-03-01T23:00:00-08:00-adversarial.md")
+    M.files[M.edges_rel] = M.edges(matrix="2026-11-18T23:00:00-08:00-adversarial.md")
     return M
 
 
@@ -519,9 +519,9 @@ CASES = {
     "live-differs": c_live_differs,
     "matrix-empty": c_bad_matrix(""),
     "matrix-int": c_bad_matrix(5),
-    "matrix-path": c_bad_matrix("notes/reviews/2027-03-01T11:00:00-08:00-adversarial.md"),
+    "matrix-path": c_bad_matrix("notes/reviews/2026-11-18T11:00:00-08:00-adversarial.md"),
     "matrix-prd": c_bad_matrix("PRD-foo.md"),
-    "matrix-not-md": c_bad_matrix("2027-03-01T11:00:00-08:00-adversarial.txt"),
+    "matrix-not-md": c_bad_matrix("2026-11-18T11:00:00-08:00-adversarial.txt"),
     "matrix-vision": c_bad_vision,
     "matrix-contract": c_matrix_contract,
     "matrix-edges-file": c_matrix_edges_file,

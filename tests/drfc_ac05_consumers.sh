@@ -25,7 +25,7 @@ bounded() {
 import sys, json
 p, s, sid, log = sys.argv[1:]
 R = [json.loads(l) for l in open(p).read().splitlines()]
-R.append(dict(R[-1], ts="2027-02-01T12:30:00-08:00", session=s, scope="notes/snapshots/bounded/bounded.sha256", scope_id=sid))
+R.append(dict(R[-1], ts="2026-11-18T12:30:00-08:00", session=s, scope="notes/snapshots/bounded/bounded.sha256", scope_id=sid))
 open(p, "w").write("".join(json.dumps(r) + "\n" for r in R))
 L = open(log).read().split("\n"); i = max(i for i, l in enumerate(L) if l.startswith("Review:"))
 L.insert(i + 1, f"Review: notes/reviews/bounded/verdict.txt reviewer-session={s}")

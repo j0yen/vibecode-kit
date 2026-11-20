@@ -126,3 +126,34 @@ doubts a rule can see what it cost when it was missing. Append-only.
   names the note's `adversarial=` matrix, a renamed matrix in `changed` is checked on its own side
   of the row, and a header without `matrix` keeps the matrix of the entry that first listed the
   manifest, so the existing notes lint unchanged (PRD dream-matrix-per-manifest).
+- **An analysis is run, reused exactly, or skipped only on a recorded outage (2026-11-19, A1723).**
+  Of the 20 governed run-note entries on carbon (four PRD homes, read 2026-11-19), 18 said
+  `wwhtbt=skipped` with free text and 2 ran a page; nine are missions. The skips were for reasons
+  that had since gone away (a Fable-only route, a wiki path out of scope). The lint accepted any skip text, a `reused` it could not verify, and a failure recorded
+  only in prose, so a skip made for a reason that still holds looked the same as one that no
+  longer does. From the cutover date written in the lint, a covered entry (a mission, new material,
+  or a PRD moved since the last manifest a reviewer bound) records a page it ran, a reuse whose page
+  digest and input manifest verify, or a skip naming a denied route-outage row that no later launch
+  of the same skill contradicts. A typed `Failure:` line names the class, whose floor comes from
+  verdict files the author does not write, and the three trigger classes need a bound
+  5whysandrhyme page. Pages may live under the PRD home's `notes/analysis/`, which removes the
+  wiki-scope reason for skipping (PRD dream-analysis-trigger-record). An outage skip names one of
+  the resolver's own outage texts, whole; the `policy-missing:` texts and any denial the caller
+  induced are the caller's to cure, and proving an outage was not induced is the route-source
+  producer's (A1300). The 2027-dated fixture families were re-dated before the cutover by a
+  checked-in tool that regenerates every digest and scope id, so the cutover stays the merge date
+  and every fixture keeps its output (Hermes H1/H2, 2026-11-19).
+- **An analysis finding counts as consumed only by the effect it names (2026-11-19, A1723).** The
+  lint read a bound analysis page's first lines for its session and nothing past them: the one
+  mission page on file (A1724's WWHTBT) listed eight mechanisms, all `state SPEC`, and its
+  falsifier waited in a JSON note, while chain-review findings already had a consumer (the
+  repairs file) and analysis findings had none, so a run could cite a page and drop everything
+  in it, and a receipt (a session, a report) stood in for consumption. From the cutover date
+  written in the lint, a note that binds a page carries a `Consumption:` line naming a record
+  that binds each finding to one of five bindings: a `requirement` (an AC that runs a command;
+  the falsifier on AC 1 of a first PRD), a `repair` (a canonical ask whose successor's done-check
+  runs this lint with `--require-closed`), a `test` (a file at a commit), a `residual` accepted
+  by a review session outside the author lineage, or a `pending` row with its owner, due date,
+  ask and successor. An unconsumed finding holds only the slugs it names, and the same answer is
+  available as `--consumption <record> --task <T>` for a canonical done-check or the A1673
+  plugin (PRD dream-finding-consumption).
