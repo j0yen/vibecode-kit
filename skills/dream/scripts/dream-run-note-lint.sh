@@ -3137,23 +3137,52 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
         return True
     if b == "pending":
         return bad("consumption-repair-open", f"pending row for successor {task}: unconsumed until a revision replaces it")
-    if (ask.get("status") or ask.get("section")) not in ("closed", "done"):
-        return bad("consumption-repair-open", f"repair ask {r['ask']} is still open")
     ev = cons_wm_asks(["events", r["ask"], "--json"]) or []
-    acc = []
-    for e in ev:
-        if isinstance(e, dict) and e.get("op") == "accept":
-            d = e.get("detail")
-            try:
-                d = json.loads(d) if isinstance(d, str) else d
-            except ValueError:
-                d = {}
-            acc.append(d if isinstance(d, dict) else {})
+    istate = cons_intake_state(ev)
+    if istate == "cancelled":            # the close gate's predicate (Hermes H5 reading 6, chain review 11 R11-F2): a cancelled repair never satisfies
+        return bad("consumption-repair-unproven", f"repair ask {r['ask']} was intake-cancelled; a cancelled repair never satisfies its successor")
+    if not cons_satisfied(ask, istate):
+        return bad("consumption-repair-open", f"repair ask {r['ask']} is still open (neither closed nor intake-accepted)")
+    acc = [cons_detail(e) for e in ev if isinstance(e, dict) and e.get("op") == "accept"]
     proved = any(x.get("result") == "FAIL" and any(y.get("result") == "PASS" and y.get("sha") == x.get("sha") and y.get("mode") == "run"
                                                   for y in acc[i + 1:]) for i, x in enumerate(acc))
     if not proved:
         return bad("consumption-repair-unproven", f"closed repair ask {r['ask']} shows no accept FAIL followed by a run PASS at one sha")
     return True
+
+
+def cons_detail(e):
+    d = e.get("detail")
+    try:
+        d = json.loads(d) if isinstance(d, str) else d
+    except ValueError:
+        d = {}
+    return d if isinstance(d, dict) else {}
+
+
+def cons_intake_state(events):
+    """The intake state of a canonical row, read from its own events (`wm-asks asks query --json` does not carry it): `add` (its `state`), `claim`,
+    `transition` (`to`), `accepted` and `cancel` set it; None for a row the intake never touched."""
+    st = None
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        op, d = e.get("op"), cons_detail(e)
+        if op == "add" and isinstance(d.get("state"), str):
+            st = d["state"]
+        elif op == "transition" and isinstance(d.get("to"), str):
+            st = d["to"]
+        elif op in ("accepted", "cancel", "claim"):
+            st = {"accepted": "accepted", "cancel": "cancelled", "claim": "claimed"}[op]
+    return st
+
+
+def cons_satisfied(ask, istate):
+    """The close gate's predicate, owned by PRD-swarm-decide-asks-waits-on-close-gate R1 and R4 (Hermes H5 reading 6; chain review 11 R11-F2): a bound
+    row is satisfied when it is closed or currently intake-accepted, and never when intake-cancelled (a cancelled row reads closed)."""
+    if istate == "cancelled":
+        return False
+    return (ask.get("status") or ask.get("section")) in ("closed", "done") or istate == "accepted"
 
 
 def cons_accepts_line(reviews, session, rid):

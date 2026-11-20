@@ -14,6 +14,7 @@ mechanism 2: a test row) and lints to exit 0. Each case replaces or adds rows an
 FAIL line must carry (the row id, the key and `<page basename>#<finding>`).
 
 Usage: dfcnfx.py --run <prefix> <lint> <scratch dir>   (exit 0 when every case of the prefix passes; one PASS or FAIL line per case)
+       dfcnfx.py --nodrift <lint> <scratch dir> <swarm-decide tree>   (the lint's repair predicate against the close gate's own _satisfied)
 """
 import hashlib
 import json
@@ -129,17 +130,39 @@ class Fx:
                                         control="the negative control: a record without the row exits 1"),
                 "mechanism:2": self.row("c-m2", "mechanism:2", "test", repo=self.repo, commit=self.commit, path="tests/bind.sh")}
 
-    def lint(self, lint, rows, drop=(), wm_asks=True):
+    def fake_canonical(self, scenario):
+        """A `wm-asks` that answers `asks query --ids` and `asks events <id>` from a scenario file, in the shapes the real CLI prints (query: the row
+        keys of `asks query --json`; events: op plus a JSON-text detail). Used where the real intake path needs a root-owned policy (acceptance)."""
+        d = os.path.join(self.T, "fake-shim")
+        os.makedirs(d, exist_ok=True)
+        sc = os.path.join(self.T, "scenario.json")
+        with open(sc, "w") as f:
+            json.dump(scenario, f)
+        write(os.path.join(d, "wm-asks"), """#!/usr/bin/env python3
+import json, sys
+sc = json.load(open(%r))
+a = sys.argv[1:]
+if a[:2] == ["asks", "query"] and "--ids" in a:
+    ids = a[a.index("--ids") + 1].split(",")
+    print(json.dumps([r for r in sc["rows"] if r["ask_id"] in ids]))
+elif a[:2] == ["asks", "events"]:
+    print(json.dumps([dict(e, detail=json.dumps(e["detail"])) for e in sc["events"].get(a[2], [])]))
+else:
+    sys.exit("fake wm-asks: unexpected %%s" %% a)
+""" % sc, 0o755)
+        return d
+
+    def lint(self, lint, rows, drop=(), wm_asks=True, task=TASK, require_closed=False, shim=None):
         rec = os.path.join(self.home, "record.jsonl")          # at the home's root: without --prd-home, row paths resolve against the record's directory
         with open(rec, "w") as f:
             for r in rows:
                 f.write(json.dumps(r) + "\n")
         path = os.environ.get("PATH", "/usr/bin:/bin")
         if wm_asks:
-            path = self.shim_dir + os.pathsep + path
+            path = (shim or self.shim_dir) + os.pathsep + path
         else:
             path = os.pathsep.join(d for d in path.split(os.pathsep) if not os.path.exists(os.path.join(d, "wm-asks")))
-        args = ["bash", lint, "--consumption", rec, "--task", TASK, "--page", PAGE, "--json"]
+        args = ["bash", lint, "--consumption", rec, "--task", task, "--page", PAGE, "--json"] + (["--require-closed"] if require_closed else [])
         for flag, val in (("--prd-home", self.home), ("--reviews", self.reviews), ("--decisions", self.dec)):
             if flag not in drop:
                 args += [flag, val]
@@ -156,9 +179,10 @@ class Fx:
 CASES = {}
 
 
-def case(name, rc, findings, needles=(), drop=(), unconsumed=None):
+def case(name, rc, findings, needles=(), drop=(), unconsumed=None, scenario=None):
     def deco(fn):
-        CASES[name] = {"fn": fn, "rc": rc, "findings": sorted(findings), "needles": list(needles), "drop": drop, "unconsumed": unconsumed}
+        CASES[name] = {"fn": fn, "rc": rc, "findings": sorted(findings), "needles": list(needles), "drop": drop, "unconsumed": unconsumed,
+                       "scenario": scenario}
         return fn
     return deco
 
@@ -247,9 +271,77 @@ case("ac03-check-mode-without-prd-home", 1, ["consumption-context-missing"], ["r
      drop=("--prd-home",))(lambda fx: rows_with(fx))
 
 
+# ---------------------------------------------------------------- Hermes H5 reading 6 in --require-closed (chain review 11 R11-F2; CR7 3:23 PM)
+# The close gate's predicate: a repair is satisfied when its ask is closed or currently intake-accepted, never when intake-cancelled; its proof is an
+# accept FAIL followed by a run-mode PASS at one sha, read from the ask's own events whichever kind of row it is.
+X, Y = "a" * 64, "b" * 64
+
+
+def ev(op, **d):
+    return {"op": op, "detail": d, "actor": "t", "ts": "2026-11-19T15:00:00-08:00"}
+
+
+PROOF = [ev("accept", result="FAIL", sha=X, mode="run", exit=1), ev("accept", result="PASS", sha=X, mode="run", exit=0)]
+INTAKE_ADD = ev("add", owner="ctl", due="2026-12-31T09:00", state="ready")
+PLAIN_ADD = ev("add", owner="ctl", due="2026-12-31T09:00")
+
+
+def scen(status, events):
+    rows = [{"ask_id": "A101", "owner": "ctl", "what": "repair %s#mechanism:2 (the canonical repair)" % BASE, "status": status, "check": "true"},
+            {"ask_id": "A102", "owner": "hermes", "what": "successor S closes-after=row:A101", "status": "open", "check": "true"}]
+    return {"rows": rows, "events": {"A101": events}}
+
+
+H5_STATES = {   # name -> (scenario, close gate row {section, state} for the no-drift comparison)
+    "closed": (scen("closed", [PLAIN_ADD] + PROOF + [ev("resolve", verdict_row="V1")]), {"section": "closed", "state": None}),
+    "intake-accepted-open": (scen("open", [INTAKE_ADD, ev("claim", worker="w"), ev("transition", to="running"), ev("transition", to="verifying")] + PROOF
+                                  + [ev("accepted", evidence="readback")]), {"section": "open", "state": "accepted"}),
+    "intake-cancelled": (scen("closed", [INTAKE_ADD] + PROOF + [ev("cancel", event_id="tg:x")]), {"section": "closed", "state": "cancelled"}),
+    "open": (scen("open", [INTAKE_ADD] + PROOF), {"section": "open", "state": "ready"}),
+}
+
+
+def h5_rows(fx):
+    return rows_with(fx, **{"mechanism:2": fx.row("c-rep", "mechanism:2", "repair", ask="A101", owner="ctl", successor="A102")})
+
+
+case("h5p-closed-repair-with-its-proof", 0, [], unconsumed=[], scenario=H5_STATES["closed"][0])(h5_rows)
+case("h5p-intake-accepted-open-repair-with-its-proof", 0, [], unconsumed=[], scenario=H5_STATES["intake-accepted-open"][0])(h5_rows)
+case("h5p-intake-cancelled-repair-never-satisfies", 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE, "intake-cancelled"],
+     unconsumed=[BASE + "#mechanism:2"], scenario=H5_STATES["intake-cancelled"][0])(h5_rows)
+case("h5p-open-repair-waits", 1, ["consumption-repair-open"], ["row c-rep (%s#mechanism:2)" % BASE, "neither closed nor intake-accepted"],
+     unconsumed=[BASE + "#mechanism:2"], scenario=H5_STATES["open"][0])(h5_rows)
+case("h5p-different-check-pass-is-no-proof", 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE, "no accept FAIL followed by a run PASS"],
+     unconsumed=[BASE + "#mechanism:2"], scenario=scen("closed", [PLAIN_ADD, ev("accept", result="FAIL", sha=X, mode="run"),
+                                                                  ev("accept", result="PASS", sha=Y, mode="run")]))(h5_rows)
+case("h5p-attested-pass-is-no-proof", 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE],
+     unconsumed=[BASE + "#mechanism:2"], scenario=scen("closed", [PLAIN_ADD, ev("accept", result="FAIL", sha=X, mode="run"),
+                                                                  ev("accept", result="PASS", sha=X, mode="attested")]))(h5_rows)
+case("h5p-an-unrelated-asks-pass-is-no-proof", 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE],
+     unconsumed=[BASE + "#mechanism:2"], scenario=dict(scen("closed", [PLAIN_ADD, ev("accept", result="FAIL", sha=X, mode="run")]),
+                                                       events={"A101": [PLAIN_ADD, ev("accept", result="FAIL", sha=X, mode="run")], "A103": PROOF}))(h5_rows)
+
+
+def nodrift(lint, T, sd):
+    """Chain review 11 R11-F2: the lint's reading of a repair's state equals the close gate's own `_satisfied` (imported from the swarm-decide tree sd)
+    on closed, intake-accepted-but-open, intake-cancelled and open rows, each carrying a valid proof."""
+    sys.path.insert(0, sd)
+    from wm_decide import asks as close_gate          # noqa: E402  (the predicate's one owner)
+    fx = Fx(T)
+    bad = 0
+    for name, (sc, row) in H5_STATES.items():
+        want = bool(close_gate._satisfied(row))
+        rc, d, err = fx.lint(lint, h5_rows(fx), task="A102", require_closed=True, shim=fx.fake_canonical(sc))
+        got = rc == 0
+        print("%s no-drift %s: close gate _satisfied=%s, lint consumed=%s (rc %s)" % ("PASS" if got == want else "FAIL", name, want, got, rc))
+        bad += got != want
+    return 1 if bad else 0
+
+
 def run(prefix, lint, T):
     fx = Fx(T)
-    fx.canonical()
+    if not prefix.startswith("h5p"):
+        fx.canonical()
     bad = 0
     names = [n for n in CASES if n.startswith(prefix)]
     if not names:
@@ -257,7 +349,10 @@ def run(prefix, lint, T):
         return 1
     for n in names:
         c = CASES[n]
-        rc, d, err = fx.lint(lint, c["fn"](fx), drop=c["drop"])
+        if c["scenario"] is not None:
+            rc, d, err = fx.lint(lint, c["fn"](fx), drop=c["drop"], task="A102", require_closed=True, shim=fx.fake_canonical(c["scenario"]))
+        else:
+            rc, d, err = fx.lint(lint, c["fn"](fx), drop=c["drop"])
         fails = [l for l in err.splitlines() if l.startswith("FAIL ")]
         probs = []
         if rc != c["rc"]:
@@ -283,5 +378,7 @@ def run(prefix, lint, T):
 if __name__ == "__main__":
     if len(sys.argv) == 5 and sys.argv[1] == "--run":
         sys.exit(run(sys.argv[2], sys.argv[3], sys.argv[4]))
+    if len(sys.argv) == 5 and sys.argv[1] == "--nodrift":
+        sys.exit(nodrift(sys.argv[2], sys.argv[3], sys.argv[4]))
     print(__doc__.strip().splitlines()[-1], file=sys.stderr)
     sys.exit(2)
