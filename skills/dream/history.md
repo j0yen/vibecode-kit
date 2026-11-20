@@ -138,11 +138,12 @@ doubts a rule can see what it cost when it was missing. Append-only.
   before `LEGACY_MATRIX_SINCE` = 2026-11-20T00:00:00-08:00 keeps the one matrix it lists when
   an entry names it in `adversarial=` or its copy passes the matrix grammar at its listed
   digest; the installing commit sets the constant no earlier than the installation and records
-  the value here. R4: an entry a manifest lists by a path outside its own directory is keyed by
-  that path, a row names it by path with a `delta` record checked against both manifests, a
-  legacy row's ambiguous bare basename is listed in `repairs.ambiguous`, and header members,
-  the repairs file among them, stay basename-keyed. Re-linted with these rules, the A1724
-  home's hash findings fall from 28,250 to one (row 120 names the repairs ledger by path
-  without `delta`), and two amended rows' unswept edges show as `sweep-missing`. R2 (sidecar
-  schema), R3 (generation-local judgement and merged chain reviews), R5 (lineage) and the rest
-  of R8 are not built.
+  the value here. R4: an entry a manifest lists by a path outside the directories of the
+  manifests compared is keyed by that path, a row names it by path with a `delta` record
+  checked against both manifests, a legacy row's ambiguous bare basename is listed in
+  `repairs.ambiguous`, and header members, the repairs file among them, stay basename-keyed in
+  every pass, so a row without `delta` may name one by path (the repairs ledger cannot carry
+  its own digest in a record). Re-linted with these rules, the A1724 home's 28,250 hash
+  findings and its GEN1 `mission-scope-incomplete` clear, and two amended rows' unswept edges
+  show as `sweep-missing`. R2 (sidecar schema), R3 (generation-local judgement and merged chain
+  reviews), R5 (lineage) and the rest of R8 are not built.

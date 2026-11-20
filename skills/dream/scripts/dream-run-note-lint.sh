@@ -117,9 +117,11 @@
 # basenames keep the basename rule, and one several entries of a manifest hold is listed in
 # mission.repairs.ambiguous, never failed; a `delta` row naming such a basename is repair-grammar
 # naming the paths. The undeclared-change pass keys entries holding `/` by path; bare names,
-# entries in the manifest's own directory and header members (the repairs file included) by
-# basename; a header member twice in one manifest is mission-scope-mismatch. Every comparison of
-# a row entry with a header member, an edge endpoint or a hold reads its basename. A manifest
+# entries in the directory of either manifest of the pair and header members (the repairs file
+# included) by basename; a header member twice in one manifest is mission-scope-mismatch. A header
+# member is looked up by its basename in every pass (a row without `delta` may name one by path,
+# checked as installed), and every comparison of a row entry with a header member, an edge
+# endpoint or a hold reads its basename; a record matches its entry by resolved key. A manifest
 # whose frozen header has no `matrix`, first listed by an entry dated (Route decision=, else header
 # ts) before LEGACY_MATRIX_SINCE, that lists exactly one *-adversarial.md keeps that matrix when an
 # entry of the mission not later than the linted one names it in adversarial= or its copy at the
@@ -252,14 +254,16 @@ def entry_key(manifest_full, rel):
     return os.path.normpath(os.path.join(os.path.dirname(manifest_full), rel))
 
 
-def split_keys(m, members):
+def split_keys(m, members, dirs=()):
     """R4: ({basename: digest} of the basename-keyed entries, {key: digest} of the path-keyed ones).
-    Basename-keyed: a bare name, an entry in the manifest's own directory, a header member; the
-    first digest of a basename is the first of the sorted canon, as installed."""
-    mdir = os.path.normpath(os.path.dirname(m["full"]))
+    Basename-keyed: a bare name, an entry in the manifest's own directory or in a directory of dirs
+    (the other manifest of a compared pair, so a file one manifest lists bare and the other by path
+    is compared), a header member; the first digest of a basename is the first of the sorted canon,
+    as installed."""
+    mdirs = {os.path.normpath(os.path.dirname(m["full"]))} | set(dirs)
     bk, pk = {}, {}
     for raw, key, base, dg in sorted(m.get("entries") or [], key=lambda e: (e[3], e[2])):
-        if "/" not in raw or os.path.dirname(key) == mdir or base in members:
+        if "/" not in raw or os.path.dirname(key) in mdirs or base in members:
             bk.setdefault(base, dg)
         else:
             pk.setdefault(key, dg)
@@ -1378,16 +1382,20 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                 if k in r and not (isinstance(r[k], str) and r[k].strip()):
                     bad(k, "not a non-empty string")
                     ok = False
-            for k in ("changed", "sweep", "added", "removed"):
+            for k in ("changed", "sweep"):
                 if k in r and not (isinstance(r[k], list) and all(isinstance(x, str) and x.strip() for x in r[k])):
                     bad(k, "not a list of names")
                     ok = False
             delta = None
-            if "delta" in r:                # generation-aware R4: the path records of a row
-                delta, why = parse_delta(r["delta"])
-                if why:
+            if "delta" in r:                # generation-aware R4: the path records of a row, and its path
+                delta, why = parse_delta(r["delta"])     # lists (a row without delta keeps 43d5b39, which
+                if why:                                  # read neither added nor removed)
                     bad("delta", why)
                     ok = False
+                for k in ("added", "removed"):
+                    if k in r and not (isinstance(r[k], list) and all(isinstance(x, str) and x.strip() for x in r[k])):
+                        bad(k, "not a list of names")
+                        ok = False
             reason = r.get("reason")
             if disp in ("declined", "amended") and not (isinstance(reason, str) and reason.strip()):
                 bad("reason", f"a {disp} row needs a non-empty reason")
@@ -1536,21 +1544,25 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                 return True
         return False
 
-    def path_entry(x, field, p):
-        """R4: a path entry (it holds /) against its delta record and both manifests."""
+    def path_entry(x, field, p, memb):
+        """R4: a path entry (it holds /) against its delta record and both manifests. A header member
+        (memb) is keyed by its basename in every pass, so its digests are looked up by basename (one
+        per manifest); a record matches the entry by resolved key, whatever its spelling."""
         n, r, dl = x["n"], x["r"], x["delta"]
         side = "before" if field == "removed" else "after"
-        key = entry_key(resolve(r[side]), p)
-        bd = next((dg for _, k, _, dg in paths_of(x, "before") if k == key), None)
-        ad = next((dg for _, k, _, dg in paths_of(x, "after") if k == key), None)
+        key, base = entry_key(resolve(r[side]), p), os.path.basename(p)
+
+        def look(s):
+            return next((dg for _, k, b_, dg in paths_of(x, s) if (b_ == base if base in memb else k == key)), None)
+        bd, ad = look("before"), look("after")
         if dl is None:
             L.fail("repair-hash-mismatch", f"row {n}: {field} {p}: a path entry needs its delta record (the row carries "
                                            f"no delta); {r['before']} holds {short(bd)}, {r['after']} holds {short(ad)}")
             return
         kind = field
-        rec = next((d for d in dl.get(field, []) if d["path"] == p), None)
+        rec = next((d for d in dl.get(field, []) if entry_key(resolve(r[side]), d["path"]) == key), None)
         if rec is None and field == "changed":      # a changed path whose record sits under delta.added
-            rec = next((d for d in dl.get("added", []) if d["path"] == p), None)
+            rec = next((d for d in dl.get("added", []) if entry_key(resolve(r[side]), d["path"]) == key), None)
             kind = "added" if rec is not None else kind
         if rec is None:
             L.fail("repair-hash-mismatch", f"row {n}: {field} {p}: no delta.{field} record; {r['before']} holds "
@@ -1633,10 +1645,14 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         if cb is not None and ca is not None and not (same_ok and not x["changed"]):
             mxo = mans[bi].get("matrix") if bi is not None else None
             mxn = mans[ai].get("matrix") if ai is not None else None
+            memb = set().union(*(mans[i].get("members", set()) for i in (bi, ai) if i is not None))
             for b in x["changed"]:
-                if "/" in b:                    # generation-aware R4: a path entry, relative to after's directory
-                    path_entry(x, "changed", b)
-                    continue
+                if "/" in b:                    # generation-aware R4: a path entry, relative to after's directory;
+                    if x["delta"] is not None or os.path.basename(b) not in memb:
+                        path_entry(x, "changed", b, memb)
+                        continue
+                    b = os.path.basename(b)     # a header member, keyed by basename in every pass: a row
+                                                # without delta names it as installed
                 if bare_ambiguous(x, "changed", b, ("before", "after")):
                     continue
                 if mxo != mxn and b in (mxo, mxn):     # matrix-per-manifest R4: old against before, new against after
@@ -1654,10 +1670,10 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                                                    f"and {r['after']}")
             for field, sides in (("added", ("after", "before")), ("removed", ("before", "after"))):
                 for b in x[field]:          # generation-aware R4: a path entry against its record; a bare
-                    if "/" in b:            # name is read only for ambiguity (43d5b39 read neither field)
-                        path_entry(x, field, b)
-                    else:
-                        bare_ambiguous(x, field, b, sides)
+                    if "/" in b and (x["delta"] is not None or os.path.basename(b) not in memb):
+                        path_entry(x, field, b, memb)       # name (or a header member a row without delta
+                    else:                                   # names) is read only for ambiguity: 43d5b39
+                        bare_ambiguous(x, field, os.path.basename(b), sides)   # read neither field
         # R6: affected consumers in a later review's manifest (once the following review exists)
         cons = [(b, e["consumer"], e["id"]) for b in x["changed"] for e in bcopy
                 if e["producer"] == os.path.basename(b) and e["consumer"] in bprds]
@@ -1697,9 +1713,10 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         if a["id"] is None or b["id"] is None:
             continue
         mem = a.get("members", set()) | b.get("members", set())
-        ab, ap = split_keys(a, mem)
-        bb, bp = split_keys(b, mem)
         bdir = os.path.normpath(os.path.dirname(b["full"]))
+        pdirs = {os.path.normpath(os.path.dirname(a["full"])), bdir}
+        ab, ap = split_keys(a, mem, pdirs)
+        bb, bp = split_keys(b, mem, pdirs)
         decl, decl_m, decl_p, legacy_bare = set(), set(), set(), set()
         for x in recs:
             if x["bi"] == k and x["ai"] == k + 1:
@@ -1708,7 +1725,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                         key = entry_key(b["full"], c)    # basename declares a header member of that name
                         decl_p.add(key)
                         decl_m.add(os.path.basename(c))
-                        if os.path.dirname(key) == bdir:
+                        if os.path.dirname(key) in pdirs:
                             decl.add(os.path.basename(c))
                     else:
                         decl.add(c)

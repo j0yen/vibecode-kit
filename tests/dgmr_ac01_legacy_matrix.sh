@@ -10,7 +10,8 @@
 # same one-matrix shape on 2027-03-01, after the constant, and drmx `rename-no-header`, are
 # mission-scope-incomplete as installed;
 # with only the linted entry's header ts on 2027-03-01 and its Route decision= on 2026-11-17 it passes
-# (an entry is dated by its Route decision= on a governed host);
+# (an entry is dated by its Route decision= on a governed host); and a later round on 2027-03-01 (m3,
+# r3, x3), linted last, keeps m1's legacy matrix (m1 is dated by the entry that first listed it);
 # and a mission whose headers name `matrix` (rounds of three) lints clean.
 set -uo pipefail
 # shellcheck source=tests/dgmr_lib.sh
@@ -25,6 +26,7 @@ gx legacy-one-before; run_mr; clean
 gx legacy-named-stale-before; run_mr; clean
 gx legacy-unnamed-valid-before; run_mr; clean
 gx legacy-route-before; run_mr; clean
+gx legacy-later-entry; run_mr; clean
 for c in legacy-none-before legacy-two-before legacy-stale-before legacy-unnamed-moved-before; do
   gx "$c"; run_mr; [ "$RC" = 1 ] || fail "$c: rc=$RC (want 1): $ERR"
   has_fail mission-scope-incomplete "manifest notes/snapshots/m1/m1.sha256:" "lists no $(gmxb $OLD_DAY 13)" \

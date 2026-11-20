@@ -129,6 +129,32 @@ def c_legacy_route():
     return M
 
 
+def c_legacy_later():
+    """legacy-one-before continued by a round on the drmx day (after the constant): m3 freezes m2's
+    members with a new matrix x3, r3 (APPROVE) binds m3, and entry 3, linted last, lists m1, m2 and
+    m3 with adversarial= x3. m1 is still first listed by entry 2 (before the constant), so R1 keeps
+    its one matrix x1; dated by the linted entry instead, m1 would fall to drmx R2 and lack x2."""
+    M = c_legacy("one")()
+    x2b = os.path.basename(M.x2).replace(mfx.DAY, OLD_DAY)
+    x3 = mx_rel(16)
+    M.files[x3] = M.matrix(tag=" run 3")
+    m2 = next(m for m in M.manifests if m["rel"] == M2)
+    members3 = {k: v for k, v in m2["members"].items() if k != x2b}
+    members3[os.path.basename(x3)] = M.files[x3]
+    m3 = M.manifest("notes/snapshots/m3/m3.sha256", members3)
+    M.row(at(9), S["A2"], role="author")
+    M.row(at(16, 30), S["R3"], role="review", scope=m3["rel"], sid=M.sid(m3))
+    r3 = M.review("notes/reviews/r3", S["R3"], [("foo", "APPROVE"), ("bar", "APPROVE")], "APPROVE")
+    e2 = M.entries[-1]["lines"]
+    reviews = [ln for ln in e2 if ln.startswith("Review:")] + [r3]
+    state = ("foo=reviewed:FIX foo=reviewed:APPROVE foo=reviewed:APPROVE foo=eligible "
+             "bar=reviewed:APPROVE bar=reviewed:APPROVE bar=reviewed:APPROVE bar=eligible")
+    m1rel = "notes/snapshots/m1/m1.sha256"
+    M.entry(at(17), reviews, state, f"Mission: {M.name} scope={m1rel},{M2},{m3['rel']} repairs={M.rep_rel}", x3,
+            route=(S["A2"], at(9)))
+    return M
+
+
 # ---------------------------------------------------------------- R4: path keys
 def paths_base(last_verdict="APPROVE", bar_by_path=False):
     """rounds(2) with m2 at DEEP and five graph.json listed by path in both manifests (g2, g4 move)."""
@@ -186,7 +212,8 @@ def c_paths(variant):
                        bar_by_path=variant.startswith("amended"))
         r = M.rep_rows[0]
         if variant in ("ok", "wrong-pair", "no-record", "delta-bare", "added-removed", "added-wrong", "changed-added",
-                       "member-twice", "repairs-twice", "a1724-rows", "a1724-rows-wrong") or variant.startswith("amended"):
+                       "member-twice", "repairs-twice", "a1724-rows", "a1724-rows-wrong", "cross-dir-declared",
+                       "record-spelling", "member-path-unmoved") or variant.startswith("amended"):
             declare(M)
         if variant == "wrong-pair":
             r["delta"]["changed"][1]["after"] = sha(b"not the after bytes\n")
@@ -225,6 +252,22 @@ def c_paths(variant):
             r["delta"]["changed"].append({"path": p2, "before": sha(e1 if variant == "a1724-rows" else e2), "after": sha(e2)})
             r["added"] = [pc]
             r["delta"]["added"] = [{"path": pc, "sha256": sha(ct)}]
+        elif variant in ("cross-dir-undeclared", "cross-dir-declared"):   # a file beside m1: m1 lists it bare,
+            a1, a2 = b'{"aux": 1}\n', b'{"aux": 2}\n'                     # m2 by path; it moves
+            M.m1["members"]["aux.json"] = M.m1["copies"]["aux.json"] = a1
+            pa = rel_from(DEEP, "notes/snapshots/m1/aux.json")
+            M.m2["extra"].append(f"{sha(a2)}  {pa}")
+            if variant == "cross-dir-declared":
+                r["changed"] = r["changed"] + [pa]
+                r["delta"]["changed"].append({"path": pa, "before": sha(a1), "after": sha(a2)})
+        elif variant == "record-spelling":      # g4's record names the same path spelled with ./
+            r["delta"]["changed"][1]["path"] = r["delta"]["changed"][1]["path"].replace("/g4/", "/./g4/")
+        elif variant == "member-path-unmoved":  # a row without delta names PRD-bar.md (unmoved) by path
+            ed = M.m1["members"][M.eb]
+            M.rep_rows.append({"finding": None, "class": None, "author_session": S["A"], "before": M.m1["rel"],
+                               "after": DEEP, "changed": [rel_from(DEEP, "built-prds/PRD-bar.md")],
+                               "sweep": [e["id"] for e in json_edges(ed) if "PRD-bar.md" in (e["producer"], e["consumer"])],
+                               "disposition": "amended", "reason": "bar named by path, unchanged"})
         elif variant == "member-twice":
             M.m2["extra"].append(f"{sha(M.m2['members'][M.eb])}  {rel_from(DEEP, M.edges_rel)}")
         elif variant.startswith("amended"):
@@ -232,11 +275,14 @@ def c_paths(variant):
             p = rel_from(DEEP, "built-prds/PRD-bar.md")
             ed = M.m1["members"][M.eb]
             sweep = [e["id"] for e in json_edges(ed) if "PRD-bar.md" in (e["producer"], e["consumer"])]
-            M.rep_rows.append({"finding": None, "class": None, "author_session": S["A"], "before": M.m1["rel"],
-                               "after": DEEP, "changed": [p],
-                               "delta": {"changed": [{"path": p, "before": sha(b1), "after": sha(b2)}]},
-                               "sweep": sweep if variant in ("amended-swept", "amended-held") else [],
-                               "disposition": "amended", "reason": "PRD bar re-worded between the reviews"})
+            row2 = {"finding": None, "class": None, "author_session": S["A"], "before": M.m1["rel"],
+                    "after": DEEP, "changed": [p],
+                    "delta": {"changed": [{"path": p, "before": sha(b1), "after": sha(b2)}]},
+                    "sweep": sweep if variant in ("amended-swept", "amended-held", "amended-legacy-path") else [],
+                    "disposition": "amended", "reason": "PRD bar re-worded between the reviews"}
+            if variant == "amended-legacy-path":    # a row without delta names the header member by path
+                del row2["delta"]
+            M.rep_rows.append(row2)
         M = refreeze(M)
         if variant == "repairs-twice":       # the repairs file listed by its frozen copy and by its live path
             M.m2["extra"].append(f"{sha(M.files[M.rep_rel])}  {rel_from(DEEP, M.rep_rel)}")
@@ -254,11 +300,13 @@ CASES = {
     "legacy-named-stale-before": c_legacy("named-stale"),
     "legacy-unnamed-moved-before": c_legacy("unnamed-moved"),
     "legacy-route-before": c_legacy_route,
+    "legacy-later-entry": c_legacy_later,
     "header-matrix": lambda: rounds(3),
 }
 for _v in ("plain", "ok", "wrong-pair", "no-record", "legacy-bare", "legacy-path", "delta-bare", "added-removed", "added-wrong",
            "changed-added", "member-twice", "repairs-twice", "a1724-rows", "a1724-rows-wrong", "amended-unswept",
-           "amended-unswept-held", "amended-swept", "amended-held"):
+           "amended-unswept-held", "amended-swept", "amended-held", "amended-legacy-path", "member-path-unmoved",
+           "cross-dir-undeclared", "cross-dir-declared", "record-spelling"):
     CASES["paths-" + _v] = c_paths(_v)
 
 

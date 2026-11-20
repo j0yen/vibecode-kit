@@ -27,7 +27,8 @@ rep=$(para "$p3" '**After the first systemic finding')
 for s in 'is keyed by that path' '`changed` and `added` relative to the `after` manifest'"'"'s directory' \
   '`removed` relative to the `before` manifest'"'"'s' '`delta` record `{changed: [{path, before, after}], added: [{path, sha256}], removed: [{path, sha256}]}`' \
   'sits under `delta.added` is served by it' 'A row without `delta` is a legacy row' '`repairs.ambiguous`, never failed' \
-  'a row with `delta` names such a file by path' 'the edges file, and the repairs file) is keyed by its basename'; do
+  'a row with `delta` names such a file by path' 'the edges file, and the repairs file) is keyed by its basename in every pass' \
+  'a row without `delta` that names one by path is checked by its basename'; do
   case "$rep" in *"$s"*) ;; *) fail "Phase 3 failure-class paragraph lacks '$s'";; esac
 done
 e=$(awk '/^- \*\*/{n++} n{print n "\t" $0}' "$REPO/skills/dream/history.md" | awk -F'\t' '{a[$1]=a[$1] " " $2} END{for(k in a) print a[k]}' | grep -F 'dream-generation-aware-mission-records')

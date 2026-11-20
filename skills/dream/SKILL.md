@@ -386,7 +386,8 @@ it). A row without `delta` is a legacy row: its bare basenames keep the basename
 basename that several entries of one manifest hold is listed in the JSON's `repairs.ambiguous`,
 never failed; a row with `delta` names such a file by path. A header member (a `prds`, `packet`
 or `contract` file, the matrix, the edges file, and the repairs file) is keyed by its basename
-and listed once per manifest.
+in every pass and listed once per manifest; a row without `delta` that names one by path is
+checked by its basename, as a bare name is.
 Reuse unchanged accepted evidence: a bounded
 re-review covers changed ∪ affected, and an unaffected PRD keeps its earlier APPROVE. There is
 no blanket hold: only the rows' `changed` members and their affected consumers wait, until the

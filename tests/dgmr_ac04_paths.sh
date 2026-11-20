@@ -14,7 +14,11 @@
 # at two depths, with their records) pass, and a wrong pair there names the outside path. An amended
 # row naming PRD-bar.md by path is compared by basename: a sweep that omits the edges incident to
 # PRD-bar.md is sweep-missing, the full sweep passes, and while the mission's last verdict is FIX the
-# amended row holds bar (with the sweep omitted too, both fire).
+# amended row holds bar (with the sweep omitted too, both fire). A header member is keyed by basename
+# in every pass: a row without delta naming PRD-bar.md by path is checked as installed (moved: clean;
+# unmoved: claimed changed, digests equal). A file beside m1 that m1 lists bare and m2 by path is
+# compared: undeclared, its move is named; declared by path with its record, it passes. A record
+# spelled differently from its entry (./) matches by resolved key.
 set -uo pipefail
 # shellcheck source=tests/dgmr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dgmr_lib.sh"
@@ -52,8 +56,15 @@ has_fail repair-hash-mismatch "row 1: changed ../../../../../contract/EDIT-LOG.m
 gx paths-amended-unswept; run_mr; findings_eq '["sweep-missing"]'
 has_fail sweep-missing "amended row (row 2)" "incident to PRD-bar.md"
 gx paths-amended-swept; run_mr; clean
+gx paths-amended-legacy-path; run_mr; clean
+gx paths-member-path-unmoved; run_mr; findings_eq '["repair-hash-mismatch"]'
+has_fail repair-hash-mismatch "row 2: PRD-bar.md: claimed changed, digests equal in notes/snapshots/m1/m1.sha256 and $D"
+gx paths-cross-dir-undeclared; run_mr
+has_fail repair-hash-mismatch "aux.json: changed but undeclared between notes/snapshots/m1/m1.sha256 and $D"
+gx paths-cross-dir-declared; run_mr; clean
+gx paths-record-spelling; run_mr; clean
 gx paths-amended-held; run_mr; no_id sweep-missing
 jtrue 'any(x["slug"] == "bar" and "amended row 2" in x["reason"] for x in d["mission"]["dependent_slugs"])' "bar held by amended row 2"
 gx paths-amended-unswept-held; run_mr; has_fail sweep-missing "amended row (row 2)" "incident to PRD-bar.md"
 jtrue 'any(x["slug"] == "bar" and "amended row 2" in x["reason"] for x in d["mission"]["dependent_slugs"])' "bar held by amended row 2 (unswept)"
-pass "path keys over two depths; undeclared, wrong pair, no record, no delta, added, removed, changed-as-added; legacy bare listed; delta bare refused; header member and repairs file twice; A1724 rows 16/41 outside the home; amended path swept and held by basename"
+pass "path keys over two depths; undeclared, wrong pair, no record, no delta, added, removed, changed-as-added; legacy bare listed; delta bare refused; header member and repairs file twice; A1724 rows 16/41 outside the home; amended path swept and held by basename; header member by path as installed; cross-directory file compared; record by resolved key"
