@@ -84,6 +84,9 @@ class Fx:
         os.makedirs(os.path.join(T, "copy"), exist_ok=True)
         shutil.copyfile(lint, os.path.join(T, "copy", "dream-run-note-lint.sh"))
         os.chmod(os.path.join(T, "copy", "dream-run-note-lint.sh"), 0o755)
+        os.makedirs(os.path.join(self.fakehome, "~+"), exist_ok=True)     # review r14c M1 (c): a same-bytes copy where `~+` reads literally, and the decoy
+        shutil.copyfile(lint, os.path.join(self.fakehome, "~+", "dream-run-note-lint.sh"))   # bash would run instead (`~+` = $PWD = HOME under _run_check)
+        write(os.path.join(self.fakehome, "dream-run-note-lint.sh"), "#!/bin/sh\nexit 0\n", 0o755)
         write(os.path.join(self.home, "build-queue", "PRD-fx-a.md"),
               "# PRD-fx-a\n\n## Acceptance criteria\n\n"
               "1. P0 — Given %s#falsifier, When `bash scripts/kill-fx.sh` runs on a record missing a row, Then it prints `KILL-FX` "
@@ -107,7 +110,8 @@ class Fx:
         self.commit = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True, check=True, env=env).stdout.strip()
         rows = [("rv-ok", TASK, "review"), (AUTHOR, TASK, "author"), (AUTHOR, TASK, "review"), ("rv-norole", TASK, None), ("rv-noline", TASK, "review"),
                 ("rv-other", "A9", "review"), ("a-2", TASK, "review"), ("a-2", TASK, "author"), ("rv-x", TASK, "review", "other-skill"),
-                ("rv-cited", TASK, "review"), ("rv-citer", TASK, None), ("a-res", TASK, "author"), ("rv-late", TASK, "review"), ("a-res", TASK, "author")]
+                ("rv-cited", TASK, "review"), ("rv-citer", TASK, None), ("a-res", TASK, "author"), ("rv-late", TASK, "review"), ("a-res", TASK, "author"),
+                ("rv-multi", "A9", "review"), ("a-late", TASK, "author"), ("rv-multi", TASK, "review")]
         with open(self.dec, "w") as f:
             for i, (s, t, role, *sk) in enumerate(rows):
                 r = {"ts": "2026-11-19T10:%02d:00-08:00" % i, "decision": "launch", "task_id": t, "skill": sk[0] if sk else "dream", "route": "opus-xhigh",
@@ -124,7 +128,8 @@ class Fx:
                            ("verdict-rvx.md", "Review session rv-x\naccepts c-res\n## VERDICT: APPROVE\n"),
                            ("verdict-cited.md", "Review session rv-cited\nno acceptance here\n## VERDICT: APPROVE\n"),
                            ("verdict-citer.md", "Review session rv-citer, re-reviewing rv-cited's verdict\naccepts c-res\n## VERDICT: APPROVE\n"),
-                           ("verdict-late.md", "Review session rv-late\nThe author is session a-res\naccepts c-late\n## VERDICT: APPROVE\n")):
+                           ("verdict-late.md", "Review session rv-late\nThe author is session a-res\naccepts c-late\n## VERDICT: APPROVE\n"),
+                           ("verdict-multi.md", "Review session rv-multi\nThe author is session a-late\naccepts c-multi\n## VERDICT: APPROVE\n")):
             write(os.path.join(self.reviews, name), text)
         with open(self.policy, "w") as f:
             json.dump({"evidence": {"ref_pattern": "^(ledger|file|pr|run|commit|page):[^\\s]{2,200}$",
@@ -243,13 +248,13 @@ CASES = {}
 
 
 def case(name, rc, findings, needles=(), drop=(), unconsumed=None, scenario=None, plain=False, task=None, require_closed=None, home=None, nopage=False,
-         pending=None, page=None):
+         pending=None, page=None, repairs=None):
     """scenario: the canonical rows come from that scenario (a fake wm-asks), linted for successor A102 with --require-closed unless `plain`.
     home: "1724" lints the A1724 page copy's home. pending: the JSON `pending` list the case expects."""
     def deco(fn):
         CASES[name] = {"fn": fn, "rc": rc, "findings": sorted(findings), "needles": list(needles), "drop": drop, "unconsumed": unconsumed,
                        "scenario": scenario, "plain": plain, "task": task, "require_closed": require_closed, "home": home, "nopage": nopage,
-                       "pending": pending, "page": page}
+                       "pending": pending, "page": page, "repairs": repairs}
         return fn
     return deco
 
@@ -366,6 +371,7 @@ case("ac03-r14m3-review-launch-of-another-skill", 1, ["consumption-residual-unac
 case("ac03-r14m4-a-later-file-citing-the-session-is-not-its-own", 1, ["consumption-residual-unaccepted"],
      ["row c-res (%s#mechanism:2)" % BASE, "accepted_by rv-cited: no verdict file"], unconsumed=[BASE + "#mechanism:2"])(lambda fx: residual(fx, "rv-cited"))
 case("ac03-r14bla-a-resumed-author-does-not-take-a-later-reviews-file", 0, [], unconsumed=[])(lambda fx: residual(fx, "rv-late", rid="c-late"))
+case("ac03-r14cl1-a-review-launched-earlier-under-another-task-keeps-its-file", 0, [], unconsumed=[])(lambda fx: residual(fx, "rv-multi", rid="c-multi"))
 case("ac03-residual-with-a-placeholder-ref", 1, ["consumption-binding-invalid"], ["row c-res (%s#mechanism:2)" % BASE, "key evidence"])(
     lambda fx: rows_with(fx, **{"mechanism:2": fx.row("c-res", "mechanism:2", "residual", owner="hermes", evidence=["ledger:tbd"], accepted_by="rv-ok")}))
 case("ac03-receipt-only-session", 1, ["consumption-receipt-only"], ["row 'c-rcpt'", "its only target is a receipt (session)"])(
@@ -467,6 +473,32 @@ F1_BOUND = (     # the over-strict side: legitimate forms of the check still bin
 )
 for _n, _chk in F1_BOUND:
     case("ac02-r14bf1-ok-" + _n, 0, [], unconsumed=[], scenario=scen_check(_chk), plain=True)(h5_rows)
+
+M1C_REFUSED = (  # review r14c M1: words bash splits differently, a timeout option that runs nothing, a tilde form bash expands elsewhere
+    ("nbsp-before-require-closed", "bash {LINT} --consumption {RECORD} --task A102\u00a0--require-closed", "not one plain command"),
+    ("vertical-tab-before-require-closed", "bash {LINT} --consumption {RECORD} --task A102\u000b--require-closed", "not one plain command"),
+    ("ideographic-space-before-require-closed", "bash {LINT} --consumption {RECORD} --task A102\u3000--require-closed", "not one plain command"),
+    ("a-tab-between-words", "bash {LINT} --consumption {RECORD}\t--task A102 --require-closed", "not one plain command"),
+    ("timeout-help", "timeout --help 60 " + LC, "its timeout option --help is not"),
+    ("timeout-version", "timeout --version 60 " + LC, "its timeout option --version is not"),
+    ("timeout-k-without-a-duration", "timeout -k --help 60 " + LC, "its timeout option -k is not"),
+    ("tilde-plus", "bash ~+/dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed", "a `~` form other than `~/`"),
+)
+for _n, _chk, _why in M1C_REFUSED:
+    case("ac02-r14cm1-" + _n, 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE, _why], unconsumed=[BASE + "#mechanism:2"],
+         scenario=scen_check(_chk), plain=True)(h5_rows)
+case("ac02-r14cm1-a-pending-row-whose-ask-is-closed-with-an-nbsp-check", 1, ["consumption-repair-unproven"],
+     ["row c-pen (%s#mechanism:2)" % BASE, "not one plain command"], unconsumed=[BASE + "#mechanism:2"],
+     scenario=scen_check("bash {LINT} --consumption {RECORD} --task A102\u00a0--require-closed"), plain=True)(
+    lambda fx: rows_with(fx, **{"mechanism:2": fx.row("c-pen", "mechanism:2", "pending", owner="ctl", due="2099-01-01T00:00:00+00:00", ask="A101",
+                                                      successor="A102")}))
+for _n, _chk in (("timeout-long-options", "timeout --kill-after=5 --signal=TERM --foreground --preserve-status 60 " + LC),
+                 ("timeout-short-options", "timeout -k 5 -s KILL -v 60 " + LC),
+                 ("two-spaces-between-words", "bash  {LINT} --consumption {RECORD}  --task A102 --require-closed")):
+    case("ac02-r14cm1-ok-" + _n, 0, [], unconsumed=[], scenario=scen_check(_chk), plain=True)(h5_rows)
+case("ac02-r14cl2-the-refusal-names-each-checked-row-and-repairs-lists-it", 1, ["consumption-repair-unproven"],
+     ["successor A102: its command is not a path to dream-run-note-lint.sh", "closes-after row A101: its command is not a path to dream-run-note-lint.sh"],
+     unconsumed=[BASE + "#mechanism:2"], scenario=scen_check("true"), plain=True, repairs=["A101"])(h5_rows)
 
 CANCEL_CLAIM = [INTAKE_ADD] + PROOF + [ev("transition", **{"from": "ready", "to": "cancelled"}), ev("claim", worker="w2", claim="w2@2026-11-19T15:01")]
 case("h5p-r14bf2-cancelled-then-a-plain-claim-never-satisfies", 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE, "intake-cancelled"],
@@ -689,6 +721,8 @@ def run(prefix, lint, T):
             probs.append("unconsumed=%s want %s" % (d.get("unconsumed"), c["unconsumed"]))
         if c["pending"] is not None and d.get("pending") != c["pending"]:
             probs.append("pending=%s want %s" % (d.get("pending"), c["pending"]))
+        if c["repairs"] is not None and [x.get("ask") for x in d.get("repairs") or []] != c["repairs"]:
+            probs.append("repairs=%s want asks %s" % (d.get("repairs"), c["repairs"]))
         if "Traceback" in err:
             probs.append("traceback")
         if probs:
