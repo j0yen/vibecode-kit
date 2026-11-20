@@ -860,6 +860,18 @@ def path_keys(full):
     return {os.path.normpath(full), os.path.realpath(full)}
 
 
+def path_string(v):
+    """Repair 6 (reviews r23g M1, r23h M1 and L2): whether a value can be compared as a path: a string that is not
+    blank, holds no NUL and encodes as a file name (a lone surrogate does not)."""
+    if not (isinstance(v, str) and v.strip() and "\0" not in v):
+        return False
+    try:
+        os.fsencode(v)
+    except UnicodeError:
+        return False
+    return True
+
+
 def withdrawn_scoped(w, resolve, dec):
     """Repair 6 (b): why a line of the decisions source may have scoped manifest w, or None. Every line is read,
     whatever its task, role or session. In a JSON row, every string value (its scope, a list's items, any other field)
@@ -874,7 +886,7 @@ def withdrawn_scoped(w, resolve, dec):
     names = {w, full, os.path.relpath(os.path.normpath(full), resolve("."))} | wk
 
     def is_w(v):
-        if not v.strip() or "\0" in v:
+        if not path_string(v):                   # review r23h L2: a value that is no file name cannot name w
             return False
         forms = [resolve(v)]
         if sr is not None and os.path.isabs(v):
@@ -918,8 +930,9 @@ def withdrawn_check(p, seq, resolve, dec):
     lists it (only a planned freeze can be withdrawn); (d) this entry carries its own scope=, which does not list it
     and is the previous entry's list without the withdrawn manifests followed only by appended manifests; and (e) no
     row of a repairs file any entry of the Task names, up to the linted one, names it as before or after (review r23d M1):
-    a file that cannot be read, a line that is no JSON object (review r23e M2), or a row whose before or after is present
-    but no non-empty NUL-free string (review r23g M1) rules nothing out.
+    a file that cannot be read, a line that is no JSON object (review r23e M2), a row with no before or after (review
+    r23h M1), a row repeating either key (review r23h L1), or a row whose before or after is no path string, that is no
+    string that is not blank, holds no NUL and encodes as a file name (reviews r23g M1, r23h M1 and L2), rules nothing out.
     (a) looks the path up as written and as normalized (review r23e M1). A token applies only whole."""
     x, ws = seq[p], seq[p]["withdrawn"]
     tok = ",".join(ws)
@@ -972,18 +985,26 @@ def withdrawn_check(p, seq, resolve, dec):
             for n, ln in enumerate(text.split("\n"), 1):
                 if not ln.strip():
                     continue
+                tops = []                        # review r23h L1: each object's keys in order; the row's own come last
                 try:
-                    r = json.loads(ln)
+                    r = json.loads(ln, object_pairs_hook=lambda ps: tops.append(ps) or dict(ps))
                 except ValueError:
                     r = None
                 if not isinstance(r, dict):
                     bad.append((w, "repair-scope-mismatch", f"line {n} of {rp} is no JSON object, so a row naming it cannot be ruled out"))
                     continue
+                keys = [k for k, _ in tops[-1]]
+                again = [s for s in ("before", "after") if keys.count(s) > 1]
+                if again:                        # review r23h L1: a repeated key reads last-wins, so either value may be meant
+                    bad.append((w, "repair-scope-mismatch", f"row {n} of {rp} repeats its {' and '.join(again)} key, so a row "
+                                                            "naming it cannot be ruled out"))
+                    continue
                 for side in ("before", "after"):
-                    if side not in r:
+                    if side not in r:            # review r23h M1: a row with no before or after (a misspelled key) rules nothing out
+                        bad.append((w, "repair-scope-mismatch", f"row {n} of {rp} has no {side}, so a row naming it cannot be ruled out"))
                         continue
                     v = r[side]
-                    if not (isinstance(v, str) and v and "\0" not in v):
+                    if not path_string(v):       # reviews r23g M1, r23h M1 and L2: blank, a NUL, or no file name
                         bad.append((w, "repair-scope-mismatch", f"row {n} of {rp}: {side} is no path string, so a row naming it cannot "
                                                                 "be ruled out"))
                     elif same(w, v):

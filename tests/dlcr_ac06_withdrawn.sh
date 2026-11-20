@@ -23,7 +23,10 @@
 # entry's repairs file that is missing or unreadable, or whose line naming W is no JSON object (M2), and applies with
 # the same file clean; a NUL in the token is mission-grammar (L1), never a traceback. Review r23g: (e) also refuses an
 # earlier row whose after is no path string ([W], {"path": W}, W followed by a NUL), any line that is no JSON object
-# whatever it spells (W with ./ or with its dot escaped, then a comma), and a file that is not UTF-8 (M1, L2).
+# whatever it spells (W with ./ or with its dot escaped, then a comma), and a file that is not UTF-8 (M1, L2). Review r23h:
+# (e) also refuses an earlier row with no after (its key spelled After) or neither key (M1), an after that is blank (M1),
+# empty (L3, R4) or a lone surrogate (L2), a before that is a list (L3, H4), a JSON line that is a list (L3, H3) and a row
+# repeating its after key (L1); a decisions value that is a lone surrogate names nothing, and neither ends in a traceback (L2).
 set -uo pipefail
 # shellcheck source=tests/dlcr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dlcr_lib.sh"
@@ -98,6 +101,22 @@ for c in dotted-comma escaped-comma; do    # review r23g M1: W spelled otherwise
   cx "r6-repairs-earlier-$c"; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
   has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl is no JSON object"
 done
+cx r6-repairs-earlier-misspelled; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'   # r23h M1
+has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl has no after, so a row naming it cannot be ruled out"
+cx r6-repairs-earlier-no-keys; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'      # r23h M1
+has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl has no before"
+has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl has no after"
+for c in blank empty surrogate; do         # review r23h M1, L3 (R4) and L2: row 3's after is " ", "" or a lone surrogate
+  cx "r6-repairs-earlier-$c"; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
+  has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl: after is no path string"
+done
+cx r6-repairs-earlier-before-list; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'  # r23h L3 (H4)
+has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl: before is no path string"
+cx r6-repairs-earlier-array; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'        # r23h L3 (H3)
+has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl is no JSON object"
+cx r6-repairs-earlier-repeated; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'     # r23h L1
+has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl repeats its after key"
+cx r6-surrogate-row; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"   # r23h L2: names nothing, no traceback
 cx r6-repairs-earlier-latin1; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'   # r23g L2
 has_fail repair-scope-mismatch "withdrawn=$WM" "notes/missions/old.repairs.jsonl cannot be read (not UTF-8)"
 cx r6-repairs-earlier-missing; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'

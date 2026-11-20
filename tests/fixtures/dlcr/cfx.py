@@ -374,7 +374,7 @@ def r6_mission(ln, scope, token=None, drop_scope=False):
 def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False, rep_side=None, mid=None,
             malformed=False, no_scope=False, still_listed=False, token_value=None, scoped_root=False, ungoverned=False,
             scoped_link=False, old_repairs=False, later_repairs=False, dangling=False, late_token=None,
-            scoped_list=False, named_row=False, nul_row=False, parent_file=False):
+            scoped_list=False, named_row=False, nul_row=False, parent_file=False, surrogate_row=False):
     """rounds(3)'s entry (14:00, m1 m2 m3) preceded by a pre-review entry at 10:30 whose scope= ends with the planned
     freeze W, never written (A1723's 4:16:48 AM entry and 124000Z); with token, the 14:00 entry carries withdrawn=W (the
     4:40:26 AM entry as the rule reads it). where: W is "last" or in the "middle" of the 10:30 list; exists: W is
@@ -396,7 +396,11 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
     old_repairs "clean" (row 3 names m3, not W), "comma" (row 3 names W and ends in a comma, so it is no JSON object) or
     "missing" (the file is never written; the 10:30 entry still names it); review r23g: "list", "dict", "nul" (row 3's after
     is [W], {"path": W} or W followed by a NUL), "dotted-comma" (W spelled notes/snapshots/./mw/…, then a comma),
-    "escaped-comma" (W's dot written \u002e, then a comma), "latin1" (a byte 0xff after the rows: not UTF-8)."""
+    "escaped-comma" (W's dot written \u002e, then a comma), "latin1" (a byte 0xff after the rows: not UTF-8); review r23h:
+    "misspelled" (row 3's after key spelled After), "no-keys" (row 3 has neither before nor after), "blank", "empty",
+    "surrogate" (row 3's after is " ", "" or a lone surrogate), "before-list" (row 3's before is [W], its after m3), "array"
+    (line 3 is the JSON list [W]) and "repeated" (row 3 names W as after, then m3 as after again); surrogate_row: a
+    launch row's reasons hold a lone surrogate."""
     M = rounds(3)
     post = M.entries[-1]
     m1, m2, m3 = (m["rel"] for m in M.mans_decl)
@@ -433,6 +437,8 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
         M.row(at(10, 20), OTHER, reasons=W_REL)
     if nul_row:
         M.row(at(10, 20), OTHER, reasons="a\u0000b")
+    if surrogate_row:                    # review r23h L2: a decisions value that encodes as no file name
+        M.row(at(10, 20), OTHER, reasons="\ud800")
     if parent_file:                      # nothing can be at W: its folder notes/snapshots/mw is a file
         M.files[os.path.dirname(W_REL)] = "a file where W's folder would be\n"
     for flag, at_entry, rel in ((old_repairs, pre, "notes/missions/old.repairs.jsonl"),
@@ -444,7 +450,21 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
             if flag in ("list", "dict", "nul", "dotted-comma"):    # review r23g M1: row 3's after is no path string, or
                 rows[-1]["after"] = {"list": [W_REL], "dict": {"path": W_REL}, "nul": W_REL + "\u0000",   # spelled otherwise
                                      "dotted-comma": W_REL.replace("/mw/", "/./mw/")}[flag]
+            if flag in ("blank", "empty", "surrogate"):    # review r23h M1, L3 (R4) and L2
+                rows[-1]["after"] = {"blank": " ", "empty": "", "surrogate": "\ud800"}[flag]
+            if flag == "misspelled":                       # review r23h M1: the after key spelled After
+                rows[-1]["After"] = rows[-1].pop("after")
+            if flag == "no-keys":                          # review r23h M1: neither key
+                del rows[-1]["before"], rows[-1]["after"]
+            if flag == "before-list":                      # review r23h L3 (H4): before is [W], after m3
+                rows[-1]["before"], rows[-1]["after"] = [W_REL], m3
             text = repairs_text(rows)
+            if flag in ("array", "repeated"):              # review r23h L3 (H3): line 3 is [W]; L1: after W, then after m3
+                raw = text.decode() if isinstance(text, bytes) else text
+                ls = raw.split("\n")
+                assert ls[2].endswith("}") and W_REL in ls[2]
+                ls[2] = json.dumps([W_REL]) if flag == "array" else ls[2][:-1] + ', "after": ' + json.dumps(m3) + "}"
+                text = "\n".join(ls).encode() if isinstance(text, bytes) else "\n".join(ls)
             if flag in ("comma", "dotted-comma", "escaped-comma"):   # review r23e M2 / r23g M1: row 3 is no JSON object
                 raw = text.decode() if isinstance(text, bytes) else text
                 ls = raw.split("\n")
@@ -560,6 +580,15 @@ CASES = {
     "r6-repairs-earlier-dotted-comma": lambda: r6_base(old_repairs="dotted-comma"),
     "r6-repairs-earlier-escaped-comma": lambda: r6_base(old_repairs="escaped-comma"),
     "r6-repairs-earlier-latin1": lambda: r6_base(old_repairs="latin1"),
+    "r6-repairs-earlier-misspelled": lambda: r6_base(old_repairs="misspelled"),
+    "r6-repairs-earlier-no-keys": lambda: r6_base(old_repairs="no-keys"),
+    "r6-repairs-earlier-blank": lambda: r6_base(old_repairs="blank"),
+    "r6-repairs-earlier-empty": lambda: r6_base(old_repairs="empty"),
+    "r6-repairs-earlier-surrogate": lambda: r6_base(old_repairs="surrogate"),
+    "r6-repairs-earlier-before-list": lambda: r6_base(old_repairs="before-list"),
+    "r6-repairs-earlier-array": lambda: r6_base(old_repairs="array"),
+    "r6-repairs-earlier-repeated": lambda: r6_base(old_repairs="repeated"),
+    "r6-surrogate-row": lambda: r6_base(surrogate_row=True),
     "r6-exists-slash": lambda: r6_base(exists=True, token_value=f"{W_REL}/"),
     "r6-exists-dot": lambda: r6_base(exists=True, token_value=f"{W_REL}/."),
     "r6-exists-dotdot": lambda: r6_base(exists=True, token_value=f"{W_REL}/../mw.sha256"),
