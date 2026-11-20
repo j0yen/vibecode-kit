@@ -2,8 +2,8 @@
 # Repair 7 (the PRD author's addendum 5; followon7/dream/requests/source-03415-lint-contract-repairs-addendum-5.md) — a
 # review file's line is a verdict line only when its first token is a PRD slug ([a-z0-9][a-z0-9-]*). Positive: chain
 # review 19's shape, a markdown table row `| FIX and UNKNOWN hold; ... |` beside the real verdict lines, in the review
-# file and in its result= capture: clean, none of review-scope-mismatch, review-result-mismatch or
-# review-verdict-mismatch for slug `|`. Negatives, unchanged beside the same row: a scoped slug's FIX with no State
+# file and in its result= capture, with a prose line whose first token looks like a slug: clean, none of
+# review-scope-mismatch, review-result-mismatch or review-verdict-mismatch for slug `|`. Negatives, unchanged beside the same row: a scoped slug's FIX with no State
 # token (review-verdict-mismatch naming it); a valid slug outside the scope (review-scope-mismatch naming it); a real
 # verdict line absent from the result= capture (review-result-mismatch naming it). Over-strict control: the installed
 # rule (43d5b39), which reads every line whose second token is a verdict word as a verdict line, refuses the positive
@@ -18,9 +18,10 @@ STATE="State: rs-alpha=linted rs-alpha=reviewed:APPROVE rs-beta=linted rs-beta=r
 run() { JS=$(lint --json 2>"$T/err"); RC=$?; no_traceback "$(cat "$T/err")"; OUT=$(lint 2>&1); }
 none_for_bar() { printf '%s\n' "$OUT" | grep -F 'slug=|' && fail "$1: a finding names slug |: $OUT"
   printf '%s\n' "$OUT" | grep -F 'PRD-|.md' && fail "$1: a finding names PRD-|.md: $OUT"; return 0; }
+PROSE='the table below restates the ruling'   # prose whose first token looks like a slug: no verdict word, no verdict line
 # positive: the row in the review file and in the reviewer's final message
-verdicts "# verdicts (Repair 7)${NL}rs-alpha APPROVE fable${NL}rs-beta APPROVE fable${NL}${ROW}${NL}" \
-  "Review done.${NL}rs-alpha APPROVE fable${NL}rs-beta APPROVE fable${NL}${ROW}" "$STATE"
+verdicts "# verdicts (Repair 7)${NL}rs-alpha APPROVE fable${NL}rs-beta APPROVE fable${NL}${PROSE}${NL}${ROW}${NL}" \
+  "Review done.${NL}rs-alpha APPROVE fable${NL}rs-beta APPROVE fable${NL}${PROSE}${NL}${ROW}" "$STATE"
 run; [ "$RC" = 0 ] || fail "positive: rc=$RC: $OUT"
 [ "$(printf '%s' "$JS" | jget 'd["findings"]')" = "[]" ] || fail "positive: findings: $JS"; none_for_bar positive
 # the row in the review file only (the reviewer's final message carries only the verdict lines)
