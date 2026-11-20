@@ -18,6 +18,10 @@ tests/fixtures/dgmr/gfx.py does. A case is one PRD home and a private decisions 
   post-review entry (14:00) adding r3's line, both naming the 11:00 matrix (A1723's review-14 entries).
 - Repair 6 (r6-*, addendum 4): a pre-review entry (10:30) lists a planned freeze W that is never written; the 14:00
   entry drops it with withdrawn=W (A1723's 4:16:48 AM entry and its 124000Z manifest).
+- Repair 8 (r8-*, addenda 6 and 7): rounds(2) whose r1 finding F1 (semantic-incompatibility) names the declared external
+  hermes, which has no contract file, and no PRD (chain review 20's R20-F2 and R20-F3) or one; F1's row (m1 -> m2) changes
+  the edges file, a packet member (a binding record the edges headers list in `packet`, moved m1 -> m2) or neither, and
+  an amended row declares the rest.
 
 Usage: cfx.py <case> <outdir> | --list
 """
@@ -109,7 +113,9 @@ CORR_REL = "notes/reviews/r1/verdict.txt.findings.corrected-1.jsonl"
 
 
 def r2_base():
-    """rounds(2) with r1's F1 naming no PRD and an undeclared external (the R12-F3 shape)."""
+    """rounds(2) with r1's F1 naming no PRD and an undeclared external (the R12-F3 shape). F1's row names PRD-foo.md and
+    the matrices, and an amended row declares the edges file: Repair 8 lets a finding naming no PRD repair the edges
+    file, so a row naming it would pass on the original sidecar too and the test would not show the correction read."""
     M = rounds(2)
     lines = entry_lines(M)
     rv1 = M.review("notes/reviews/r1", S["R1"], [("foo", "FIX"), ("bar", "APPROVE")], "FIX", findings=[
@@ -117,6 +123,10 @@ def r2_base():
     for i, ln in enumerate(lines):
         if ln.startswith("Review: notes/reviews/r1/"):
             lines[i] = rv1
+    r = M.rep_rows[0]
+    r["changed"] = [x for x in r["changed"] if x != M.eb]
+    M.rep_rows.append({"finding": None, "class": None, "author_session": S["A"], "before": r["before"], "after": r["after"],
+                       "changed": [M.eb], "sweep": [], "disposition": "amended", "reason": "fixture amendment: the edges file"})
     return rewrite_repairs(M)
 
 
@@ -382,7 +392,9 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
     dangling: a symlink to a missing file sits at W (V2); late_token: the 14:00 entry carries withdrawn=late_token
     even after mid "withdraws" (V5); scoped: True for a review row, or the role of the row scoping W (V9);
     scoped_list: a review row's scope is the list [W] (L2); named_row: a launch row with no role names W in reasons
-    ("nested": in a nested field); nul_row: a row's reasons hold a NUL; parent_file: W's folder is a file."""
+    ("nested": in a nested field); nul_row: a row's reasons hold a NUL; parent_file: W's folder is a file. Review r23e:
+    old_repairs "clean" (row 3 names m3, not W), "comma" (row 3 names W and ends in a comma, so it is no JSON object) or
+    "missing" (the file is never written; the 10:30 entry still names it)."""
     M = rounds(3)
     post = M.entries[-1]
     m1, m2, m3 = (m["rel"] for m in M.mans_decl)
@@ -425,7 +437,16 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
                                 (later_repairs, None, "notes/missions/new.repairs.jsonl")):
         if flag:                         # another repairs file, named by one entry only, whose row 3 names W as after
             rows = copy.deepcopy(M.rep_rows[:2]) + [dict(M.rep_rows[-1], finding="F9", before=m2, after=W_REL)]
-            M.files[rel] = repairs_text(rows)
+            if flag == "clean":
+                rows[-1]["after"] = m3
+            text = repairs_text(rows)
+            if flag == "comma":          # review r23e M2: row 3, which names W, is no JSON object
+                raw = text.decode() if isinstance(text, bytes) else text
+                ls = raw.split("\n")
+                ls[2] += ","
+                text = "\n".join(ls).encode() if isinstance(text, bytes) else "\n".join(ls)
+            if flag != "missing":
+                M.files[rel] = text
             lines = at_entry if at_entry is not None else post["lines"]
             lines[:] = [ln.replace(f" repairs={M.rep_rel}", f" repairs={rel}") if ln.startswith("Mission:") else ln
                         for ln in lines]
@@ -520,6 +541,20 @@ CASES = {
     "r6-not-listed": lambda: r6_base(token_value="notes/snapshots/mz/mz.sha256"),
     "r6-repairs-earlier": lambda: r6_base(old_repairs=True),
     "r6-repairs-earlier-control": lambda: r6_base(old_repairs=True, token=False),
+    "r6-repairs-earlier-clean": lambda: r6_base(old_repairs="clean"),
+    "r6-repairs-earlier-comma": lambda: r6_base(old_repairs="comma"),
+    "r6-repairs-earlier-missing": lambda: r6_base(old_repairs="missing"),
+    "r6-exists-slash": lambda: r6_base(exists=True, token_value=f"{W_REL}/"),
+    "r6-exists-dot": lambda: r6_base(exists=True, token_value=f"{W_REL}/."),
+    "r6-exists-dotdot": lambda: r6_base(exists=True, token_value=f"{W_REL}/../mw.sha256"),
+    "r6-nul-token": lambda: r6_base(token_value=f"{W_REL}\u0000b"),
+    "r8-edges": lambda: r8_base(),
+    "r8-record": lambda: r8_base(changed="record", packet=True),
+    "r8-neither": lambda: r8_base(changed="neither", packet=True),
+    "r8-record-unlisted": lambda: r8_base(changed="record", packet=True, listed=False),
+    "r8-prd-edges": lambda: r8_base(prds=["PRD-bar.md"]),
+    "r8-prd-record": lambda: r8_base(prds=["PRD-bar.md"], changed="record", packet=True),
+    "r8-packet-malformed": lambda: r8_base(changed="record", packet=True, packet_value=[REC, {"name": REC}]),
     "r6-repairs-later": lambda: r6_base(mid="withdraws", later_repairs=True),
     "r6-dangling": lambda: r6_base(dangling=True),
     "r6-repeated": lambda: r6_base(token_value=f"{W_REL},{W_REL}"),
@@ -536,6 +571,48 @@ CASES = {
 for _k, _v in (("id", "F9"), ("class", "authority-bypass"), ("counterexample", "another counterexample"),
                ("correction", "another correction"), ("control", "another control")):
     CASES[f"r2-changes-{_k}"] = (lambda k, v: lambda: corrected(r2_base(), change={k: v}))(_k, _v)
+
+
+# ---------------------------------------------------------------- Repair 8
+REC = "m.consumption.jsonl"
+
+
+def r8_base(prds=(), changed="edges", packet=False, listed=True, packet_value=None):
+    """F1 names `prds` (none: R20-F2/F3's shape) and external:hermes. F1's row (m1 -> m2) changes the matrices and
+    `changed`: "edges" (the edges file), "record" (the record) or "neither" (PRD-foo.md); an amended row of the author's
+    declares the rest of what moved m1 -> m2, so only F1's row decides. F1's sweep stays as built (E1 and E2, every edge
+    incident to its PRDs and to external:hermes). packet: the manifests hold the record (m1 one
+    version, m2 the next, the live copy m2's) and, when listed, every edges header lists it in `packet` (or lists
+    packet_value instead)."""
+    M = rounds(2)
+    rv1 = M.review("notes/reviews/r1", S["R1"], [("foo", "FIX"), ("bar", "APPROVE")], "FIX", findings=[
+        {"id": "F1", "class": "semantic-incompatibility", "prds": list(prds), "consumers": ["external:hermes"]}])
+    lines = entry_lines(M)
+    for i, ln in enumerate(lines):
+        if ln.startswith("Review: notes/reviews/r1/"):
+            lines[i] = rv1
+    if packet:
+        for k, m in enumerate(M.mans_decl):
+            if listed:
+                pv = [REC] if packet_value is None else packet_value
+                ed = M.edges(matrix=M.mxb[k], mutate=lambda h, es: h.__setitem__("packet", pv))
+                m["members"][M.eb] = m["copies"][M.eb] = ed
+            m["members"][REC] = m["copies"][REC] = ('{"id": "L1-%02d", "round": %d}\n' % (k + 1, k + 1)).encode()
+        M.files[M.edges_rel] = M.mans_decl[-1]["members"][M.eb]
+        M.files[f"notes/missions/{REC}"] = M.mans_decl[-1]["members"][REC]
+    r = M.rep_rows[0]
+    r["class"] = "semantic-incompatibility"
+    mx = [x for x in r["changed"] if x != M.eb and not x.startswith("PRD-")]
+    moved = ["PRD-foo.md", M.eb] + ([REC] if packet else [])
+    own = {"edges": M.eb, "record": REC, "neither": "PRD-foo.md"}[changed]
+    r["changed"] = mx + [own]
+    rest = [x for x in moved if x != own]
+    m1, m2 = M.mans_decl[0], M.mans_decl[1]
+    sw_foo = [e["id"] for e in json_edges(m1["members"][M.eb]) if "PRD-foo.md" in (e["producer"], e["consumer"])]
+    M.rep_rows.append({"finding": None, "class": None, "author_session": S["A"], "before": m1["rel"], "after": m2["rel"],
+                       "changed": rest, "sweep": sw_foo if "PRD-foo.md" in rest else [], "disposition": "amended",
+                       "reason": "fixture amendment: the rest of m1 -> m2"})
+    return rewrite_repairs(M)
 
 
 def main(argv):

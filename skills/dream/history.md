@@ -226,13 +226,23 @@ doubts a rule can see what it cost when it was missing. Append-only.
   nothing is at its path, no line of the decisions source scopes or names it, it is the last
   element of the latest earlier list naming it, no row of any repairs file the Task names names
   it, and the entry's own `scope=` is the previous list without it, followed only by appended
-  manifests. Any unmet condition keeps today's findings.
+  manifests. Any unmet condition keeps today's findings. Review r23e made two conditions exact: the
+  path is looked up as written and as normalized (`x/` names the file x), and a repairs file the
+  lint cannot read, or a line of it that is no JSON object but names the manifest, rules nothing
+  out. A decisions line counts as in the lint's header: in a JSON row, any string value that
+  resolves to the manifest; a line that is no JSON object, when it names it.
   A seventh followed (addendum 5). Chain review 19's verdict file holds a markdown table, and
   its row `| FIX and UNKNOWN hold; only explicitly free proceeds | Met. ...` has FIX as its
   second token, so the lint read it as the verdict FIX for the slug `|`: three findings on every
   later run, on a reviewer-owned file no entry can repair. A verdict line's first token must now
   be a PRD slug (`[a-z0-9][a-z0-9-]*`); any other line is prose. dream-persist.sh reads a
   separate file of verdict lines only, so it is unchanged.
+  An eighth followed (addenda 6 and 7). A `repaired` row's `changed` had to name one of the
+  finding's PRDs or a contract file of an external it names, so a finding that names no PRD and
+  whose correction is to the edge map (chain review 20's R20-F3) or to a packet record (R19-F4
+  and R20-F2, which moved the binding record) failed `repair-grammar` whatever it changed. For a
+  finding whose `prds` is empty, the mission's edges file and the members of the edges header's
+  `packet` now count too. A finding that names PRDs keeps the old set.
 - **Reading a review scope recorded on another host (2026-11-20, A1723).** A1113's nine
   chain reviews ran on Carbon, and their launch rows record `scope` under Carbon's PRD home
   (`/home/jsy/.cache/dream-a1113/prds-clone`). The continuation on RedBaron holds the same

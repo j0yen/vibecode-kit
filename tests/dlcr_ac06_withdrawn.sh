@@ -18,7 +18,10 @@
 # only by an entry after the withdrawing one); a dangling link at W (V2) and an unreadable folder (L1) refuse; a
 # repeated item (V3); a later void token keeps an earlier applying withdrawal (V5); an unparsed line naming W in a form
 # other than the token's (V8); a row of any role (V9), a list-valued scope or any field naming W (L2) scopes it; a
-# row holding a NUL and a file where W's folder would be leave the token applying.
+# row holding a NUL and a file where W's folder would be leave the token applying. Review r23e: (a) looks W up as written
+# and as normalized (M1: `W/`, `W/.` and `W/../mw.sha256` with W written are refused as existing); (e) refuses an earlier
+# entry's repairs file that is missing or unreadable, or whose line naming W is no JSON object (M2), and applies with
+# the same file clean; a NUL in the token is mission-grammar (L1), never a traceback.
 set -uo pipefail
 # shellcheck source=tests/dlcr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dlcr_lib.sh"
@@ -79,6 +82,23 @@ cx r6-scoped-list; run_mr; has_fail mission-grammar "withdrawn=$WM" "role review
 cx r6-named-row; run_mr; has_fail mission-grammar "withdrawn=$WM" "names it in reasons"
 cx r6-named-nested; run_mr; has_fail mission-grammar "withdrawn=$WM" "names it in freeze"
 cx r6-nul-row; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"
+for c in slash dot dotdot; do                # review r23e M1
+  cx "r6-exists-$c"; run_mr; findings_eq '["mission-grammar"]'; has_fail mission-grammar "withdrawn=$WM" "mw/mw.sha256 exists; only a manifest that was never written"
+done
+cx r6-repairs-earlier-clean; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"     # review r23e M2: the twin of the three below
+cx r6-repairs-earlier-comma; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
+has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl, which is no JSON object, names it"
+cx r6-repairs-earlier-missing; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
+has_fail repair-scope-mismatch "withdrawn=$WM" "notes/missions/old.repairs.jsonl cannot be read (No such file or directory)"
+if [ "$(id -u)" != 0 ]; then             # the clean file made unreadable: a row naming W cannot be ruled out (review r23e M2)
+  cx r6-repairs-earlier-clean; chmod 000 "$H/notes/missions/old.repairs.jsonl"; JS=$(lint --json 2>"$T/err"); RC=$?
+  chmod 644 "$H/notes/missions/old.repairs.jsonl"; ERR=$(cat "$T/err"); no_tb
+  has_fail repair-scope-mismatch "withdrawn=$WM" "notes/missions/old.repairs.jsonl cannot be read (Permission denied)"
+else
+  echo "note: run as root, so the unreadable repairs-file case (review r23e M2) is not run"
+fi
+cx r6-nul-token; run_mr; has_id mission-grammar                         # review r23e L1: a finding, never a traceback
+has_fail mission-grammar "withdrawn=$WM" "a NUL character in its value"
 cx r6-parent-file; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"
 for c in r6-scoped r6-not-last r6-reordered r6-after-w r6-malformed-row r6-not-listed r6-repairs-earlier r6-dangling \
          r6-scoped-author r6-scoped-list r6-named-row r6-named-nested r6-dot-token-line; do
@@ -86,4 +106,4 @@ for c in r6-scoped r6-not-last r6-reordered r6-after-w r6-malformed-row r6-not-l
   v=$(printf '%s' "$JS" | jget 'd["mission"]["withdrawn"][-1]["applies"]'); [ "$v" = false ] || fail "$c: the token applies"
 done
 today r6-positive; has_fail mission-grammar "withdrawn=$WM" "unknown token"; has_id mission-edges-missing
-pass "a planned freeze never written is withdrawn by the dropping entry, by an entry appended after it, and stays withdrawn for later entries (a later void token keeps it); an existing (also a dangling link or behind an unreadable folder), scoped (any role, a list scope, any field, under a --scope-root, through a link or on an unparsed decisions line), not-last, reordered, repairs-named (by any entry's repairs file), repeated, still-listed or unlisted manifest, no decisions source and no own scope= refused; the original and the earlier dropping entry stay refused; the installed rule refuses the positive"
+pass "(review r23e: W/, W/. and W/../mw.sha256 refused as existing; a missing, unreadable or unparsed earlier repairs file refused, its clean twin applies; a NUL token is grammar) a planned freeze never written is withdrawn by the dropping entry, by an entry appended after it, and stays withdrawn for later entries (a later void token keeps it); an existing (also a dangling link or behind an unreadable folder), scoped (any role, a list scope, any field, under a --scope-root, through a link or on an unparsed decisions line), not-last, reordered, repairs-named (by any entry's repairs file), repeated, still-listed or unlisted manifest, no decisions source and no own scope= refused; the original and the earlier dropping entry stay refused; the installed rule refuses the positive"

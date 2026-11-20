@@ -426,7 +426,9 @@ consumers (the finding's `prds` and `consumers`, read from the edges copy frozen
 batch: `{finding, class, author_session, before, after, changed, sweep, disposition}`, where
 `disposition` is `repaired`, `declined` (with a `reason`) or `amended` (an author change
 between two reviews that answers no finding: `finding` and `class` null, a `reason`, and
-`changed` naming what moved). Once any repairs row exists, the repairs file is a packet
+`changed` naming what moved). A `repaired` row's `changed` names one of the finding's PRDs or a
+contract file of an external among its `consumers`; for a finding whose `prds` is empty, the
+mission's edges file or a member of its edges header's `packet` counts too. Once any repairs row exists, the repairs file is a packet
 member: list its basename in every `scope=` manifest later than the earliest `before` any
 row names, including that row's own `after`, so write the row (it names `after` by path)
 before freezing `after`. Feedback goes to the same author: `author_session` is a session
@@ -528,10 +530,13 @@ The six record lines, each on one line (`Mission:` only on a mission run):
   edges copy frozen beside every `scope=` manifest, and earlier entries' `State:` slugs). A
   run without the line lints as before. A freeze named last in `scope=` before it is written,
   and then never written, is dropped by a later entry's `withdrawn=<manifest>`: only when
-  nothing is at the manifest's path, no line of the decisions source scopes or names it, it is
-  the last element of the latest earlier list that names it, no row of any repairs file the
-  Task's entries name names it, and that entry's own `scope=` is the previous entry's list
-  without it, followed only by appended manifests. The token is never inherited, and the
+  nothing is at the manifest's path, as written or normalized; no line of the decisions source
+  scopes or names it (in a JSON row, any string value that resolves to the manifest; a line
+  that is no JSON object, when it names it); it is the last element of the latest earlier list
+  that names it; no row of any repairs file the Task's entries name names it (a file that
+  cannot be read, or a line that is no JSON object but names it, rules nothing out); and that
+  entry's own `scope=` is the previous entry's list without it, followed only by appended
+  manifests. The token is never inherited, and the
   earlier entries are left as written.
 - Paths are relative to the PRD home or absolute.
 

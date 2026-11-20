@@ -3,7 +3,8 @@
 # Shared helpers for the dlcr_* tests: the Dream lint's producer-contract repairs of A1723 decision 3 (the PRD author's
 # request followon7/dream/requests/source-03415-lint-contract-repairs.md, Repairs 1 and 2; its addendum 1, Repair 3;
 # addendum 2, Repair 4, a sidecar consumer declared at the next freeze; addendum 3, Repair 5, a post-review matrix;
-# addendum 4, Repair 6, a planned freeze never written, withdrawn).
+# addendum 4, Repair 6, a planned freeze never written, withdrawn; addenda 6 and 7, Repair 8, the repair of a finding
+# naming no PRD may change the edges file or a packet member).
 # Reuses the dgmr helpers (setup_mx's private HOME, lint, run_mr, findings_eq, has_id, no_id, has_fail, jtrue, clean,
 # base43_lint). `cx <case>` builds one case of tests/fixtures/dlcr/cfx.py into $W and points LOG, DEC and H at it.
 # `today <case>` builds the case and lints it with the installed rule each repair extends (vibecode-kit 43d5b39): the
