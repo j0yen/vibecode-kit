@@ -7,7 +7,7 @@
 # the JSON equals the predecessor's once `mission` and `provenance.mission` are deleted
 # (findings, exit and every provenance label among it); --matrix and --scope-id outputs are
 # byte-identical; --selftest holds every predecessor PASS line verbatim, no FAIL, exit 0,
-# and every further PASS line is a new marked fixture (drei-/drmr-/drfc-/drsp-/datr-), at least
+# and every further PASS line is a new marked fixture (drei-/drmr-/drfc-/drsp-/datr-/dfcn-), at least
 # one per new edge-map finding id, so the count is the predecessor's 70 plus the new ones.
 set -uo pipefail
 # shellcheck source=tests/drei_lib.sh
@@ -86,7 +86,7 @@ while IFS= read -r l; do grep -qxF -- "$l" "$T/st.new" || fail "predecessor PASS
 nnew=0
 while IFS= read -r l; do
   grep -qxF -- "$l" "$T/st.old" && continue
-  case "$l" in *drei-*|*drmr-*|*drfc-*|*drsp-*|*datr-*) nnew=$((nnew+1));; *) fail "unmarked new PASS line: $l";; esac
+  case "$l" in *drei-*|*drmr-*|*drfc-*|*drsp-*|*datr-*|*dfcn-*) nnew=$((nnew+1));; *) fail "unmarked new PASS line: $l";; esac
 done < <(grep '^PASS ' "$T/st.new")
 nhead=$(grep -c '^PASS ' "$T/st.new")
 [ "$nhead" = $((npred + nnew)) ] || fail "PASS count $nhead != $npred + $nnew"
