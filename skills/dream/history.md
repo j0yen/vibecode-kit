@@ -206,6 +206,16 @@ doubts a rule can see what it cost when it was missing. Append-only.
   repeating a key compared equal as parsed, while a first-wins reader saw the other value. The
   resume row must now be later than the session's first review launch that is not a resume, and
   a repeated key is refused.
+  Two more repairs followed (the PRD author's addenda 2 and 3). Review 13's sidecar rows 1-3
+  named a consumer, `external:<name>`, that the review's frozen header did not declare. The
+  author declared it at the next freeze (the 093500Z header) with an edges row (row 136). The
+  lint now accepts such a consumer when the manifest listed next declares it and the author's
+  repairs row from the review's manifest to that one names the edges file. The original failure
+  is kept in `findings_historical` with `declared_by`. Review 14's post-review entry (1:53:07 AM)
+  named the matrix of the pre-review entry (1:22:59 AM) for the same round, which the recency
+  rule read as an earlier run's matrix. A post-review entry may now carry the previous entry's
+  matrix forward when the matrix path, `uncovered=` and `scope=` are unchanged and it adds at
+  least one review of the last listed manifest.
 - **Reading a review scope recorded on another host (2026-11-20, A1723).** A1113's nine
   chain reviews ran on Carbon, and their launch rows record `scope` under Carbon's PRD home
   (`/home/jsy/.cache/dream-a1113/prds-clone`). The continuation on RedBaron holds the same

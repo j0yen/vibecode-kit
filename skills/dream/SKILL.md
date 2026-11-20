@@ -334,7 +334,12 @@ resume), may write `<verdict file>.findings.corrected-<n>.jsonl`, whose first ro
 `{"corrects": <the sidecar's sha256>, "session": <that session>}` and whose other rows are
 the sidecar's, in order, changing only `prds` and `consumers`, with no key repeated in a row. The lint reads it for the
 finding grammar and the repairs rows, keeps the original's failures in the JSON's
-`findings_historical`, and refuses any other correction as `sidecar-correction-unbound`. The final
+`findings_historical`, and refuses any other correction as `sidecar-correction-unbound`. A
+sidecar row may name a consumer `external:<name>` that its review's frozen edges header does not
+declare when the manifest listed next in `scope=` freezes a header that declares `<name>` and the
+mission author's (not the reviewer's) repairs row from the review's manifest to that next one
+names the edges file in `changed`; the lint keeps the original failure in `findings_historical`
+with `declared_by` (that manifest and repairs row). The final
 message ends with one `findings=<sha256 of the sidecar, or none>` line, the per-PRD verdict
 lines and one `mission=<APPROVE|FIX|REJECT> <session>` line verbatim, and the `result=`
 capture carries those same lines. The run note's `Mission:` line gains `scope=` (the
@@ -380,7 +385,10 @@ the note's `adversarial=` names the last, which the last manifest's header and t
 name too. Until every listed manifest's frozen header carries `matrix`, a manifest whose header
 has none keeps the matrix of the entry that first listed it: a repair round inside one run
 entry keeps the matrix name, and a continued legacy mission writes the new run's matrix, later
-than the previous entry. A legacy manifest first listed before `LEGACY_MATRIX_SINCE` (a
+than the previous entry. A post-review entry may name the previous entry's matrix when its
+`adversarial=` path, its `uncovered=` and its `Mission:` `scope=` equal the previous entry's
+and its `Review:` lines are the previous entry's plus at least one new line whose launch row is
+a review of the last listed manifest (its `scope_id`). A legacy manifest first listed before `LEGACY_MATRIX_SINCE` (a
 constant in the lint, recorded in `history.md`; an entry is dated by its `Route:` line's
 `decision=`, else by its header ts) that lists exactly one `*-adversarial.md` keeps that one as
 its matrix member, not compared with the entry's `adversarial=` name, when an entry of the

@@ -11,6 +11,11 @@ tests/fixtures/dgmr/gfx.py does. A case is one PRD home and a private decisions 
   the corrected sidecar r1/verdict.txt.findings.corrected-1.jsonl is written by r1's session, resumed.
 - Repair 3 (r3-*): rounds(3) plus amended rows 3-5 of the pair (m1, m2) that overlap (A1723 rows 129-131) and a
   consolidation row 6 naming their union.
+- Repair 4 (r4-*, addendum 2): r1's finding F1 names the consumer external:newx, which m1's frozen header does not declare;
+  m2's frozen header declares it and the F1 row (m1 -> m2, the author's) names the edges file (A1723 review 13's sidecar
+  rows 1-3, the 093500Z header and repairs row 136).
+- Repair 5 (r5-*, addendum 3): rounds(3)'s entry split into a pre-review entry (13:00, Review: lines of r1 and r2) and the
+  post-review entry (14:00) adding r3's line, both naming the 11:00 matrix (A1723's review-14 entries).
 
 Usage: cfx.py <case> <outdir> | --list
 """
@@ -208,6 +213,77 @@ def r3_other_session():
     return rewrite_repairs(M)
 
 
+# ---------------------------------------------------------------- Repair 4
+def with_newx(M, k):
+    """Manifest k's frozen edges header (and the live one, for the last manifest) declares the external newx."""
+    ed = M.edges(matrix=M.mxb[k], mutate=lambda h, es: h["external"].append("newx"))
+    m = M.mans_decl[k]
+    m["members"][M.eb] = m["copies"][M.eb] = ed
+    if k == len(M.mans_decl) - 1:
+        M.files[M.edges_rel] = ed
+    return M
+
+
+def r4_base(declare_at=1, n=2, live_only=False, row_eb=True, reviewer_row=False, two_names=False):
+    """rounds(n) whose r1 finding F1 names consumers PRD-bar.md and external:newx; declare_at: the manifest index whose
+    frozen header declares newx (1 = m2, the next; 2 = m3, two later; None = none); live_only: only the live header;
+    two_names: F1 also names external:other, which no header declares."""
+    M = rounds(n)
+    cons = ["PRD-bar.md", "external:newx"] + (["external:other"] if two_names else [])
+    rv1 = M.review("notes/reviews/r1", S["R1"], [("foo", "FIX"), ("bar", "APPROVE")], "FIX", findings=[
+        {"id": "F1", "class": "missing-producer-runner", "prds": ["PRD-foo.md"], "consumers": cons}])
+    lines = entry_lines(M)
+    for i, ln in enumerate(lines):
+        if ln.startswith("Review: notes/reviews/r1/"):
+            lines[i] = rv1
+    if declare_at is not None:
+        with_newx(M, declare_at)
+    if live_only:
+        M.files[M.edges_rel] = M.edges(matrix=M.mxb[-1], mutate=lambda h, es: h["external"].append("newx"))
+    r = M.rep_rows[0]
+    if not row_eb or reviewer_row:
+        r["changed"] = [x for x in r["changed"] if x != M.eb]
+    if reviewer_row:                     # the only (m1, m2) row naming the edges file is the reviewer's, an admitted
+        ar = M.row(at(9, 50), S["R1"], role="author")   # author too: an author launch row placed before its
+        M.rows.remove(ar)                                # review launch row, so the review binding still holds
+        M.rows.insert(next(i for i, x in enumerate(M.rows) if x.get("session") == S["R1"]), ar)
+        M.rep_rows.append({"finding": None, "class": None, "author_session": S["R1"], "before": M.mans_decl[0]["rel"],
+                           "after": M.mans_decl[1]["rel"], "changed": [M.eb], "sweep": [], "disposition": "amended",
+                           "reason": "the reviewer's edges row"})
+    return rewrite_repairs(M)
+
+
+# ---------------------------------------------------------------- Repair 5
+def r5_base(prev_all=False, scope_extra=False, other_scope_id=False, prev_uncovered=None, older_matrix=False,
+            drop_old_line=False, new_author_role=False):
+    """rounds(3)'s entry (14:00) split: a pre-review entry at 13:00 with the same lines but r3's Review: line (or all of
+    them, prev_all), then the post-review entry. scope_extra: the post entry's scope= gains a manifest; other_scope_id:
+    r3's launch row names m1; prev_uncovered: the pre entry's uncovered= value; older_matrix: the post entry names round
+    1's matrix; drop_old_line: the post entry drops r1's Review: line; new_author_role: r3's latest launch row is an
+    author row carrying m3's scope_id."""
+    M = rounds(3)
+    post = M.entries[-1]
+    pre = [ln for ln in post["lines"] if prev_all or not ln.startswith("Review: notes/reviews/r3/")]
+    if prev_uncovered is not None:
+        pre = [ln.replace(" uncovered=1", f" uncovered={prev_uncovered}") if ln.startswith("Analysis:") else ln for ln in pre]
+    M.entries.insert(len(M.entries) - 1, {"ts": at(13), "lines": pre})
+    if scope_extra:
+        post["lines"] = [ln.replace("m3/m3.sha256", "m3/m3.sha256,notes/snapshots/m4/m4.sha256") if ln.startswith("Mission:")
+                         else ln for ln in post["lines"]]
+    if other_scope_id:
+        r3 = [r for r in M.rows if r.get("session") == S["R3"]][-1]
+        r3["scope"], r3["scope_id"] = M.mans_decl[0]["rel"], M.sid(M.mans_decl[0])
+    if older_matrix:
+        post["lines"] = [ln.replace(mfx.mx_rel(11), mfx.mx_rel(9)) if ln.startswith("Analysis:") else ln for ln in post["lines"]]
+    if drop_old_line:
+        post["lines"] = [ln for ln in post["lines"] if not ln.startswith("Review: notes/reviews/r1/")]
+    if new_author_role:
+        m3 = M.mans_decl[-1]
+        M.row(at(10, 30), S["R3"], role="author", scope=m3["rel"], sid=M.sid(m3))
+    M.no_resign = other_scope_id
+    return M
+
+
 CASES = {
     "r1-positive": lambda: r1_base(),
     "r1-intermediate-reviewed": lambda: r1_base(intermediate_reviewed=True),
@@ -228,6 +304,21 @@ CASES = {
     "r3-omits-changed": lambda: r3_base(changed=["PRD-foo.md"]),
     "r3-other-session": r3_other_session,
     "r3-twice": r3_twice,
+    "r4-original": lambda: r4_base(declare_at=None),
+    "r4-positive": lambda: r4_base(),
+    "r4-later-only": lambda: r4_base(declare_at=2, n=3),
+    "r4-live-only": lambda: r4_base(declare_at=None, live_only=True),
+    "r4-no-row": lambda: r4_base(row_eb=False),
+    "r4-reviewer-row": lambda: r4_base(reviewer_row=True),
+    "r4-two-names": lambda: r4_base(two_names=True),
+    "r5-positive": lambda: r5_base(),
+    "r5-scope-added": lambda: r5_base(scope_extra=True),
+    "r5-no-new-review": lambda: r5_base(prev_all=True),
+    "r5-other-scope-id": lambda: r5_base(other_scope_id=True),
+    "r5-uncovered-changed": lambda: r5_base(prev_uncovered=2),
+    "r5-older-matrix": lambda: r5_base(older_matrix=True),
+    "r5-old-line-dropped": lambda: r5_base(drop_old_line=True),
+    "r5-new-line-author-role": lambda: r5_base(new_author_role=True),
 }
 for _k, _v in (("id", "F9"), ("class", "authority-bypass"), ("counterexample", "another counterexample"),
                ("correction", "another correction"), ("control", "another control")):
@@ -242,7 +333,8 @@ def main(argv):
         print(f"usage: cfx.py <case> <outdir> | --list (cases: {' '.join(CASES)})", file=sys.stderr)
         return 2
     M = CASES[argv[0]]()
-    resign(M)
+    if not getattr(M, "no_resign", False):
+        resign(M)
     M.write(argv[1])
     return 0
 

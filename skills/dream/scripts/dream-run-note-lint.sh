@@ -705,6 +705,42 @@ def entry_state_slugs(e):
     return out
 
 
+def post_review_reuse(entries, ei, adv, mrec, rows, task, reviews_raw, resolve):
+    """Producer-contract Repair 5 (A1723 decision 3, addendum 3): a post-review entry may name the previous entry's
+    matrix when (a) its adversarial= path and uncovered= equal the previous entry's, (b) its Mission: scope= is the
+    previous entry's, nothing added, and (c) its Review: lines are the previous entry's plus at least one new line,
+    each new line's latest launch row of the Task having role review and the last listed manifest's scope_id."""
+    if ei < 1 or task is None or not mrec or not mrec.get("scope") or not mrec.get("earlier"):
+        return False
+    prev = entries[ei - 1]
+    if entry_task(prev) != task:
+        return False
+    pa = [ln for ln in prev["lines"] if ln.startswith("Analysis:")]
+    pv = parse_analysis(pa[-1])[0].get("adversarial") if pa else None
+    if not pv or pv[0] != "matrix" or adv[0] != "matrix" or pv[2] != adv[2] \
+            or os.path.normpath(resolve(pv[1])) != os.path.normpath(resolve(adv[1])):
+        return False                                                             # (a)
+    pscope = (mrec["earlier"][-1]["eff"].get("scope") or ([], None))[0]
+    if [os.path.normpath(resolve(x)) for x in pscope] != [os.path.normpath(resolve(x)) for x in mrec["scope"]]:
+        return False                                                             # (b)
+    old = [ln.rstrip() for ln in prev["lines"] if ln.startswith("Review:")]
+    cur = [ln.rstrip() for ln in reviews_raw]
+    new = [ln for ln in cur if ln not in old]
+    if not new or any(ln not in cur for ln in old):
+        return False                                                             # (c) the previous lines plus a new one
+    try:
+        last_id = scope_canon(resolve(mrec["scope"][-1]))[0]
+    except ScopeError:
+        return False
+    for ln in new:
+        m = re.match(r"^Review:\s+\S+\s+reviewer-session=(\S+)", ln)
+        lr = [r for r in rows or [] if m and r.get("session") == m.group(1) and r.get("decision") == "launch"
+              and r.get("skill") == "dream" and r.get("task_id") == task]
+        if not lr or lr[-1].get("role") != "review" or lr[-1].get("scope_id") != last_id:
+            return False                                                         # (c) each new line's launch row
+    return True
+
+
 def entry_matrix(e):
     """The matrix path of one log entry's last Analysis: line (None for skipped: or no line)."""
     a = None
@@ -1067,6 +1103,52 @@ def header_contracts(hd):
     return out
 
 
+def repairs_rows(mrec, resolve):
+    """[(row number, row)] of the Mission: line's repairs file, JSON objects only ([] when absent or unreadable: the
+    repair sweep reports that)."""
+    tok = mrec.get("repairs") if mrec else None
+    if not tok:
+        return []
+    try:
+        with open(resolve(tok), "rb") as fh:
+            text = fh.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    out = []
+    for n, ln in enumerate(text.split("\n"), 1):
+        try:
+            r = json.loads(ln) if ln.strip() else None
+        except ValueError:
+            r = None
+        if isinstance(r, dict):
+            out.append((n, r))
+    return out
+
+
+def late_declared(mans, k, exts, eb, rep_rows, admitted, reviewer, resolve):
+    """Producer-contract Repair 4 (A1723 decision 3, addendum 2): the externals a chain review of manifest k may name
+    though its frozen edges header does not declare them. {name: {manifest, repairs_row}} for each name the frozen
+    header of the next listed manifest declares, when a repairs row with before = manifest k and after = that next
+    manifest names the edges file in changed, written by the mission's author (an admitted author session when the
+    host is governed), never the reviewer. Any other name stays mission-finding-incomplete."""
+    if k + 1 >= len(mans) or mans[k + 1]["id"] is None or not mans[k + 1].get("frozen"):
+        return {}
+    nxt = mans[k + 1]
+    names = set(nxt["frozen"]["external_names"]) - exts
+    if not names or not eb:
+        return {}
+
+    def at(p):
+        return isinstance(p, str) and p.strip() and os.path.normpath(resolve(p))
+    for n, r in rep_rows:
+        a_s, ch = r.get("author_session"), r.get("changed")
+        if (at(r.get("before")) == os.path.normpath(mans[k]["full"]) and at(r.get("after")) == os.path.normpath(nxt["full"])
+                and isinstance(ch, list) and any(isinstance(x, str) and os.path.basename(x) == eb for x in ch)
+                and isinstance(a_s, str) and a_s.strip() and a_s != reviewer and (admitted is None or a_s in admitted)):
+            return {nm: {"manifest": nxt["path"], "repairs_row": n} for nm in sorted(names)}
+    return {}
+
+
 def sidecar_rows(data):
     """A findings sidecar's rows: [(line number, JSON value or None)] for each non-blank line."""
     out = []
@@ -1079,9 +1161,12 @@ def sidecar_rows(data):
     return out
 
 
-def sc_rows(c, rows_sc, sc, prset, exts, ids_seen, fail, live):
+def sc_rows(c, rows_sc, sc, prset, exts, ids_seen, fail, live, late=None, hist=None):
     """Chain-review R4 on one sidecar's rows: each failure goes to fail(id, detail). `live` reads the rows as the
-    review's findings (ids_seen, named, findings, advisory); a historical pass (Repair 2's original) only records."""
+    review's findings (ids_seen, named, findings, advisory); a historical pass (Repair 2's original) only records.
+    late: {name: declaration} of the externals the next freeze declares (producer-contract Repair 4); a consumer
+    external:<name> its review's frozen header does not declare passes when late names it, and the live pass sends
+    the failure it would have been to hist."""
     mine = set()
     for n, r in rows_sc:
         def bad(field, why, n=n):
@@ -1119,11 +1204,17 @@ def sc_rows(c, rows_sc, sc, prset, exts, ids_seen, fail, live):
         if not isinstance(pr, list) or (not adv_row and not pr) or not all(x in prset for x in pr):
             bad("prds", "not a non-empty list of mission prds members" if not adv_row else "not a list of mission prds members")
             ok = False
-        if (not isinstance(co, list) or not all(x in prset or (isinstance(x, str) and x.startswith("external:")
-                                                                and x[9:] in exts) for x in co)
-                or (not co and not adv_row and cls != "provenance")):
+        undecl = [x for x in co if not (x in prset or (isinstance(x, str) and x.startswith("external:") and x[9:] in exts))] \
+            if isinstance(co, list) else None
+        late_ok = bool(undecl) and bool(late) and all(isinstance(x, str) and x.startswith("external:") and x[9:] in late
+                                                      for x in undecl)
+        if not isinstance(co, list) or (undecl and not late_ok) or (not co and not adv_row and cls != "provenance"):
             bad("consumers", "not a list of prds members or declared external:<name> (empty only for class provenance)")
             ok = False
+        elif late_ok and live and hist is not None:
+            hist({"id": "mission-finding-incomplete",
+                  "detail": f"{sc}: row {n}: field consumers: {', '.join(undecl)} not declared by its review's frozen "
+                            "edges header", "declared_by": {x: late[x[9:]] for x in undecl}})
         if adv_row:
             ac = r.get("accepts")
             if not isinstance(ac, list) or not ac or not all(isinstance(x, str) and x.strip() for x in ac):
@@ -1379,7 +1470,11 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
     # R3 verdict lines and the sidecar binding; R4 the findings sidecar
     since = parse_iso(SIDECAR_BINDING_SINCE)
     ids_seen = {}
-    findings_hist = []      # Repair 2: an original sidecar's failures a corrected sidecar answers (never dropped)
+    findings_hist = []      # Repair 2: an original sidecar's failures a corrected sidecar answers (never dropped);
+                            # Repair 4: a consumer the next freeze declares
+    rep_rows = repairs_rows(mrec, resolve)
+    admitted = ({r.get("session") for r in rows or [] if r.get("decision") == "launch" and r.get("skill") == "dream"
+                 and r.get("task_id") == task and r.get("role", "author") == "author"} if governed else None)
     for c in chain:
         f, res = c["rv"]["file"], c["rv"]["result"]
         c["verdict"], c["findings"], c["advisory"], c["sidecar_bound"] = None, [], [], False
@@ -1445,6 +1540,7 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
         fh = mans[c["idx"]]["frozen"] or hd
         prset = set(fh["prds"]) if fh else set()
         exts = set(fh["external_names"]) if fh else set()
+        late = late_declared(mans, c["idx"], exts, eb, rep_rows, admitted, c["rv"]["session"], resolve)
         # producer-contract Repair 2 (A1723 decision 3): a corrected sidecar written by this review's own session,
         # resumed, may change prds and consumers; it is read for finding grammar and the sweep, the original's failures
         # are kept as findings_historical, and findings= still binds the original bytes
@@ -1454,9 +1550,9 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
             c["sidecar_corrected"] = corr[0]
             sc_rows(c, rows_sc, sc, prset, exts, ids_seen, lambda fid_, d: findings_hist.append(
                 {"id": fid_, "detail": d, "corrected_by": corr[0]}), False)
-            sc_rows(c, corr[1], corr[0], prset, exts, ids_seen, L.fail, True)
+            sc_rows(c, corr[1], corr[0], prset, exts, ids_seen, L.fail, True, late, findings_hist.append)
         else:
-            sc_rows(c, rows_sc, sc, prset, exts, ids_seen, L.fail, True)
+            sc_rows(c, rows_sc, sc, prset, exts, ids_seen, L.fail, True, late, findings_hist.append)
     # the mission verdict: the last chain review, in line (launch) order, of the last listed manifest
     vr = None
     if order_ok and chain and chain[-1]["idx"] == last:
@@ -3496,7 +3592,7 @@ def lint_log(a):
             mm = re.match(r"^(.+)-adversarial\.md$", os.path.basename(adv[1]))
             if mm and prev_ts and os.path.isfile(mpath):
                 mt, pt = parse_iso(mm.group(1)), parse_iso(prev_ts)
-                if mt and pt and mt <= pt:
+                if mt and pt and mt <= pt and not post_review_reuse(entries, ei, adv, mrec, rows, task, reviews_raw, resolve):
                     L.fail("analysis-grammar",
                            f"matrix {adv[1]} is not later than the previous entry {prev_ts} (an earlier run's matrix)")
 
