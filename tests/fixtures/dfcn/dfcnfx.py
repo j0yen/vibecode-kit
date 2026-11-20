@@ -14,7 +14,7 @@ mechanism 2: a test row) and lints to exit 0. Each case replaces or adds rows an
 FAIL line must carry (the row id, the key and `<page basename>#<finding>`).
 
 Usage: dfcnfx.py --run <prefix> <lint> <scratch dir>   (exit 0 when every case of the prefix passes; one PASS or FAIL line per case)
-       dfcnfx.py --nodrift <lint> <scratch dir> <swarm-decide tree>   (the lint's repair predicate against the close gate's own _satisfied)
+       dfcnfx.py --nodrift <lint> <scratch dir> <swarm-decide tree>   (the lint against the close gate's own store, writers and _satisfied)
 """
 import hashlib
 import json
@@ -26,6 +26,7 @@ import sys
 PAGE = "notes/analysis/fx-wwhtbt.md"
 P1724 = "2026-11-18-mission-analysis-consistency-wwhtbt.md"
 PAGE2 = "notes/analysis/fx2-wwhtbt.md"
+PAGE3 = "notes/analysis/fx3-wwhtbt.md"           # review r14b L-b: its Falsifier paragraph runs `timeout 60 python3 -I scripts/kill-fx3.py`
 BASE = "fx-wwhtbt.md"
 AUTHOR = "a-1"
 TASK = "A1"
@@ -70,6 +71,19 @@ class Fx:
                  "```\n# a shell comment inside a fenced block\n```\n\n2. Second — ⚙ b — owner ctl — state SPEC (A1300)\n")   # review r14 L1
         write(os.path.join(self.home, PAGE2), page2)
         self.page2_sha = sha(page2)
+        page3 = ("# Weakest link\n\nThe kill script is a Python file.\n\n**Falsifier.** `timeout 60 python3 -I scripts/kill-fx3.py` prints KILL-FX3 when "
+                 "a finding has no row.\n\n# Mechanisms\n\n1. Only one — ⚙ a — owner A1723 author — state SPEC (A1723)\n")      # review r14b L-b
+        write(os.path.join(self.home, PAGE3), page3)
+        self.page3_sha = sha(page3)
+        self.kill3 = "print('KILL-FX3')\n"
+        write(os.path.join(self.home, "scripts", "kill-fx3.py"), self.kill3)
+        write(os.path.join(self.home, "build-queue", "PRD-fx-c.md"),
+              "# PRD-fx-c\n\n## Acceptance criteria\n\n1. P0 — Given fx3-wwhtbt.md#falsifier, When `python3 -I scripts/kill-fx3.py` runs on a record "
+              "missing a row, Then it prints `KILL-FX3`.\n")
+        write(os.path.join(T, "decoy", "dream-run-note-lint.sh"), "#!/bin/sh\n# a decoy with the lint's name\nexit 0\n", 0o755)    # review r14b F1
+        os.makedirs(os.path.join(T, "copy"), exist_ok=True)
+        shutil.copyfile(lint, os.path.join(T, "copy", "dream-run-note-lint.sh"))
+        os.chmod(os.path.join(T, "copy", "dream-run-note-lint.sh"), 0o755)
         write(os.path.join(self.home, "build-queue", "PRD-fx-a.md"),
               "# PRD-fx-a\n\n## Acceptance criteria\n\n"
               "1. P0 — Given %s#falsifier, When `bash scripts/kill-fx.sh` runs on a record missing a row, Then it prints `KILL-FX` "
@@ -77,12 +91,15 @@ class Fx:
               "2. P0 — Given %s#mechanism:1, When `tests/fx_ac02.sh` runs its negative control, Then a record without the row exits 1.\n"
               "3. P0 — Given %s#mechanism:1, When a reader looks, Then the row is described in prose only.\n"
               "4. P0 — Given %s#falsifier, When `bash scripts/other-kill.sh` runs, Then it prints OTHER.\n"
-              "5. P0 — Given `%s#mechanism:1`, When a reader looks, Then nothing runs.\n" % (BASE, BASE, BASE, BASE, BASE))
+              "5. P0 — Given `%s#mechanism:1`, When a reader looks, Then nothing runs.\n"
+              "6. P0 — Given %s#falsifier, When `bash scripts/kill-fx.sh` runs on a record missing a row, Then it prints `KILL-FX` "
+              "(re-expressed by `bash ../outside-rx.sh`).\n" % (BASE, BASE, BASE, BASE, BASE, BASE))     # AC 6: review r14b L-c
         write(os.path.join(T, "outside-rx.sh"), "#!/bin/sh\necho KILL-FX\n", 0o755)
         os.makedirs(os.path.join(self.repo, "tests"))
         write(os.path.join(self.repo, "tests", "bind.sh"), "# exercises %s#falsifier,mechanism:1,mechanism:2\n" % BASE)
         write(os.path.join(self.repo, "tests", "plain.sh"), "# names no finding\n")
         write(os.path.join(self.repo, "tests", "bind2.sh"), "# exercises fx2-wwhtbt.md#falsifier,mechanism:1,mechanism:2\n")
+        write(os.path.join(self.repo, "tests", "bind3.sh"), "# exercises fx3-wwhtbt.md#mechanism:1\n")
         write(os.path.join(self.repo, "t2", "%s#mechanism:2.sh" % BASE), "# a file name that names the finding, inside a tree\n")
         env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", HOME=self.fakehome)
         for c in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "fixture"]):
@@ -90,7 +107,7 @@ class Fx:
         self.commit = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True, check=True, env=env).stdout.strip()
         rows = [("rv-ok", TASK, "review"), (AUTHOR, TASK, "author"), (AUTHOR, TASK, "review"), ("rv-norole", TASK, None), ("rv-noline", TASK, "review"),
                 ("rv-other", "A9", "review"), ("a-2", TASK, "review"), ("a-2", TASK, "author"), ("rv-x", TASK, "review", "other-skill"),
-                ("rv-cited", TASK, "review"), ("rv-citer", TASK, None)]
+                ("rv-cited", TASK, "review"), ("rv-citer", TASK, None), ("a-res", TASK, "author"), ("rv-late", TASK, "review"), ("a-res", TASK, "author")]
         with open(self.dec, "w") as f:
             for i, (s, t, role, *sk) in enumerate(rows):
                 r = {"ts": "2026-11-19T10:%02d:00-08:00" % i, "decision": "launch", "task_id": t, "skill": sk[0] if sk else "dream", "route": "opus-xhigh",
@@ -106,7 +123,8 @@ class Fx:
                            ("verdict-a2.md", "Review session a-2\naccepts c-res\n## VERDICT: APPROVE\n"),
                            ("verdict-rvx.md", "Review session rv-x\naccepts c-res\n## VERDICT: APPROVE\n"),
                            ("verdict-cited.md", "Review session rv-cited\nno acceptance here\n## VERDICT: APPROVE\n"),
-                           ("verdict-citer.md", "Review session rv-citer, re-reviewing rv-cited's verdict\naccepts c-res\n## VERDICT: APPROVE\n")):
+                           ("verdict-citer.md", "Review session rv-citer, re-reviewing rv-cited's verdict\naccepts c-res\n## VERDICT: APPROVE\n"),
+                           ("verdict-late.md", "Review session rv-late\nThe author is session a-res\naccepts c-late\n## VERDICT: APPROVE\n")):
             write(os.path.join(self.reviews, name), text)
         with open(self.policy, "w") as f:
             json.dump({"evidence": {"ref_pattern": "^(ledger|file|pr|run|commit|page):[^\\s]{2,200}$",
@@ -181,7 +199,7 @@ class Fx:
         os.makedirs(d, exist_ok=True)
         sc = os.path.join(self.T, "scenario.json")
         with open(sc, "w") as f:
-            f.write(json.dumps(scenario).replace("{RECORD}", os.path.join(self.home, "record.jsonl")).replace("{LINT}", self.lint_path))
+            f.write(json.dumps(scenario).replace("{RECORD}", os.path.join(self.home, "record.jsonl")).replace("{LINT}", self.lint_path).replace("{T}", self.T))
         write(os.path.join(d, "wm-asks"), """#!/usr/bin/env python3
 import json, sys
 sc = json.load(open(%r))
@@ -315,7 +333,7 @@ case("ac02-r14l2-ac-whose-only-backticks-name-the-finding", 1, ["consumption-bin
 case("ac02-r14l3-a-tree-is-no-test-file", 1, ["consumption-binding-invalid"], ["row c-m2 (%s#mechanism:2)" % BASE, "key path: t2 is not a file"])(
     lambda fx: rows_with(fx, **{"mechanism:2": dict(fx.base()["mechanism:2"], path="t2")}))
 case("ac02-r14l4-reexpression-outside-the-home", 1, ["consumption-binding-invalid"], ["row c-fal (%s#falsifier)" % BASE, "not under the PRD home"])(
-    lambda fx: rows_with(fx, falsifier=dict(fx.base()["falsifier"], reexpression={"script": "../outside-rx.sh",
+    lambda fx: rows_with(fx, falsifier=dict(fx.base()["falsifier"], ac=6, reexpression={"script": "../outside-rx.sh",
                                                                                   "sha256": sha(open(os.path.join(fx.T, "outside-rx.sh")).read())})))
 case("ac02-r14l5-an-empty-record-without-page", 1, ["consumption-grammar"], ["has no row and no --page"], nopage=True)(lambda fx: [])
 case("ac02-r14l5-require-closed-with-no-row-for-the-task", 1, ["consumption-repair-unbound"], ["no repair or pending row", "names successor A999"],
@@ -347,6 +365,7 @@ case("ac03-r14m3-review-launch-of-another-skill", 1, ["consumption-residual-unac
      ["row c-res (%s#mechanism:2)" % BASE, "accepted_by rv-x: no review launch row"], unconsumed=[BASE + "#mechanism:2"])(lambda fx: residual(fx, "rv-x"))
 case("ac03-r14m4-a-later-file-citing-the-session-is-not-its-own", 1, ["consumption-residual-unaccepted"],
      ["row c-res (%s#mechanism:2)" % BASE, "accepted_by rv-cited: no verdict file"], unconsumed=[BASE + "#mechanism:2"])(lambda fx: residual(fx, "rv-cited"))
+case("ac03-r14bla-a-resumed-author-does-not-take-a-later-reviews-file", 0, [], unconsumed=[])(lambda fx: residual(fx, "rv-late", rid="c-late"))
 case("ac03-residual-with-a-placeholder-ref", 1, ["consumption-binding-invalid"], ["row c-res (%s#mechanism:2)" % BASE, "key evidence"])(
     lambda fx: rows_with(fx, **{"mechanism:2": fx.row("c-res", "mechanism:2", "residual", owner="hermes", evidence=["ledger:tbd"], accepted_by="rv-ok")}))
 case("ac03-receipt-only-session", 1, ["consumption-receipt-only"], ["row 'c-rcpt'", "its only target is a receipt (session)"])(
@@ -413,19 +432,224 @@ case("h5p-an-unrelated-asks-pass-is-no-proof", 1, ["consumption-repair-unproven"
                                                        events={"A101": [PLAIN_ADD, ev("accept", result="FAIL", sha=X, mode="run")], "A103": PROOF}))(h5_rows)
 
 
+def scen_check(check):
+    """The closed, proved repair A101 of the H5 cases, with successor A102's done-check replaced (review r14b F1)."""
+    sc = scen("closed", [PLAIN_ADD] + PROOF + [ev("resolve", verdict_row="V1")])
+    sc["rows"][1]["check"] = check
+    return sc
+
+
+LC = "bash {LINT} --consumption {RECORD} --task A102 --require-closed"
+F1_REFUSED = (   # review r14b F1: each check could exit 0 without the lint gating it on this record for this successor
+    ("or-true-never-gates", LC + " || true", "not one plain command"),
+    ("true-or-the-lint", "true || " + LC, "not one plain command"),
+    ("an-echo-of-the-lint", "echo " + LC, "its command is not a path to dream-run-note-lint.sh"),
+    ("a-comment-after-true", "true # " + LC, "not one plain command"),
+    ("a-sequence", "bash {LINT} --task A1; true --consumption {RECORD} --task A102 --require-closed", "not one plain command"),
+    ("a-variable", "bash $HOME/../copy/dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed", "not one plain command"),
+    ("a-relative-decoy-record", "bash {LINT} --consumption home/record.jsonl --task A102 --require-closed", "its --consumption is not"),
+    ("page-takes-require-closed", "bash {LINT} --consumption {RECORD} --task A102 --page --require-closed", "it lacks --require-closed"),
+    ("a-later-task-overrides", "bash {LINT} --consumption {RECORD} --task A102 --task A1 --require-closed", "its --task is A1, not A102"),
+    ("a-later-record-overrides", "bash {LINT} --consumption {RECORD} --consumption {T}/decoy.jsonl --task A102 --require-closed",
+     "its --consumption is not"),
+    ("a-missing-lint", "bash {T}/nowhere/dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed", "is not this lint"),
+    ("a-decoy-with-the-lints-name", "bash {T}/decoy/dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed", "is not this lint"),
+    ("a-bare-name", "dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed", "its command is not a path"),
+    ("another-mode", "bash {LINT} --selftest --consumption {RECORD} --task A102 --require-closed", "another mode"),
+)
+for _n, _chk, _why in F1_REFUSED:
+    case("ac02-r14bf1-" + _n, 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE, _why], unconsumed=[BASE + "#mechanism:2"],
+         scenario=scen_check(_chk), plain=True)(h5_rows)
+F1_BOUND = (     # the over-strict side: legitimate forms of the check still bind
+    ("timeout-and-a-home-relative-record", "timeout -k 5 60 bash {LINT} --consumption ../home/record.jsonl --task A102 --require-closed --json"),
+    ("direct-exec-and-a-tilde-record", "{LINT} --json --consumption ~/../home/record.jsonl --task A102 --require-closed"),
+    ("a-copy-with-the-same-bytes", "bash {T}/copy/dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed"),
+)
+for _n, _chk in F1_BOUND:
+    case("ac02-r14bf1-ok-" + _n, 0, [], unconsumed=[], scenario=scen_check(_chk), plain=True)(h5_rows)
+
+CANCEL_CLAIM = [INTAKE_ADD] + PROOF + [ev("transition", **{"from": "ready", "to": "cancelled"}), ev("claim", worker="w2", claim="w2@2026-11-19T15:01")]
+case("h5p-r14bf2-cancelled-then-a-plain-claim-never-satisfies", 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE, "intake-cancelled"],
+     unconsumed=[BASE + "#mechanism:2"], scenario=scen("open", CANCEL_CLAIM))(h5_rows)
+case("h5p-r14bf2-cancelled-then-a-plain-claim-is-refused-in-plain-mode", 1, ["consumption-repair-unproven"],
+     ["row c-rep (%s#mechanism:2)" % BASE, "intake-cancelled"], unconsumed=[BASE + "#mechanism:2"], scenario=scen("open", CANCEL_CLAIM), plain=True)(h5_rows)
+
+case("ac02-r14blb-a-falsifier-run-by-python3-with-options", 0, [], unconsumed=[], page=PAGE3)(
+    lambda fx: [{"id": "c3-fal", "page": PAGE3, "page_sha256": fx.page3_sha, "finding": "falsifier", "binding": "requirement", "author_session": AUTHOR,
+                 "prd": "PRD-fx-c.md", "ac": 1, "kill": {"script": "scripts/kill-fx3.py", "sha256": sha(fx.kill3), "string": "KILL-FX3"}},
+                {"id": "c3-m1", "page": PAGE3, "page_sha256": fx.page3_sha, "finding": "mechanism:1", "binding": "test", "author_session": AUTHOR,
+                 "repo": fx.repo, "commit": fx.commit, "path": "tests/bind3.sh"}])
+
+
 def nodrift(lint, T, sd):
-    """Chain review 11 R11-F2: the lint's reading of a repair's state equals the close gate's own `_satisfied` (imported from the swarm-decide tree sd)
-    on closed, intake-accepted-but-open, intake-cancelled and open rows, each carrying a valid proof."""
+    """Chain review 11 R11-F2's no-drift control, driven by the close gate's own store (review r14b F2). Each sequence creates a repair R and a successor
+    S (`closes-after=row:R`, whose check runs this lint) and moves R with swarm-decide's own code from the tree sd: asks add/accept/claim/resolve, intake
+    submit (new and cancel), claim_task, transition, begin_effect, release_task and the acceptance core, on a temp store. The lint then reads R through
+    that tree's own CLI (`wm-asks` = `wm_decide.cli`). For each sequence: the lint's intake state equals R's `state` column ('legacy' = none), its
+    predicate equals the close gate's `_satisfied(R)`, and its verdict under --require-closed for S is what the close gate implies: consumed when
+    satisfied, `consumption-repair-unproven` when cancelled, `consumption-repair-open` otherwise. A plain-mode run refuses exactly the cancelled ones."""
     sys.path.insert(0, sd)
-    from wm_decide import asks as close_gate          # noqa: E402  (the predicate's one owner)
+    state, shome = os.path.join(T, "sd-state"), os.path.join(T, "sd-home")
+    os.makedirs(state)
+    os.makedirs(shome)
+    os.environ.update(WM_DECIDE_STATE=state, HOME=shome)
+    from wm_decide import asks, intake, store                    # noqa: E402  (the predicate's one owner, and the store's own writers)
+    db = store.connect()
+    intake.ensure(db)
+    shim = os.path.join(T, "sd-shim")
+    write(os.path.join(shim, "wm-asks"), "#!/bin/sh\nexec env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH='%s' WM_DECIDE_STATE='%s' HOME='%s' python3 -B -c "
+          "'import sys; from wm_decide.cli import main; sys.exit(main(sys.argv[1:]))' \"$@\"\n" % (sd, state, shome), 0o755)
     fx = Fx(T, lint)
+    rec = os.path.join(fx.home, "record.jsonl")
+    DUE = "2026-12-31T09:00"
+    n = [0]
+
+    def rev(a):
+        return db.execute("SELECT rev FROM asks WHERE ask_id = ?", (a,)).fetchone()[0]
+
+    def new_repair(intake_row, depends=()):
+        n[0] += 1
+        chk = "test -f m%d" % n[0]
+        what = "repair %s#mechanism:2 (the canonical repair %d)" % (BASE, n[0])
+        if intake_row:
+            res, _ = intake.submit(db, {"source_event_id": "tg:nd%d" % n[0], "text": what, "request_type": "new", "authorized_by": "hermes"},
+                                   {"owner": "ctl", "due": DUE, "what": what, "check": chk, "depends": list(depends)}, trusted=("hermes",))
+            return res["ask_id"], n[0]
+        return asks.add(db, owner="ctl", due=DUE, what=what, check=chk, actor="t-author"), n[0]
+
+    def successor(r):
+        s = asks.next_id(db, "A")
+        got = asks.add(db, owner="hermes", due=DUE, what="successor S closes-after=row:%s" % r,
+                       check="bash %s --consumption %s --task %s --require-closed" % (lint, rec, s), actor="t-author")
+        if got != s:
+            raise SystemExit("FAIL no-drift: successor id %s, predicted %s" % (got, s))
+        return s
+
+    def prove(r, k):                                              # FAIL, then the file appears, then a run PASS at the same sha
+        asks.accept(db, r, actor="t-closer")
+        open(os.path.join(shome, "m%d" % k), "w").close()
+        asks.accept(db, r, actor="t-closer")
+
+    def verifying(r, pid=None):
+        intake.claim_task(db, r, worker="w-nd", expect_rev=rev(r), actor="ctl", pid=pid)
+        intake.transition(db, r, "running", expect_rev=rev(r), actor="ctl")
+        intake.transition(db, r, "verifying", expect_rev=rev(r), actor="ctl")
+
+    def dead_pid():
+        p = subprocess.Popen(["true"])
+        p.wait()
+        return p.pid
+
+    def cli(*a):
+        return subprocess.run([os.path.join(shim, "wm-asks"), *a], capture_output=True, text=True)
+
+    def seq_legacy_open():
+        r, k = new_repair(False); s = successor(r); prove(r, k); return r, s
+
+    def seq_legacy_closed():
+        r, k = new_repair(False); s = successor(r); prove(r, k)
+        rid = db.execute("SELECT row_id FROM asks WHERE ask_id = ?", (r,)).fetchone()[0]
+        p = cli("record", "--agent", "r7", "--kind", "verdict", "--model", "deterministic", "--gates", rid, "--what", "decision=%s fixture check passed" % rid,
+                "--why", "fixture", "--evidence", "decision=%s fixture check rc 0" % rid, "--reverse-text", "fixture only")
+        vid = (p.stdout.strip().split() or [""])[-1]
+        asks.resolve(db, r, expect_rev=rev(r), actor="t-closer", evidence="fixture close", verdict_row=vid)
+        return r, s
+
+    def seq_ready():
+        r, k = new_repair(True); s = successor(r); prove(r, k); return r, s
+
+    def seq_claimed():
+        r, k = new_repair(True); s = successor(r); prove(r, k)
+        intake.claim_task(db, r, worker="w-nd", expect_rev=rev(r), actor="ctl"); return r, s
+
+    def seq_verifying():
+        r, k = new_repair(True); s = successor(r); prove(r, k); verifying(r); return r, s
+
+    def seq_blocked():
+        r, k = new_repair(True); s = successor(r); prove(r, k)
+        intake.claim_task(db, r, worker="w-nd", expect_rev=rev(r), actor="ctl")
+        intake.transition(db, r, "blocked", expect_rev=rev(r), actor="ctl"); return r, s
+
+    def seq_accepted():
+        r, k = new_repair(True); s = successor(r); verifying(r); prove(r, k)
+        intake._accept_core(db, r, expect_rev=rev(r), actor="r7", evidence="independent readback"); return r, s
+
+    def seq_cancelled_by_transition():
+        r, k = new_repair(True); s = successor(r); prove(r, k)
+        intake.transition(db, r, "cancelled", expect_rev=rev(r), actor="hermes"); return r, s
+
+    def seq_cancelled_then_plain_claim():
+        r, s = seq_cancelled_by_transition()
+        asks.claim(db, r, worker="w2", actor="someone"); return r, s
+
+    def seq_cancelled_by_request():
+        r, k = new_repair(True); prove(r, k)
+        intake.submit(db, {"source_event_id": "tg:ndx%d" % k, "text": "cancel %s" % r, "request_type": "cancel", "authorized_by": "hermes",
+                           "target_ask": r, "target_rev": rev(r)}, None, trusted=("hermes",))
+        return r, successor(r)
+
+    def seq_plain_claim_on_ready():
+        r, s = seq_ready()
+        asks.claim(db, r, worker="w3", actor="someone"); return r, s
+
+    def seq_draft():
+        d, _ = new_repair(True)
+        r, k = new_repair(True, depends=(d,)); s = successor(r); prove(r, k); return r, s
+
+    def seq_enabled():
+        d, _ = new_repair(True)
+        r, k = new_repair(True, depends=(d,)); s = successor(r); prove(r, k)
+        verifying(d)
+        intake._accept_core(db, d, expect_rev=rev(d), actor="r7", evidence="independent readback"); return r, s
+
+    def seq_released():
+        r, k = new_repair(True); s = successor(r); prove(r, k)
+        intake.claim_task(db, r, worker="w-nd", expect_rev=rev(r), actor="ctl", pid=dead_pid())
+        intake.release_task(db, r, expect_rev=rev(r), actor="sweeper", evidence="owner gone", stale_after=0); return r, s
+
+    def seq_release_unknown():
+        r, k = new_repair(True); s = successor(r); prove(r, k)
+        intake.claim_task(db, r, worker="w-nd", expect_rev=rev(r), actor="ctl", pid=dead_pid())
+        intake.begin_effect(db, r, idem_key="nd-fx-%d" % k, actor="w-nd")
+        intake.release_task(db, r, expect_rev=rev(r), actor="sweeper", evidence="owner gone", stale_after=0); return r, s
+
+    seqs = [seq_legacy_open, seq_legacy_closed, seq_ready, seq_claimed, seq_verifying, seq_blocked, seq_accepted, seq_cancelled_by_transition,
+            seq_cancelled_then_plain_claim, seq_cancelled_by_request, seq_plain_claim_on_ready, seq_draft, seq_enabled, seq_released, seq_release_unknown]
     bad = 0
-    for name, (sc, row) in H5_STATES.items():
-        want = bool(close_gate._satisfied(row))
-        rc, d, err = fx.lint(lint, h5_rows(fx), task="A102", require_closed=True, shim=fx.fake_canonical(sc))
-        got = rc == 0
-        print("%s no-drift %s: close gate _satisfied=%s, lint consumed=%s (rc %s)" % ("PASS" if got == want else "FAIL", name, want, got, rc))
-        bad += got != want
+    for fn in seqs:
+        name = fn.__name__[4:].replace("_", "-")
+        try:
+            r, s = fn()
+        except Exception as e:                                    # a sequence the store refuses is a broken control, never a pass
+            print("FAIL no-drift %s: the store refused the sequence: %s: %s" % (name, type(e).__name__, e))
+            bad += 1
+            continue
+        row = asks._row(db, r)
+        st = asks._state(row)
+        want_state = None if st in (None, "legacy") else st
+        want_sat = bool(asks._satisfied(row))
+        rows = rows_with(fx, **{"mechanism:2": fx.row("c-rep", "mechanism:2", "repair", ask=r, owner="ctl", successor=s)})
+        rc, d, err = fx.lint(lint, rows, task=s, require_closed=True, shim=shim)
+        rep_ = [x for x in (d.get("repairs") or []) if x.get("ask") == r]
+        got_state = rep_[0].get("intake_state") if rep_ else "(no repairs entry)"
+        got_sat = rep_[0].get("satisfied") if rep_ else None
+        want_rc, want_find = (0, []) if want_sat else (1, ["consumption-repair-unproven" if want_state == "cancelled" else "consumption-repair-open"])
+        prc, pd, perr = fx.lint(lint, rows, task=TASK, require_closed=False, shim=shim)
+        want_prc = 1 if want_state == "cancelled" else 0
+        probs = []
+        if got_state != want_state:
+            probs.append("intake state %r, the store's %r" % (got_state, want_state))
+        if got_sat is not want_sat:
+            probs.append("predicate %r, the close gate's _satisfied %r" % (got_sat, want_sat))
+        if rc != want_rc or sorted(set(d.get("findings") or [])) != want_find:
+            probs.append("--require-closed rc %s findings %s, want rc %s findings %s" % (rc, d.get("findings"), want_rc, want_find))
+        if prc != want_prc:
+            probs.append("plain mode rc %s, want %s" % (prc, want_prc))
+        if "Traceback" in err + perr:
+            probs.append("traceback")
+        print("%s no-drift %s: store state %s section %s _satisfied %s; lint state %s predicate %s, rc %s/%s%s"
+              % ("FAIL" if probs else "PASS", name, st, row["section"], want_sat, got_state, got_sat, rc, prc, ("; " + "; ".join(probs)) if probs else ""))
+        bad += bool(probs)
     return 1 if bad else 0
 
 

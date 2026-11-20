@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Chain review 11 R11-F2's no-drift control: the consumption lint's reading of a repair (consumed or not under --require-closed, a valid proof present)
-# equals the close gate's own `_satisfied` on closed, intake-accepted-but-open, intake-cancelled and open rows. The predicate has one owner, the
-# close gate (swarm-decide wm_decide/asks.py); DFCN_SWARM_DECIDE names the swarm-decide tree to read it from. Without it this control cannot run and
-# fails, saying so.
+# Chain review 11 R11-F2's no-drift control, driven by the close gate's own store (review r14b F2). Fifteen sequences create a repair and its
+# successor and move the repair with the swarm-decide tree's own code (asks add/accept/claim/resolve; intake submit, claim, transition, release,
+# effects, the acceptance core) on a temp store; the lint reads them through that tree's own CLI. Its intake state must equal the row's `state`
+# column, its predicate the close gate's `_satisfied`, and its verdict in both modes what that predicate implies. The predicate has one owner, the
+# close gate (swarm-decide wm_decide/asks.py); DFCN_SWARM_DECIDE names that tree. Without it this control cannot run and fails, saying so.
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; repo="$(dirname "$here")"
 sd="${DFCN_SWARM_DECIDE:-}"

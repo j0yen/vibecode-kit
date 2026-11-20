@@ -2892,11 +2892,20 @@ def cons_page_falsifier(text):
     body = sec.group(1) if sec else ""
     fp = re.search(r"^\*\*Falsifier", body, re.M)
     for cmd in re.findall(r"`([^`]+)`", body[fp.start():] if fp else body):
-        toks = cmd.split()
-        if len(toks) >= 2 and toks[0] in ("bash", "sh", "python3", "python") and re.search(r"\.(sh|py)$", toks[1]):
-            return toks[1], None
-        if toks and toks[0].startswith("./") and re.search(r"\.(sh|py)$", toks[0]):
-            return toks[0], None
+        toks, i = cmd.split(), 0
+        if toks and toks[0] == "timeout":                     # review r14b L-b: `timeout [opts] N`, then the runner's own options
+            i = 1
+            while i < len(toks) and toks[i].startswith("-"):
+                i += 2 if toks[i] in ("-k", "-s") else 1
+            i += 1
+        if i < len(toks) and toks[i] in ("bash", "sh", "python3", "python"):
+            i += 1
+            while i < len(toks) and toks[i].startswith("-") and toks[i] not in ("-c", "-m"):
+                i += 1
+            if i < len(toks) and re.search(r"\.(sh|py)$", toks[i]):
+                return toks[i], None
+        elif i < len(toks) and toks[i].startswith("./") and re.search(r"\.(sh|py)$", toks[i]):
+            return toks[i], None
     return None, None
 
 
@@ -2935,6 +2944,7 @@ def cons_check(a):
     pages. Exit 0 when every finding is consumed, 1 when any is not, 2 when it cannot tell (Exit2: unreadable record, no wm-asks for a repair or pending
     row, a canonical read that fails)."""
     L = Lint()
+    L.repairs = []
     rec, task = a["consumption"], a["task"]
     if not task:
         usage("--consumption needs --task <T>")
@@ -3052,6 +3062,7 @@ def cons_check(a):
     obj = {"schema": "dream-finding-consumption-check.v1", "record": rec, "task": task, "trust": "same-uid",
            "rows": len(rows), "pages": pages, "unconsumed": sorted(f"{os.path.basename(p)}#{f}" for (p, f), ok in consumed.items() if not ok),
            "pending": sorted({f"{os.path.basename(r['page'])}#{r['finding']}" for r in rows if r["binding"] == "pending"}),             # review r14 L6
+           "repairs": L.repairs,              # each repair or pending row's canonical reading: intake state and the close gate's predicate (review r14b F2)
            "findings": L.ids()}
     return L, obj, f"OK consumption {rec} task={task} rows={len(rows)}"
 
@@ -3166,15 +3177,17 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
                                                  f"(closes-after=row:{r['ask']}) are not both in the canonical ledger as bound")
     # R3 in every mode (review r14 M1): the successor's done-check, or the check of a row its text names in closes-after=row:, runs this lint on this
     # record for the successor with --require-closed; a closed repair ask carries its proof
-    checks = [succ.get("check")]
-    if not cons_runs_lint(succ.get("check"), a["consumption"], r["successor"]):
+    ok, why = cons_runs_lint(succ.get("check"), a["consumption"], r["successor"])
+    if not ok:
         more = cons_wm_asks(["query", "--ids", ",".join(closes), "--status", "all", "--json"]) or []
-        checks += [x.get("check") for x in more if isinstance(x, dict)]
-    if not any(cons_runs_lint(c, a["consumption"], r["successor"]) for c in checks):
+        ok = any(cons_runs_lint(x.get("check"), a["consumption"], r["successor"])[0] for x in more if isinstance(x, dict))
+    if not ok:
         return bad("consumption-repair-unproven", f"successor {r['successor']}'s done-check (or a closes-after row's) does not run dream-run-note-lint.sh "
-                                                  f"--consumption {os.path.basename(a['consumption'])} --task {r['successor']} --require-closed")
+                                                  f"--consumption {os.path.basename(a['consumption'])} --task {r['successor']} --require-closed: {why}")
     ev = cons_wm_asks(["events", r["ask"], "--json"]) or []
     istate = cons_intake_state(ev)
+    L.repairs.append({"row": r["id"], "ask": r["ask"], "successor": r["successor"], "intake_state": istate,
+                      "status": ask.get("status") or ask.get("section"), "satisfied": cons_satisfied(ask, istate)})
     if istate == "cancelled":            # the close gate's predicate (Hermes H5 reading 6, chain review 11 R11-F2): a cancelled repair never satisfies
         return bad("consumption-repair-unproven", f"repair ask {r['ask']} was intake-cancelled; a cancelled repair never satisfies its successor")
     satisfied = cons_satisfied(ask, istate)
@@ -3202,19 +3215,36 @@ def cons_detail(e):
 
 
 def cons_intake_state(events):
-    """The intake state of a canonical row, read from its own events (`wm-asks asks query --json` does not carry it): `add` (its `state`), `claim`,
-    `transition` (`to`), `accepted` and `cancel` set it; None for a row the intake never touched."""
+    """The intake state of a canonical row, read from its own events in order (`wm-asks asks query --json` does not carry it), as swarm-decide's intake
+    writes it: `add` (its `state`), `transition` (`to`), `accepted`, `cancel` (cancelled), the intake claim (claimed, from ready), `release` (ready),
+    `release-unknown` (blocked) and `enabled` (draft to ready). `accepted` and `cancelled` are terminal, as in the store: no writer moves a row out of them
+    (intake EDGES; claim_task needs ready, a correction or cancel draft or ready), so later events are not read (review r14b F2). A plain `asks claim`
+    writes its stamp under `claim` and leaves the state, so only a claim without it is the intake claim. None for a row the intake never touched."""
     st = None
     for e in events:
+        if st in ("accepted", "cancelled"):
+            break
         if not isinstance(e, dict):
             continue
         op, d = e.get("op"), cons_detail(e)
         if op == "add" and isinstance(d.get("state"), str):
             st = d["state"]
+        elif st is None:
+            continue                                     # a row the intake never created keeps no intake state (it reads 'legacy' in the store)
         elif op == "transition" and isinstance(d.get("to"), str):
             st = d["to"]
-        elif op in ("accepted", "cancel", "claim"):
-            st = {"accepted": "accepted", "cancel": "cancelled", "claim": "claimed"}[op]
+        elif op == "accepted":
+            st = "accepted"
+        elif op == "cancel":
+            st = "cancelled"
+        elif op == "claim" and "claim" not in d and st == "ready":
+            st = "claimed"
+        elif op == "release":
+            st = "ready"
+        elif op == "release-unknown":
+            st = "blocked"
+        elif op == "enabled" and st == "draft":
+            st = "ready"
     return st
 
 
@@ -3227,14 +3257,20 @@ def cons_satisfied(ask, istate):
 
 
 def cons_accepts_line(reviews, session, rid, rows, task):
-    """A verdict file under --reviews that is the session's own and holds the line `accepts <rid>` (R3 residual). A file is credited to one session:
-    of the dream-launched sessions its first lines name as whole tokens (this Task's first), the latest launched, the rule failure_floor uses
-    (review r14 M4: a re-review that names an earlier review's session never counts for it)."""
-    sess = [x for x in rows if x.get("decision") == "launch" and x.get("skill") == "dream" and x.get("session")]
-
-    def launched(x):
-        t = parse_iso(x.get("ts") or "")
-        return (t is not None, t.timestamp() if t else 0.0, x["session"])
+    """A verdict file under --reviews that is the session's own and holds the line `accepts <rid>` (R3 residual). A file is credited to one session: of
+    the dream-launched sessions its first lines name as whole tokens (this Task's first), the one launched latest, each session dated by its FIRST launch
+    row, so a resumed author does not take a later review's file (review r14b L-a). Unlike failure_floor, author-lineage sessions take part: a file that
+    a role-less or author session wrote and that names a review session is that lineage session's, never the review's (review r14 M4: a re-review that
+    names an earlier review's session never counts for it). A file that names a session launched after its own is credited to that later session, which
+    fails closed."""
+    first, tasks = {}, {}                 # session -> (has a ts, ts) of its earliest launch row; session -> the Tasks its launch rows name
+    for x in rows:
+        if x.get("decision") == "launch" and x.get("skill") == "dream" and isinstance(x.get("session"), str) and x["session"]:
+            t = parse_iso(x.get("ts") or "")
+            k = (t is not None, t.timestamp() if t else 0.0)
+            if x["session"] not in first or (k[0], -k[1]) > (first[x["session"]][0], -first[x["session"]][1]):
+                first[x["session"]] = k
+            tasks.setdefault(x["session"], set()).add(x.get("task_id"))
     for d, ds, files in os.walk(reviews):
         ds.sort()
         for fn in sorted(files):
@@ -3243,25 +3279,67 @@ def cons_accepts_line(reviews, session, rid, rows, task):
             except (OSError, UnicodeDecodeError):
                 continue
             head = "\n".join(t.split("\n")[:PAGE_LINES])
-            named = [x for x in sess if re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(x["session"]), head)]
-            named = [x for x in named if x.get("task_id") == task] or named
-            if named and max(named, key=launched)["session"] == session and any(l.strip() == f"accepts {rid}" for l in t.split("\n")):
+            named = [s for s in first if re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(s), head)]
+            named = [s for s in named if task in tasks[s]] or named
+            if named and max(named, key=lambda s: (first[s], s)) == session and any(l.strip() == f"accepts {rid}" for l in t.split("\n")):
                 return True
     return False
 
 
+CONS_CHECK_REFUSED = re.compile(r"[;&|()<>`$'\"\\{}*?\[\]!\n\r]|(?:^|\s)#")
+
+
+def cons_check_path(w):
+    """A path word of a done-check as the close gate's runner sees it: `~` expanded, a relative path taken from HOME (asks._run_check runs `bash -c` there)."""
+    p = os.path.expanduser(w)
+    return os.path.realpath(p if os.path.isabs(p) else os.path.join(os.path.expanduser("~"), p))
+
+
 def cons_runs_lint(check, record, successor):
-    """R3: a done-check that runs `dream-run-note-lint.sh --consumption <this record> --task <successor> --require-closed` (the record named by its path,
-    or by its basename when the check gives a relative path, whose directory is the check's own)."""
+    """R3 (reviews r14 M1, r14b F1): the done-check is ONE plain command that runs this lint and nothing else, `[timeout [-k N|-s SIG|--…] N] [bash|sh]
+    <path to dream-run-note-lint.sh> <args>`: no quote, escape, operator, redirection, grouping, substitution, variable, glob, brace, `!` or comment, so the
+    words bash runs are the words read here (a check that could exit 0 without the lint gating it binds nothing). The lint is named by a path (`~`, absolute,
+    or relative to HOME, where the close gate runs a check) to an existing file that is this lint (the same file or the same bytes), and the lint's own
+    parser reads <args> as this mode with --consumption = this record, --task = the successor and --require-closed (a repeated flag counts as the parser
+    takes it: the last value). -> (True, None) | (False, why)."""
+    text = check if isinstance(check, str) else ""
+    if not text.strip():
+        return False, "it has no done-check"
+    if CONS_CHECK_REFUSED.search(text):
+        return False, "it is not one plain command (a quote, escape, operator, redirection, grouping, substitution, variable, glob, brace, ! or comment)"
+    toks, i = text.split(), 0
+    if toks[0] == "timeout":
+        i = 1
+        while i < len(toks) and toks[i].startswith("-"):
+            i += 2 if toks[i] in ("-k", "-s") else 1
+        if i >= len(toks) or not re.fullmatch(r"[0-9]+(\.[0-9]+)?[smhd]?", toks[i]):
+            return False, "its timeout has no duration"
+        i += 1
+    if i < len(toks) and toks[i] in ("bash", "sh", "/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh"):
+        i += 1
+    if i >= len(toks) or os.path.basename(toks[i]) != "dream-run-note-lint.sh" or "/" not in toks[i] and not toks[i].startswith("~"):
+        return False, "its command is not a path to dream-run-note-lint.sh"
+    lint = cons_check_path(toks[i])
+    me = os.path.realpath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
     try:
-        toks = shlex.split(check or "")
-    except ValueError:
-        toks = (check or "").split()
-    after = lambda flag: [toks[i + 1] for i, t in enumerate(toks[:-1]) if t == flag]
-    recs = [x for x in after("--consumption")
-            if os.path.basename(x) == os.path.basename(record) and (not os.path.isabs(x) or os.path.realpath(x) == os.path.realpath(record))]
-    return (any(os.path.basename(t) == "dream-run-note-lint.sh" for t in toks) and bool(recs) and successor in after("--task")
-            and "--require-closed" in toks)
+        same = os.path.isfile(lint) and (lint == me or open(lint, "rb").read() == open(me, "rb").read())
+    except OSError:
+        same = False
+    if not same:
+        return False, f"{toks[i]} is not this lint (missing, or other bytes)"
+    try:
+        pa = parse_args(toks[i + 1:])
+    except Exit2:
+        return False, "the lint refuses its arguments"
+    if pa["selftest"] or any(pa[k] not in (None, False) for k in ("log", "entry", "prd_dir", "matrix", "states", "scope_id", "edges", "prds")):
+        return False, "it runs another mode of the lint"
+    if not pa["consumption"] or cons_check_path(pa["consumption"]) != os.path.realpath(record):
+        return False, f"its --consumption is not {record}"
+    if pa["task"] != successor:
+        return False, f"its --task is {pa['task']}, not {successor}"
+    if pa["require_closed"] is not True:
+        return False, "it lacks --require-closed"
+    return True, None
 
 
 def main(argv):
