@@ -709,7 +709,7 @@ def nodrift(lint, T, sd):
 
 
 def ac05(lint, T, sd):
-    """AC 5 (R3, R8; PRD 13236dbb): a temp store driven by the close gate's own code from the swarm-decide tree sd (asks add/accept/resolve, intake
+    """AC 5 (R3, R8; PRD 75ee8ebd): a temp canonical store driven by the close gate's own code from the swarm-decide tree sd (asks add/accept/resolve, intake
     submit/claim/transition and the acceptance core), read by the lint through that tree's own CLI. Each case has its own repair A (finding
     mechanism:1) and successor S1, whose done-check runs this lint on the record for S1 with --require-closed, and its own repair B (mechanism:2) and
     successor S2, bound first: S2's own check is `true` and a row added with `asks add --blocks S2` carries the lint check. R3's command runs for S1

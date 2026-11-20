@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# PRD-dream-finding-consumption AC 5 (R3, R8; PRD 13236dbb) — a temp store driven by the close gate's own code (the swarm-decide tree DFCN_SWARM_DECIDE
-# names: asks add/accept/resolve, intake submit/claim/transition, the acceptance core), read by the lint through that tree's own CLI; repairs A->S1
-# and B->S2 (S2 bound first, its lint on a row it closes-after, added with `asks add --blocks`). R3's command for S1 with A open, closed on a PASS
-# only, FAIL then attested PASS (the store refuses to close it, so A stays open), FAIL then run PASS, an intake A accepted (open) or cancelled
-# after that proof, S1's check lacking the lint, for S2 after B's FAIL then run PASS, and without wm-asks exits 1 (consumption-repair-open), 1, 1,
-# 0, 0, 1, 1, 0, 2. Without DFCN_SWARM_DECIDE it fails, saying so (the close gate's `mode` field and intake states exist only in that tree until it is installed).
+# PRD-dream-finding-consumption AC 5 (R3, R8; PRD 75ee8ebd) — a temp canonical store driven by the close gate's own code (the swarm-decide
+# tree DFCN_SWARM_DECIDE names: asks add/accept/resolve, intake submit/claim/transition, the acceptance core), read by the lint through that
+# tree's own CLI; repairs A->S1 and B->S2 (S2 bound first, its lint on a row it closes-after, added with `asks add --blocks`). R3's command for
+# S1 with A open, closed on a PASS only, FAIL then attested PASS (the store refuses to close it, so A stays open), FAIL then run PASS, an intake
+# A accepted (open) or cancelled after that proof, S1's check lacking the lint, for S2 after B's FAIL then run PASS, and without wm-asks exits
+# 1 (consumption-repair-open), 1, 1, 0, 0, 1, 1, 0, 2. Without DFCN_SWARM_DECIDE it fails, saying so (the close gate's `mode` field and intake
+# states exist only in that tree until it is installed).
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; repo="$(dirname "$here")"
 sd="${DFCN_SWARM_DECIDE:-}"
