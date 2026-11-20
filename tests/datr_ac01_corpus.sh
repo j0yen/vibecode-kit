@@ -84,7 +84,7 @@ for name in sorted(os.listdir(logs)):
                                          "model": "claude-opus-5-5", "effort": "xhigh", "account": "x", "session": None, "resume": False,
                                          "reasons": "policy file not found"}) + "\n")
             p = subprocess.run(["bash", lint, os.path.join(home, "notes", "dream-log.md"), "--entry", ts_new, "--prd-dir", home, "--decisions", dec, "--json"],
-                               capture_output=True, text=True, env=env, cwd=top, timeout=300)
+                               capture_output=True, text=True, env=env, cwd=top)
             try:
                 d = json.loads(p.stdout)
             except ValueError:

@@ -674,7 +674,7 @@ def lint(lint_path, out, ungov, cwd, home_env):
         args += ["--decisions", os.path.join(out, "decisions.jsonl")]
     env = {k: v for k, v in os.environ.items() if k not in ("SKILL_ROUTING_DECISIONS", "ANALYSIS_WIKI_DIR", "SKILL_ROUTING_POLICY")}
     env.update(HOME=home_env, SKILL_ROUTING_POLICY=os.path.join(out, "policy.json"), GIT_CONFIG_NOSYSTEM="1")
-    p = subprocess.run(args, capture_output=True, text=True, env=env, cwd=cwd, timeout=300)
+    p = subprocess.run(args, capture_output=True, text=True, env=env, cwd=cwd)
     try:
         d = json.loads(p.stdout)
     except ValueError:

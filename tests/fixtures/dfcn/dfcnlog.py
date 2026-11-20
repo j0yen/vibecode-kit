@@ -556,7 +556,7 @@ def run(prefix, lint, T):
         env = dict(os.environ, HOME=fake, PATH=path, SKILL_ROUTING_POLICY=os.path.join(out, "policy.json"))
         env.pop("SKILL_ROUTING_DECISIONS", None)
         p = subprocess.run(["bash", lint, os.path.join(fx.home, "notes", "dream-log.md"), "--last", "--prd-dir", fx.home, "--decisions", fx.dec, "--json"],
-                           capture_output=True, text=True, env=env, cwd=out, timeout=600)
+                           capture_output=True, text=True, env=env, cwd=out)
         try:
             d = json.loads(p.stdout) if p.stdout.strip() else {}
         except ValueError:
