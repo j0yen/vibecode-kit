@@ -15,6 +15,7 @@ FAIL line must carry (the row id, the key and `<page basename>#<finding>`).
 
 Usage: dfcnfx.py --run <prefix> <lint> <scratch dir>   (exit 0 when every case of the prefix passes; one PASS or FAIL line per case)
        dfcnfx.py --nodrift <lint> <scratch dir> <swarm-decide tree>   (the lint against the close gate's own store, writers and _satisfied)
+       dfcnfx.py --ac05 <lint> <scratch dir> <swarm-decide tree>      (AC 5: R3's command on a temp store driven by the close gate's own code)
 """
 import hashlib
 import json
@@ -87,6 +88,10 @@ class Fx:
         os.makedirs(os.path.join(self.fakehome, "~+"), exist_ok=True)     # review r14c M1 (c): a same-bytes copy where `~+` reads literally, and the decoy
         shutil.copyfile(lint, os.path.join(self.fakehome, "~+", "dream-run-note-lint.sh"))   # bash would run instead (`~+` = $PWD = HOME under _run_check)
         write(os.path.join(self.fakehome, "dream-run-note-lint.sh"), "#!/bin/sh\nexit 0\n", 0o755)
+        for d in (os.path.join(self.fakehome, "FOO=x"), os.path.join(T, "eq=dir")):     # review r14d LOW 1: same-bytes copies under `=` directories
+            os.makedirs(d, exist_ok=True)
+            shutil.copyfile(lint, os.path.join(d, "dream-run-note-lint.sh"))
+            os.chmod(os.path.join(d, "dream-run-note-lint.sh"), 0o755)
         write(os.path.join(self.home, "build-queue", "PRD-fx-a.md"),
               "# PRD-fx-a\n\n## Acceptance criteria\n\n"
               "1. P0 — Given %s#falsifier, When `bash scripts/kill-fx.sh` runs on a record missing a row, Then it prints `KILL-FX` "
@@ -496,6 +501,24 @@ for _n, _chk in (("timeout-long-options", "timeout --kill-after=5 --signal=TERM 
                  ("timeout-short-options", "timeout -k 5 -s KILL -v 60 " + LC),
                  ("two-spaces-between-words", "bash  {LINT} --consumption {RECORD}  --task A102 --require-closed")):
     case("ac02-r14cm1-ok-" + _n, 0, [], unconsumed=[], scenario=scen_check(_chk), plain=True)(h5_rows)
+R14D_REFUSED = (  # review r14d: a first word bash reads as an assignment (LOW 1), and the lint run under sh (LOW 2: dash cannot run its bootstrap)
+    ("an-assignment-as-the-command-word", "FOO=x/dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed",
+     "its first word FOO=x/dream-run-note-lint.sh is a shell assignment"),
+    ("an-append-assignment-as-the-command-word", "FOO+=x/dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed",
+     "is a shell assignment"),
+    ("sh", "sh {LINT} --consumption {RECORD} --task A102 --require-closed", "it runs the lint under sh"),
+    ("bin-sh", "/bin/sh {LINT} --consumption {RECORD} --task A102 --require-closed", "it runs the lint under /bin/sh"),
+    ("usr-bin-sh", "/usr/bin/sh {LINT} --consumption {RECORD} --task A102 --require-closed", "it runs the lint under /usr/bin/sh"),
+    ("timeout-then-sh", "timeout 60 sh {LINT} --consumption {RECORD} --task A102 --require-closed", "it runs the lint under sh"),
+)
+for _n, _chk, _why in R14D_REFUSED:
+    case("ac02-r14d-" + _n, 1, ["consumption-repair-unproven"], ["row c-rep (%s#mechanism:2)" % BASE, _why], unconsumed=[BASE + "#mechanism:2"],
+         scenario=scen_check(_chk), plain=True)(h5_rows)
+for _n, _chk in (("bin-bash", "/bin/bash {LINT} --consumption {RECORD} --task A102 --require-closed"),
+                 ("usr-bin-bash", "/usr/bin/bash {LINT} --consumption {RECORD} --task A102 --require-closed"),
+                 ("an-equals-sign-inside-an-absolute-path", "{T}/eq=dir/dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed"),
+                 ("an-equals-sign-after-bash", "bash ~/FOO=x/dream-run-note-lint.sh --consumption {RECORD} --task A102 --require-closed")):
+    case("ac02-r14d-ok-" + _n, 0, [], unconsumed=[], scenario=scen_check(_chk), plain=True)(h5_rows)
 case("ac02-r14cl2-the-refusal-names-each-checked-row-and-repairs-lists-it", 1, ["consumption-repair-unproven"],
      ["successor A102: its command is not a path to dream-run-note-lint.sh", "closes-after row A101: its command is not a path to dream-run-note-lint.sh"],
      unconsumed=[BASE + "#mechanism:2"], scenario=scen_check("true"), plain=True, repairs=["A101"])(h5_rows)
@@ -685,6 +708,166 @@ def nodrift(lint, T, sd):
     return 1 if bad else 0
 
 
+def ac05(lint, T, sd):
+    """AC 5 (R3, R8; PRD 13236dbb): a temp store driven by the close gate's own code from the swarm-decide tree sd (asks add/accept/resolve, intake
+    submit/claim/transition and the acceptance core), read by the lint through that tree's own CLI. Each case has its own repair A (finding
+    mechanism:1) and successor S1, whose done-check runs this lint on the record for S1 with --require-closed, and its own repair B (mechanism:2) and
+    successor S2, bound first: S2's own check is `true` and a row added with `asks add --blocks S2` carries the lint check. R3's command runs for S1
+    with A open, closed on a PASS only, FAIL then attested PASS (which the store refuses to close: A stays open), FAIL then run PASS, an intake A accepted (still open) after FAIL then run PASS, an
+    intake A cancelled after that proof, S1's check lacking the lint (A proven and closed), for S2 after B's FAIL then run PASS, and without wm-asks:
+    exits 1 (consumption-repair-open), 1, 1, 0, 0, 1, 1, 0, 2."""
+    sys.path.insert(0, sd)
+    state, shome = os.path.join(T, "sd-state"), os.path.join(T, "sd-home")
+    os.makedirs(state)
+    os.makedirs(shome)
+    os.environ.update(WM_DECIDE_STATE=state, HOME=shome)
+    from wm_decide import asks, intake, store                    # noqa: E402  (the store's own writers)
+    db = store.connect()
+    intake.ensure(db)
+    shim = os.path.join(T, "sd-shim")
+    write(os.path.join(shim, "wm-asks"), "#!/bin/sh\nexec env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH='%s' WM_DECIDE_STATE='%s' HOME='%s' python3 -B -c "
+          "'import sys; from wm_decide.cli import main; sys.exit(main(sys.argv[1:]))' \"$@\"\n" % (sd, state, shome), 0o755)
+    fx = Fx(T, lint)
+    rec = os.path.join(fx.home, "record.jsonl")                   # fx.lint writes each case's rows here before it runs
+    DUE = "2026-12-31T09:00"
+
+    def rev(a):
+        return db.execute("SELECT rev FROM asks WHERE ask_id = ?", (a,)).fetchone()[0]
+
+    def lintcheck(task):
+        return "bash %s --consumption %s --task %s --require-closed" % (lint, rec, task)
+
+    def repair(k, finding, intake_row=False):
+        what = "repair %s#%s (AC 5 case %d)" % (BASE, finding, k)
+        f = "ac05-%d-%s" % (k, finding.replace(":", ""))
+        if intake_row:
+            res, _ = intake.submit(db, {"source_event_id": "tg:ac05-%d-%s" % (k, finding), "text": what, "request_type": "new", "authorized_by": "hermes"},
+                                   {"owner": "ctl", "due": DUE, "what": what, "check": "test -f " + f, "depends": []}, trusted=("hermes",))
+            return res["ask_id"], f
+        return asks.add(db, owner="ctl", due=DUE, what=what, check="test -f " + f, actor="t-author"), f
+
+    def s1_of(a, lint_in_check=True):
+        s = asks.next_id(db, "A")
+        got = asks.add(db, owner="hermes", due=DUE, what="successor S1 closes-after=row:%s" % a, check=lintcheck(s) if lint_in_check else "true",
+                       actor="t-author")
+        if got != s:
+            raise SystemExit("FAIL ac05: successor id %s, predicted %s" % (got, s))
+        return s
+
+    def s2_of(b):                                                  # S2 bound first; the row it closes-after carries the lint check
+        s2 = asks.add(db, owner="hermes", due=DUE, what="successor S2 closes-after=row:%s" % b, check="true", actor="t-author")
+        ob = asks.next_id(db, "A")
+        got = asks.add(db, owner="hermes", due=DUE, what="the obligation row S2 closes after", check=lintcheck(s2), actor="t-author", blocks=[s2])
+        if got != ob:
+            raise SystemExit("FAIL ac05: obligation row id %s, predicted %s" % (got, ob))
+        return s2
+
+    def fail_then_run_pass(a, f):
+        asks.accept(db, a, actor="t-closer")                       # run mode: the file is missing, FAIL
+        open(os.path.join(shome, f), "w").close()
+        asks.accept(db, a, actor="t-closer")                       # run mode: PASS at the same sha
+
+    def close(a):
+        rid = db.execute("SELECT row_id FROM asks WHERE ask_id = ?", (a,)).fetchone()[0]
+        p = subprocess.run([os.path.join(shim, "wm-asks"), "record", "--agent", "r7", "--kind", "verdict", "--model", "deterministic", "--gates", rid,
+                            "--what", "decision=%s fixture check passed" % rid, "--why", "fixture", "--evidence", "decision=%s fixture check rc 0" % rid,
+                            "--reverse-text", "fixture only"], capture_output=True, text=True)
+        vid = (p.stdout.strip().split() or [""])[-1]
+        asks.resolve(db, a, expect_rev=rev(a), actor="t-closer", evidence="fixture close", verdict_row=vid)
+
+    def verifying(a):
+        intake.claim_task(db, a, worker="w-ac05", expect_rev=rev(a), actor="ctl")
+        intake.transition(db, a, "running", expect_rev=rev(a), actor="ctl")
+        intake.transition(db, a, "verifying", expect_rev=rev(a), actor="ctl")
+
+    def setup(k, a_intake=False, s1_lint=True):
+        a, fa = repair(k, "mechanism:1", a_intake)
+        s1 = s1_of(a, s1_lint)
+        b, fb = repair(k, "mechanism:2")
+        s2 = s2_of(b)
+        rows = [fx.base()["falsifier"], fx.row("c-a", "mechanism:1", "repair", ask=a, owner="ctl", successor=s1),
+                fx.row("c-b", "mechanism:2", "repair", ask=b, owner="ctl", successor=s2)]
+        return a, fa, s1, b, fb, s2, rows
+
+    def c_open(k):
+        a, fa, s1, b, fb, s2, rows = setup(k); return rows, s1
+
+    def c_pass_only(k):
+        a, fa, s1, b, fb, s2, rows = setup(k)
+        open(os.path.join(shome, fa), "w").close()
+        asks.accept(db, a, actor="t-closer"); close(a); return rows, s1
+
+    def c_attested(k):                                            # the close gate refuses to close a bound row on an attested PASS (its R4), so A
+        a, fa, s1, b, fb, s2, rows = setup(k)                     # stays open; that the lint never takes an attested PASS as the proof of a CLOSED
+        asks.accept(db, a, actor="t-closer")                      # repair is h5p-attested-pass-is-no-proof's case
+        asks.accept(db, a, actor="t-closer", result="PASS", evidence="a caller attests it")
+        try:
+            close(a)
+        except store.Refused as e:
+            if "needs a run PASS" not in str(e):
+                raise
+        else:
+            raise SystemExit("FAIL ac05: the store closed bound row %s on an attested PASS" % a)
+        return rows, s1
+
+    def c_run_pass(k):
+        a, fa, s1, b, fb, s2, rows = setup(k)
+        fail_then_run_pass(a, fa); close(a); return rows, s1
+
+    def c_intake_accepted(k):
+        a, fa, s1, b, fb, s2, rows = setup(k, a_intake=True)
+        verifying(a); fail_then_run_pass(a, fa)
+        intake._accept_core(db, a, expect_rev=rev(a), actor="r7", evidence="independent readback"); return rows, s1
+
+    def c_intake_cancelled(k):
+        a, fa, s1, b, fb, s2, rows = setup(k, a_intake=True)
+        fail_then_run_pass(a, fa)
+        intake.transition(db, a, "cancelled", expect_rev=rev(a), actor="hermes"); return rows, s1
+
+    def c_s1_lacks(k):
+        a, fa, s1, b, fb, s2, rows = setup(k, s1_lint=False)
+        fail_then_run_pass(a, fa); close(a); return rows, s1
+
+    def c_s2(k):
+        a, fa, s1, b, fb, s2, rows = setup(k)
+        fail_then_run_pass(b, fb); close(b); return rows, s2
+
+    def c_no_asks(k):
+        a, fa, s1, b, fb, s2, rows = setup(k)
+        fail_then_run_pass(a, fa); close(a); return rows, s1
+
+    cases = [("a-open", c_open, 1, ["consumption-repair-open"]), ("a-closed-on-a-pass-only", c_pass_only, 1, ["consumption-repair-unproven"]),
+             ("a-fail-then-attested-pass-the-store-will-not-close", c_attested, 1, ["consumption-repair-open"]), ("a-fail-then-run-pass", c_run_pass, 0, []),
+             ("intake-a-accepted-open-after-its-proof", c_intake_accepted, 0, []),
+             ("intake-a-cancelled-after-its-proof", c_intake_cancelled, 1, ["consumption-repair-unproven"]),
+             ("s1-check-lacks-the-lint", c_s1_lacks, 1, ["consumption-repair-unproven"]), ("s2-after-b-fail-then-run-pass", c_s2, 0, []),
+             ("no-wm-asks", c_no_asks, 2, None)]
+    bad, exits = 0, []
+    for k, (name, fn, want_rc, want_find) in enumerate(cases, 1):
+        try:
+            rows, task = fn(k)
+        except Exception as e:                                    # a sequence the store refuses is a broken control, never a pass
+            print("FAIL ac05-%s: the store refused the sequence: %s: %s" % (name, type(e).__name__, e))
+            bad += 1
+            exits.append(None)
+            continue
+        rc, d, err = fx.lint(lint, rows, task=task, require_closed=True, shim=shim, wm_asks=name != "no-wm-asks")
+        exits.append(rc)
+        probs = []
+        if rc != want_rc:
+            probs.append("rc %s, want %s" % (rc, want_rc))
+        if want_find is not None and sorted(set(d.get("findings") or [])) != want_find:
+            probs.append("findings %s, want %s" % (d.get("findings"), want_find))
+        if want_rc == 2 and "canonical-unavailable" not in err:
+            probs.append("exit 2 without canonical-unavailable")
+        if "Traceback" in err:
+            probs.append("traceback")
+        print("%s ac05-%s: rc %s findings %s%s" % ("FAIL" if probs else "PASS", name, rc, d.get("findings"), ("; " + "; ".join(probs)) if probs else ""))
+        bad += bool(probs)
+    print("# ac05 exits %s (want 1, 1, 1, 0, 0, 1, 1, 0, 2)" % ", ".join(str(x) for x in exits))
+    return 1 if bad else 0
+
+
 def run(prefix, lint, T):
     fx = Fx(T, lint)
     if not prefix.startswith("h5p"):
@@ -739,5 +922,7 @@ if __name__ == "__main__":
         sys.exit(run(sys.argv[2], sys.argv[3], sys.argv[4]))
     if len(sys.argv) == 5 and sys.argv[1] == "--nodrift":
         sys.exit(nodrift(sys.argv[2], sys.argv[3], sys.argv[4]))
+    if len(sys.argv) == 5 and sys.argv[1] == "--ac05":
+        sys.exit(ac05(sys.argv[2], sys.argv[3], sys.argv[4]))
     print(__doc__.strip().splitlines()[-1], file=sys.stderr)
     sys.exit(2)

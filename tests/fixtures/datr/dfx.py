@@ -48,6 +48,7 @@ def lint_helpers(path=LINT):
 H = lint_helpers()
 Fx, row, CUT = H["Fx"], H["row"], H["TRIGGER_CUTOVER"]
 S_W, S_5, M_REL = H["S_W"], H["S_5"], H["M_REL"]
+FXF = H["FX_FINDINGS"]         # finding consumption R5: every page a case binds has its falsifier section (Fx writes the entry's record, R1)
 T_TS, OUT_TS, LATE_TS = CUT + "T02:00:00-08:00", CUT + "T00:30:00-08:00", CUT + "T01:00:00-08:00"
 DAY_BEFORE_CUT = (datetime.date.fromisoformat(CUT) - datetime.timedelta(days=1)).isoformat()
 S_F, S_G, S_R0 = ("bbbbbbbb-0000-4000-8000-0000000000%02d" % i for i in (9, 10, 11))
@@ -159,6 +160,11 @@ def drfc_mission(out, variant, w):
             break
     else:
         raise SystemExit("drfc fixture: no Analysis: line in the last entry")
+    # finding consumption R7: a covered entry's WWHTBT skip counts as an unbound falsifier, which holds the mission's first PRDs, so a re-dated
+    # mission whose entries skip WWHTBT stops before `eligible` (the hold itself is dfcn AC 4's case); these cases test the skip, not eligibility
+    for i in range(last, len(lines)):
+        if lines[i].startswith("State:"):
+            lines[i] = "State:" + "".join(" " + t for t in lines[i][len("State:"):].split() if not t.endswith("=eligible"))
     with open(log, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
     return None
@@ -365,7 +371,7 @@ def _(out):
 
 Z64 = "0" * 64
 case("ac02-uncovered-wwhtbt-reused-extended", 1, ["analysis-grammar"], "d['analysis'].get('covered') == 'none'", detail="wwhtbt value 'reused")(
-    lambda out: (lambda fx: (fx.files.__setitem__("visions/wwhtbt.md", f"# wwhtbt page\ntask: A1\nsession: {S_W}\n"),
+    lambda out: (lambda fx: (fx.files.__setitem__("visions/wwhtbt.md", f"# wwhtbt page\ntask: A1\nsession: {S_W}\n" + FXF),
                              fx.entry.__setitem__("Analysis", AN.format(w=f"reused visions/wwhtbt.md sha256={Z64} inputs=notes/none.sha256", f="skipped: x")),
                              fx.build(), policy(out)))(earlier(tfx(out, failure=None))))
 case("ac02-uncovered-5whys-reused", 1, ["analysis-grammar"], "d['analysis'].get('covered') == 'none'", detail="5whys value 'reused")(
@@ -382,7 +388,7 @@ def reuse(out, page_sha=None, edit_page=None, edit_input=None, manifest="ok", se
     with open(ext, "w", encoding="utf-8") as fh:
         fh.write("external input\n")
     page = (f"# wwhtbt page\ntask: A1\nsession: {S_W if bound else S_G}\n"
-            f"cites file:notes/inputs/a.txt and {ext}, and the directory {out}/external/\n")
+            f"cites file:notes/inputs/a.txt and {ext}, and the directory {out}/external/\n" + FXF)
     fx.files["visions/wwhtbt.md"] = page
     fx.files["notes/inputs/a.txt"] = "input a\n"
     lines = [f"{sha('input a' + chr(10))}  a.txt", f"{sha('external input' + chr(10))}  {ext}"]
@@ -399,6 +405,7 @@ def reuse(out, page_sha=None, edit_page=None, edit_input=None, manifest="ok", se
     if edit_page:
         with open(os.path.join(fx.home, "visions", "wwhtbt.md"), "a", encoding="utf-8") as fh:
             fh.write("one byte more\n")
+        fx.write_consumption()         # the record re-binds the moved page, so only the reuse digest is stale (this AC's rule)
     if edit_input == "home":
         with open(os.path.join(fx.home, "notes", "inputs", "a.txt"), "a", encoding="utf-8") as fh:
             fh.write("moved\n")
@@ -406,6 +413,7 @@ def reuse(out, page_sha=None, edit_page=None, edit_input=None, manifest="ok", se
         with open(ext, "a", encoding="utf-8") as fh:
             fh.write("moved\n")
     policy(out)
+    return fx
 
 
 case("ac03-verified", 0, [], "d['analysis']['reuse']['verified'] is True and d['analysis']['covered'] == 'new-material'")(lambda out: reuse(out))
@@ -435,10 +443,11 @@ def _(out):
 
 def reuse_cites(out, extra):
     """An exact reuse whose page also cites `extra`, which the manifest does not list."""
-    reuse(out)
+    fx = reuse(out)
     p = os.path.join(out, "home", "visions", "wwhtbt.md")
     page = open(p, encoding="utf-8").read() + extra + "\n"
     open(p, "w", encoding="utf-8").write(page)
+    fx.write_consumption()             # the record re-binds the edited page (finding consumption R1), as the reuse digest below does
     log = os.path.join(out, "home", "notes", "dream-log.md")
     t = open(log, encoding="utf-8").read()
     i = t.index("sha256=", t.index("wwhtbt=reused")) + len("sha256=")
@@ -565,20 +574,20 @@ case("ac04-uncovered-floor-met", 0, [], "d['analysis']['failure']['class'] == 'f
 
 
 # ---------------------------------------------------------------- AC 5: R5 5whysandrhyme trigger
-FIVE = f"# five whys page\nsession: {S_5}\n"
+FIVE = f"# five whys page\nsession: {S_5}\n" + FXF
 
 
 def five_fx(out, cls, f, rows=(), refs="ledger:A1", five_other_task=False):
     fx = tfx(out, f=f, failure=f"Failure: {cls} {refs}")
     if five_other_task:                          # the reused page is bound to another task's 5whysandrhyme launch row
-        fx.files["visions/5whys-a7.md"] = f"# five whys page of A7\nsession: {S_G}\n"
+        fx.files["visions/5whys-a7.md"] = f"# five whys page of A7\nsession: {S_G}\n" + FXF
         fx.rows.append(row(CUT + "T00:20:00-08:00", "launch", "A7", "5whysandrhyme", "opus-xhigh", "claude-opus-5-5", "xhigh", S_G))
     fx.rows += list(rows)
     fx.build()
     policy(out)
 
 
-REUSED7 = f"reused visions/5whys-a7.md sha256={sha('# five whys page of A7' + chr(10) + 'session: ' + S_G + chr(10))}"
+REUSED7 = f"reused visions/5whys-a7.md sha256={sha('# five whys page of A7' + chr(10) + 'session: ' + S_G + chr(10) + FXF)}"
 for _c in ("recurring-failure", "failed-acceptance", "consequential-obstacle"):
     k = _c.split("-")[0]
     case(f"ac05-{k}-bound-page", 0, [])((lambda c: lambda out: five_fx(out, c, PAGE5))(_c))
@@ -616,7 +625,7 @@ case("ac05-skip-infix-in-caller-text", 1, ["analysis-trigger-unmet"], detail="no
 
 def five_reused_below_trigger(out, failure):
     fx = tfx(out, f=REUSED7, failure=failure)
-    fx.files["visions/5whys-a7.md"] = f"# five whys page of A7\nsession: {S_G}\n"
+    fx.files["visions/5whys-a7.md"] = f"# five whys page of A7\nsession: {S_G}\n" + FXF
     fx.rows.append(row(CUT + "T00:20:00-08:00", "launch", "A7", "5whysandrhyme", "opus-xhigh", "claude-opus-5-5", "xhigh", S_G))
     fx.build()
     policy(out)
@@ -630,7 +639,7 @@ case("ac05-other-takes-today-5whys", 1, ["analysis-grammar"], detail="5whys valu
 @case("ac08-page-under-notes-analysis", 0, [], "d['analysis']['covered'] == 'new-material'")
 def _(out):
     fx = tfx(out, w="ran notes/analysis/wwhtbt.md")
-    fx.files["notes/analysis/wwhtbt.md"] = f"# wwhtbt page\ntask: A1\nsession: {S_W}\n"
+    fx.files["notes/analysis/wwhtbt.md"] = f"# wwhtbt page\ntask: A1\nsession: {S_W}\n" + FXF
     fx.build()
     policy(out)
 

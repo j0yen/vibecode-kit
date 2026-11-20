@@ -28,6 +28,19 @@ SID = "dddddddd-0000-4000-8000-000000000001"
 pol = os.path.join(top, "policy.json")
 json.dump({"evidence": {"ref_pattern": "^(ledger|file|pr|run|commit|page):[^\\s]{2,200}$", "placeholders": ["none", "tbd"]}}, open(pol, "w"))
 env = dict(os.environ, HOME=os.path.join(top, "fakehome"), SKILL_ROUTING_POLICY=pol)
+# finding consumption R1: the `ran` rewrite binds a page, so it carries a Consumption: line and a record binding the page's one finding (its falsifier)
+# by a `test` row in a scratch repository, so the rewrite adds nothing but the wwhtbt value
+import hashlib
+PAGE = f"# wwhtbt page\nsession: {SID}\n" + "\n# Weakest link\n\nThe corpus page's weakest link.\n\n# Mechanisms\n\n1. corpus mechanism — state LIVE\n"
+repo = os.path.join(top, "cons-repo")
+os.makedirs(os.path.join(repo, "tests"))
+open(os.path.join(repo, "tests", "cons.sh"), "w").write("# binds datr-wwhtbt.md#falsifier\n")
+genv = dict(env, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+for c in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "fixture"]):
+    subprocess.run(["git", "-C", repo] + c, check=True, capture_output=True, env=genv)
+COMMIT = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, env=genv).stdout.strip()
+RECORD = json.dumps({"id": "ac01-c1", "page": "notes/analysis/datr-wwhtbt.md", "page_sha256": hashlib.sha256(PAGE.encode()).hexdigest(),
+                     "finding": "falsifier", "binding": "test", "author_session": SID, "repo": repo, "commit": COMMIT, "path": "tests/cons.sh"}) + "\n"
 n = cov = bad = refused = cleared = task_none = 0
 for name in sorted(os.listdir(logs)):
     if not name.endswith(".md"):
@@ -50,6 +63,7 @@ for name in sorted(os.listdir(logs)):
             b = body
             if variant == "ran":
                 b = re.sub(r"wwhtbt=skipped(?::)? .*? 5whys=", "wwhtbt=ran notes/analysis/datr-wwhtbt.md 5whys=", body, count=1, flags=re.M)
+                b = b.rstrip("\n") + "\nConsumption: notes/consumption/datr-ac01.jsonl\n"
             elif variant == "blocked":                          # the same entry with a value R2 accepts: a corroborated route outage
                 b = re.sub(r"wwhtbt=skipped(?::)? .*? 5whys=", f"wwhtbt=skipped: blocked decision={cut}T00:10:00-08:00 5whys=", body, count=1, flags=re.M)
             home = os.path.join(top, f"{name}-{k}-{variant}")
@@ -57,7 +71,10 @@ for name in sorted(os.listdir(logs)):
             with open(os.path.join(home, "notes", "dream-log.md"), "w", encoding="utf-8") as fh:
                 fh.write(text[:m.start()] + f"## {ts_new}  /dream  vision-datr-ac01\n" + b)
             with open(os.path.join(home, "notes", "analysis", "datr-wwhtbt.md"), "w", encoding="utf-8") as fh:
-                fh.write(f"# wwhtbt page\nsession: {SID}\n")
+                fh.write(PAGE)
+            os.makedirs(os.path.join(home, "notes", "consumption"), exist_ok=True)
+            with open(os.path.join(home, "notes", "consumption", "datr-ac01.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write(RECORD)
             dec = os.path.join(home, "decisions.jsonl")
             with open(dec, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps({"ts": cut + "T00:05:00-08:00", "decision": "launch", "task_id": task, "skill": "wwhtbt", "route": "opus-xhigh",

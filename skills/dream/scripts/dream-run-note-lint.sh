@@ -2256,6 +2256,295 @@ def trigger_record(L, entries, ei, an, prov, task, states, mrec, rows, home, res
     return out
 
 
+# ---------------------------------------------------------------- finding consumption in the log check (PRD-dream-finding-consumption R1, R6, R7)
+CONS_LINE_RE = re.compile(r"^Consumption:\s+(\S+)\s*$")
+CONS_PRD_RE = re.compile(r"PRD-[A-Za-z0-9._-]+\.md")
+
+
+def entry_post(ts, route, rows):
+    """R9 (trigger-record R7): an entry is under R1-R7 when its header date is on or after TRIGGER_CUTOVER (a header with no readable leading date
+    counts as after), or its Route: binds a dream launch row on or after it. One cutover date, shared by both PRDs."""
+    hdate = header_date(ts)
+    return (hdate is None or hdate >= TRIGGER_CUTOVER
+            or bool(route and route.get("decision") and any(r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("session") == route["session"]
+                                                          and r.get("ts") == route["decision"] and str(r.get("ts"))[:10] >= TRIGGER_CUTOVER for r in rows or [])))
+
+
+def entry_route(e):
+    """The Route: of one log entry (its last Route: line) as lint_log parses it, or None."""
+    s = None
+    for ln in e["lines"]:
+        if ln.startswith("Route:"):
+            s = ln.rstrip()
+    if s is None:
+        return None
+    mu = re.match(r"^Route:\s+ungoverned\s+session=(\S+)\s+host=(\S+)$", s)
+    mg = re.match(r"^Route:\s+(\S+)\s+(\S+)\s+(\S+)\s+session=(\S+)\s+decision=(\S+)$", s)
+    if mu:
+        return {"route": "ungoverned", "session": mu.group(1), "decision": None}
+    if mg and mg.group(1) != "ungoverned":
+        return {"route": mg.group(1), "session": mg.group(4), "decision": mg.group(5)}
+    return None
+
+
+def entry_states(e):
+    """slug -> values of one log entry's last State: line (grammar-valid tokens)."""
+    s = None
+    for ln in e["lines"]:
+        if ln.startswith("State:"):
+            s = ln
+    out = {}
+    for t in (s or "State:")[len("State:"):].split():
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)=(\S+)$", t)
+        if m:
+            out.setdefault(m.group(1), []).append(m.group(2))
+    return out
+
+
+def cons_entry_pages(an):
+    """R1: the pages an entry's Analysis: line binds (`wwhtbt=ran|reused`, `5whys=page|reused`), as written there."""
+    out = []
+    w, f = an.get("wwhtbt"), an.get("fivewhys")
+    if w and w[0] in ("ran", "reused") and w[1] not in out:
+        out.append(w[1])
+    if f and f[0] in ("page", "reused") and f[1] not in out:
+        out.append(f[1])
+    return out
+
+
+def prd_depends_on(home, base):
+    """The PRD basenames one PRD's `Depends-on:` frontmatter line names (empty without the line), or None when the home holds no such PRD."""
+    p = next((os.path.join(home, d, base) for d in PRD_DIRS if os.path.isfile(os.path.join(home, d, base))), None)
+    if p is None:
+        return None
+    try:
+        text = read_text(p)
+    except OSError:
+        return None
+    for l in text.split("\n"):
+        if l.startswith("## "):
+            break
+        m = re.match(r"^(?:- )?Depends-on:\s*(.*)$", l)
+        if m:
+            return set(CONS_PRD_RE.findall(m.group(1)))
+    return set()
+
+
+def first_prds(home, members):
+    """R6, R7: the first PRDs of a run (members whose Depends-on names no other member) and the members the home lacks (dependencies unknown).
+    `members` is the mission's PRDs, else the PRDs the entry's State: line names."""
+    first, unknown = [], []
+    for b in members:
+        d = prd_depends_on(home, b)
+        if d is None:
+            unknown.append(b)
+        elif not d & (set(members) - {b}):
+            first.append(b)
+    return first, unknown
+
+
+def cons_view(entries, j, rows, home, resolve):
+    """What R1 and R7 read of entry j: Task, State, Analysis, coverage (trigger-record R1), the Failure: class trigger-record reads, the PRD members
+    (mission PRDs, else State: slugs) and its Consumption: lines."""
+    e = entries[j]
+    task = entry_task(e)
+    route = entry_route(e)
+    post = entry_post(e["ts"], route, rows)
+    states = entry_states(e)
+    al = [ln.rstrip() for ln in e["lines"] if ln.startswith("Analysis:")]
+    an = parse_analysis(al[-1], extended=post)[0] if al else {"wwhtbt": None, "fivewhys": None, "adversarial": None}
+    mrec = None
+    if any(ln.startswith("Mission:") for x in entries[:j + 1] for ln in x["lines"]):
+        try:
+            mrec = mission_record(Lint(), entries, j, task, list(states), resolve)
+        except Exit2:
+            mrec = None
+    cov, floor = "none", None
+    if post:
+        try:
+            cov = covered_kind(entries, j, task, states, mrec, rows, home, resolve)[0]
+            floor = failure_floor(entries, j, task, states, rows, home)[0]
+        except (Exit2, OSError):
+            cov = "unknown"                  # read as covered: more holds, never fewer
+    fl = [ln.rstrip() for ln in e["lines"] if ln.startswith("Failure:")]
+    toks = fl[-1][len("Failure:"):].split() if fl and (cov != "none" or floor is not None) else []
+    return {"ts": e["ts"], "task": task, "post": post, "states": states, "an": an, "covered": cov,
+            "failure": toks[0] if toks and toks[0] in FAILURE_CLASSES else None,
+            "members": list(mrec["header"]["prds"]) if mrec and mrec.get("header") else [f"PRD-{s}.md" for s in states],
+            "lines": [ln.rstrip() for ln in e["lines"] if ln.startswith("Consumption:")], "route": route}
+
+
+def cons_read_entry(L, v, rows, dec_path, home):
+    """R1's line and R2-R6 for one entry's record. A bad line or an unreadable record is `consumption-missing` (into L). -> (path, obj, st) | None."""
+    if not v["lines"]:
+        return None
+    if len(v["lines"]) > 1:
+        L.fail("consumption-missing", f"{len(v['lines'])} Consumption: lines (an entry carries one)")
+        return None
+    m = CONS_LINE_RE.match(v["lines"][0])
+    if not m:
+        L.fail("consumption-missing", f"'{v['lines'][0]}' is not 'Consumption: <path>'")
+        return None
+    path = m.group(1)
+    full = os.path.realpath(path if os.path.isabs(path) else os.path.join(home, path))
+    hr = os.path.realpath(home)
+    if os.path.commonpath([full, hr]) != hr or not os.path.isfile(full):
+        L.fail("consumption-missing", f"Consumption: {path} is not a file under the PRD home {home}")
+        return None
+    a = {"consumption": full, "task": v["task"], "prd_home": home, "reviews": os.path.join(home, "notes", "reviews"), "decisions": dec_path,
+         "drows": rows, "require_closed": False, "page": None, "lineage": [v["route"]["session"]] if v.get("route") else []}
+    obj, st = cons_record(L, a, pages=cons_entry_pages(v["an"]), mode="authoring")
+    if st is None:
+        return None
+    first, _ = first_prds(home, v["members"])                                                                                   # R6
+    for r in st["rows"]:
+        if r["binding"] == "requirement" and r["finding"] == "falsifier" and (r.get("ac") != 1 or r.get("prd") not in first):
+            L.fail("falsifier-not-first", f"row {r['id']} ({os.path.basename(r['page'])}#falsifier): {r.get('prd')} AC {r.get('ac')} is not AC 1 of a "
+                                          f"first PRD of this run ({', '.join(first) or 'none'}; members {', '.join(v['members']) or 'none'}); a falsifier "
+                                          f"owned outside this run binds repair, residual or pending")
+            if not any(x is r for x in st["refused"]):
+                st["refused"].append(r)
+            st["consumed"][(r["page"], "falsifier")] = False
+    return path, obj, st
+
+
+def cons_items(v, st, home):
+    """R7: the unconsumed items of one entry: refused rows, valid pending rows, unbound findings (every finding of a bound page the record does not
+    read), a covered entry's WWHTBT skip and a 5whys skip under a trigger class."""
+    items = []
+    if st is not None:
+        items += [{"kind": "row", "row": r, "state": "refused", "resolve": st["resolve"]} for r in st["refused"]]
+        items += [{"kind": "row", "row": r, "state": "pending", "resolve": st["resolve"]} for r in st["pending"]]
+        items += [{"kind": "unbound", "page": pg, "finding": f, "resolve": st["resolve"]} for pg, f in st["unbound"]]
+    else:
+        def res(p):
+            return p if os.path.isabs(p) else os.path.join(home, p)
+        for pg in cons_entry_pages(v["an"]):
+            try:
+                need = cons_page_findings(read_text(res(pg)))[0]
+            except OSError:
+                need = None
+            items += [{"kind": "unbound", "page": pg, "finding": f, "resolve": res} for f in (need or ["*"])]
+    w, f5 = v["an"].get("wwhtbt"), v["an"].get("fivewhys")
+    if v["covered"] != "none" and w and w[0] == "skipped":
+        items.append({"kind": "wwhtbt-skip"})
+    if v["failure"] in TRIGGER_CLASSES and f5 and f5[0] == "skipped":
+        items.append({"kind": "5whys-skip"})
+    return items
+
+
+def cons_item_text(it):
+    k = it["kind"]
+    if k == "row":
+        r = it["row"]
+        where = f"{os.path.basename(r['page'])}#{r['finding']}" if isinstance(r.get("page"), str) and isinstance(r.get("finding"), str) else "?"
+        return f"row {r.get('id', '?')} ({where}) {it['state']}"
+    if k == "unbound":
+        return f"{os.path.basename(it['page'])}#{it['finding']} unbound" if it["finding"] != "*" else f"{os.path.basename(it['page'])} unread (every finding)"
+    return "a covered entry's WWHTBT skip (an unbound falsifier)" if k == "wwhtbt-skip" else "a 5whys skip under a trigger-class Failure:"
+
+
+def cons_hold(it, v, home):
+    """R7: the slugs one unconsumed item holds. A row naming `prd` holds that slug; a row naming a canonical successor (and no prd) holds the successor
+    through the ledger gate and no slug; any other row, an unbound mechanism and a trigger-class 5whys skip hold every slug of the entry's State:
+    line; an unbound falsifier and a WWHTBT skip hold the first PRDs (members whose dependencies are unknown count as first)."""
+    k = it["kind"]
+    if k == "row":
+        r = it["row"]
+        if isinstance(r.get("prd"), str) and CONS_PRD_RE.fullmatch(r["prd"]):
+            return [r["prd"][len("PRD-"):-len(".md")]]
+        if isinstance(r.get("successor"), str) and CONS_ASK_RE.fullmatch(r["successor"]):
+            return []
+        return list(v["states"])
+    if k == "wwhtbt-skip" or k == "unbound" and it["finding"] == "falsifier":
+        first, unknown = first_prds(home, v["members"])
+        return [b[len("PRD-"):-len(".md")] for b in first + unknown]
+    return list(v["states"])
+
+
+def cons_lifts(it, later):
+    """R7: whether a later entry of the Task lifts one earlier item: a record binding the same page and finding as consumed (not pending), a later
+    `wwhtbt=ran|reused` for a WWHTBT skip, a later bound 5whysandrhyme page for a trigger-class 5whys skip. later: [(view, st)]."""
+    k = it["kind"]
+    if k == "wwhtbt-skip":
+        return any(v["an"].get("wwhtbt") and v["an"]["wwhtbt"][0] in ("ran", "reused") for v, _ in later)
+    if k == "5whys-skip":
+        return any(v["an"].get("fivewhys") and v["an"]["fivewhys"][0] in ("page", "reused") for v, _ in later)
+    if k == "row":
+        r = it["row"]
+        if not (isinstance(r.get("page"), str) and isinstance(r.get("finding"), str) and r.get("page")):
+            return False                     # a row without a page and a finding names nothing a later record can bind
+        page, finding, res = r["page"], r["finding"], it["resolve"]
+    else:
+        page, finding, res = it["page"], it["finding"], it["resolve"]
+    key = os.path.realpath(res(page))                    # the page as its own record resolves it (the PRD home), compared by real path
+    for _, st in later:
+        if st is None:
+            continue
+        pend = {(x["page"], x["finding"]) for x in st["pending"]}
+        got = [(f, ok and (pg, f) not in pend) for (pg, f), ok in st["consumed"].items() if os.path.realpath(st["resolve"](pg)) == key]
+        if finding == "*":
+            if got and all(ok for _, ok in got) and not any(os.path.realpath(st["resolve"](pg)) == key for pg, _ in st["unbound"]):
+                return True
+        elif any(f == finding and ok for f, ok in got):
+            return True
+    return False
+
+
+def cons_log(L, entries, ei, cur, rows, dec_path, home, resolve):
+    """PRD-dream-finding-consumption R1, R6 and R7 for the entry under check (on or after the cutover, R9). `cur`: its cons_view with lint_log's own
+    readings. Earlier entries' records are read apart (their refusals are not this entry's findings); only their holds reach this entry.
+    -> the `consumption` JSON block."""
+    task = cur["task"]
+    pages = cons_entry_pages(cur["an"])
+    got = cons_read_entry(L, cur, rows, dec_path, home)
+    path, obj, st = got if got else (None, None, None)
+    views = {}
+
+    def view(j):
+        if j not in views:
+            v = cons_view(entries, j, rows, home, resolve)
+            g = cons_read_entry(Lint(), v, rows, dec_path, home) if v["post"] else None
+            views[j] = (v, g[2] if g else None, g[0] if g else None)
+        return views[j]
+    same = [j for j in range(ei) if task not in (None, "none") and entry_task(entries[j]) == task]
+    same = [j for j in same if view(j)[0]["post"]]                     # R9: an entry before the cutover is not under R1-R7, nor are its holds
+    held, open_before, earlier = {}, [], []
+    for j in same:
+        v, sj, pj = view(j)
+        later = [(view(k)[0], view(k)[1]) for k in same if k > j]
+        rest = []
+        for it in cons_items(v, sj, home):
+            before = cons_lifts(it, later)
+            if before or cons_lifts(it, [(cur, st)]):
+                continue
+            rest.append(cons_item_text(it))
+            if it["kind"] in ("row", "unbound"):
+                open_before.append(f"entry {v['ts']}: {cons_item_text(it)}")
+            for s in cons_hold(it, v, home):
+                held.setdefault(s, []).append(f"entry {v['ts']}: {cons_item_text(it)}")
+        earlier.append({"entry": v["ts"], "record": pj, "unconsumed": rest})
+    if not cur["lines"]:                                                                                                         # R1
+        if pages:
+            L.fail("consumption-missing", f"the Analysis: line binds {', '.join(pages)}; the entry carries no `Consumption: <path>` line")
+        elif cur["covered"] != "none" and open_before:
+            L.fail("consumption-missing", f"a covered entry while an earlier record of Task {task} still has unconsumed rows ({'; '.join(open_before[:5])}); "
+                                          f"the entry carries no `Consumption: <path>` line")
+    for it in cons_items(cur, st, home):                                                                                       # R7
+        for s in cons_hold(it, cur, home):
+            held.setdefault(s, []).append(cons_item_text(it))
+    for slug, vals in cur["states"].items():
+        if "eligible" in vals and slug in held:
+            L.fail("consumption-blocked", f"slug {slug}=eligible while held by {'; '.join(held[slug][:5])}")
+    pend = {(x["page"], x["finding"]) for x in st["pending"]} if st else set()
+    return {"record": path, "pages": pages, "rows": len(st["rows"]) if st else 0,
+            "unconsumed": sorted(f"{os.path.basename(p)}#{f}" for (p, f), ok in st["consumed"].items() if not ok) if st else [],
+            "pending": sorted(f"{os.path.basename(p)}#{f}" for p, f in pend),
+            "repairs": obj["repairs"] if obj else [],
+            "held": [{"slug": s, "by": held[s]} for s in sorted(held)],
+            "earlier": earlier}
+
+
 # ---------------------------------------------------------------- the log check
 def lint_log(a):
     log = a["log"]
@@ -2349,10 +2638,7 @@ def lint_log(a):
     # trigger-record R7: the header date, which the author writes, or the launcher's own date: a header with no readable leading date, or a Route: bound
     # to a dream launch row on or after the cutover, puts the entry under R1-R5 too (security review ddf46516 finding 5). Real headers carry sloppy
     # times ('2026-09-13T16:2xZ', '2026-09-29T14:55', '2026-11-12'): only the date is read, so every earlier entry keeps 43d5b39's output.
-    hdate = header_date(entry["ts"])
-    post = (hdate is None or hdate >= TRIGGER_CUTOVER
-            or bool(route and route.get("decision") and any(r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("session") == route["session"]
-                                                          and r.get("ts") == route["decision"] and str(r.get("ts"))[:10] >= TRIGGER_CUTOVER for r in rows or [])))
+    post = entry_post(entry["ts"], route, rows)
     failure_lines = [ln.rstrip() for ln in entry["lines"] if ln.startswith("Failure:")] if post else []
     if "Analysis" in lines:
         an, probs = parse_analysis(lines["Analysis"], extended=post)
@@ -2712,6 +2998,16 @@ def lint_log(a):
                        "unlisted_review_sessions": []}
         approval(L, mrec, deps, mfields["verdict"], states)
 
+    # ---- finding consumption (PRD-dream-finding-consumption R1, R6, R7), entries on or after the cutover only (R9)
+    cons = None
+    if post:
+        cur = {"ts": entry["ts"], "task": task, "post": True, "states": states, "an": an,
+               "covered": coverage[0] if coverage else "none",
+               "failure": (trig or {}).get("failure", {}).get("class") if (trig or {}).get("failure") else None,
+               "members": list(mrec["header"]["prds"]) if mrec and mrec.get("header") else [f"PRD-{s}.md" for s in states],
+               "lines": [ln.rstrip() for ln in entry["lines"] if ln.startswith("Consumption:")], "route": route}
+        cons = cons_log(L, entries, ei, cur, rows, dec_path, home, resolve)
+
     for k in ("route", "wwhtbt", "fivewhys"):
         if prov[k] is None:
             prov[k] = "self"
@@ -2742,6 +3038,8 @@ def lint_log(a):
     }
     if trig is not None:
         obj["analysis"].update(trig)                    # trigger-record R6: covered, failure and, for a reuse, reuse
+    if cons is not None:
+        obj["consumption"] = cons                       # finding-consumption R7: what the case-11 gate and the persist hook (edge E37) read
     prov["mission"] = "none" if obj["mission"] is None else "self"
     if obj["mission"] is not None and mfields is not None:
         prds = mrec["header"]["prds"] if mrec["header"] else []
@@ -2946,23 +3244,32 @@ def cons_wm_asks(args):
         raise Exit2(f"wm-asks asks {' '.join(args)} printed no JSON ({e})")
 
 
-def cons_check(a):
-    """--consumption <record> --task <T> [--page <page>] [--prd-home <dir>] [--reviews <dir>] [--require-closed] [--json] (R8): R2-R5 for the record's
-    pages. Exit 0 when every finding is consumed, 1 when any is not, 2 when it cannot tell (Exit2: unreadable record, no wm-asks for a repair or pending
-    row, a canonical read that fails)."""
-    L = Lint()
+def cons_record(L, a, pages=(), mode="check"):
+    """R2-R5 for one consumption record, shared by check mode (R8) and authoring mode (R1-R7). `a`: consumption, task, prd_home, reviews,
+    decisions, require_closed, and in authoring mode drows (the decisions rows the log check already read) and lineage (the entry's Route session).
+    `pages`: the pages the record must bind (check mode's --page; authoring mode, the pages the entry's Analysis: line binds). In authoring mode an
+    unreadable record is `consumption-missing` and a canonical read that cannot be made is the refusal `canonical-unavailable` (check mode: exit 2).
+    -> (obj, st), obj the check-mode JSON object and st what R7 reads: grammar-valid rows, refused rows (any refusal, including every row of a stale
+    or unreadable page), valid pending rows, unbound findings ((page, finding), finding `*` for a page whose findings cannot be read) and the
+    consumed map; (None, None) when an authoring-mode record cannot be read."""
     L.repairs = []
     rec, task = a["consumption"], a["task"]
-    if not task:
-        usage("--consumption needs --task <T>")
     try:
         raw = read_text(rec)
     except OSError as e:
+        if mode == "authoring":
+            L.fail("consumption-missing", f"the consumption record {rec} cannot be read ({e})")
+            return None, None
         raise Exit2(f"cannot read the consumption record {rec}: {e}")
     base_dir = a["prd_home"] or os.path.dirname(os.path.abspath(rec))
 
     def resolve(p):
         return p if os.path.isabs(p) else os.path.join(base_dir, p)
+    st = {"rows": [], "refused": [], "pending": [], "unbound": [], "consumed": {}, "resolve": resolve}
+
+    def refuse_row(r):
+        if not any(x is r for x in st["refused"]):
+            st["refused"].append(r)
     rows, seen = [], set()
     for n, ln in enumerate(raw.split("\n"), 1):
         if not ln.strip():
@@ -2971,18 +3278,22 @@ def cons_check(a):
             r = json.loads(ln)
         except ValueError:
             L.fail("consumption-grammar", f"line {n} is not one JSON object")
+            refuse_row({})
             continue
         if not isinstance(r, dict):
             L.fail("consumption-grammar", f"line {n} is not one JSON object")
+            refuse_row({})
             continue
         rid = r.get("id")
         b = r.get("binding")
         if b not in CONS_KEYS:                                                                                                  # R4
             L.fail("consumption-receipt-only", f"row {rid!r}: binding {b!r} is none of {', '.join(CONS_KEYS)}; a receipt binds nothing")
+            refuse_row(r)
             continue
         req, opt = CONS_KEYS[b]
         if any(k in r for k in CONS_RECEIPT_KEYS) and not all(r.get(k) not in (None, "", []) for k in req):
             L.fail("consumption-receipt-only", f"row {rid!r}: its only target is a receipt ({', '.join(k for k in CONS_RECEIPT_KEYS if k in r)})")
+            refuse_row(r)
             continue
         probs = []
         if not isinstance(rid, str) or not rid.strip():
@@ -3004,21 +3315,24 @@ def cons_check(a):
             probs.append("note is not text")
         if probs:
             L.fail("consumption-grammar", f"row {rid!r}: " + "; ".join(probs))
+            refuse_row(r)
             continue
         seen.add(rid)
         rows.append(r)
+    st["rows"] = rows
     authors = {r["author_session"] for r in rows}
     by_page = {}
     for r in rows:
         by_page.setdefault(r["page"], []).append(r)
-    if a["page"] and a["page"] not in by_page:
-        by_page[a["page"]] = []                  # R8 --page: the record must bind that page's findings; each one it does not is named
+    for pg in pages:
+        if pg not in by_page:
+            by_page[pg] = []                     # R8 --page, R1 an entry's pages: the record must bind that page's findings; each one it does not is named
     pages = list(by_page)
-    if not rows and not a["page"]:
+    if not rows and not by_page:
         L.fail("consumption-grammar", f"record {rec} has no row and no --page names a page it must bind (review r14 L5)")
     if a["require_closed"] and not any(r["binding"] in ("repair", "pending") and r.get("successor") == task for r in rows):
         L.fail("consumption-repair-unbound", f"--require-closed: no repair or pending row of {rec} names successor {task} (review r14 L5)")
-    consumed = {}                                                                                                               # (page, finding) -> bool
+    consumed = st["consumed"]                                                                                                   # (page, finding) -> bool
     page_info = {}
     for pg in pages:
         prs = by_page[pg]
@@ -3030,6 +3344,9 @@ def cons_check(a):
             page_info[pg] = None
             for f in sorted({r["finding"] for r in prs}):
                 consumed[(pg, f)] = False
+            for r in prs:
+                refuse_row(r)
+            st["unbound"].append((pg, "*"))
             continue
         dig = hashlib.sha256(text.encode("utf-8")).hexdigest()
         stale = sorted({r["id"] for r in prs if r["page_sha256"] != dig})
@@ -3042,6 +3359,12 @@ def cons_check(a):
         if page_info[pg] is None:                # R5: a stale or unparsed page leaves every finding of it unconsumed (review r14 M6)
             for f in (need or sorted({r["finding"] for r in prs})):
                 consumed[(pg, f)] = False
+            for r in prs:
+                refuse_row(r)
+            if need is None:
+                st["unbound"].append((pg, "*"))
+            else:
+                st["unbound"] += [(pg, f) for f in need if not any(r["finding"] == f for r in prs)]
     for pg in pages:
         info = page_info.get(pg)
         if info is None:
@@ -3051,27 +3374,55 @@ def cons_check(a):
         for r in by_page[pg]:
             if r["finding"] not in need:
                 L.fail("consumption-grammar", f"row {r['id']}: {base}#{r['finding']} is no finding of the page that needs a row")
+                refuse_row(r)
         for f in need:
             fr = [r for r in by_page[pg] if r["finding"] == f]
             main_rows = [r for r in fr if not (r["binding"] == "residual" and isinstance(r.get("part"), str) and r["part"].strip())]
             if not main_rows:
                 L.fail("consumption-finding-unbound", f"{base}#{f}: no binding row")
                 consumed[(pg, f)] = False
+                st["unbound"].append((pg, f))
+                for r in fr:
+                    refuse_row(r)
                 continue
             if len(main_rows) > 1:
                 L.fail("consumption-grammar", f"{base}#{f}: rows {','.join(r['id'] for r in main_rows)} bind it; one row, plus residual rows with `part`")
                 consumed[(pg, f)] = False
+                for r in fr:
+                    refuse_row(r)
                 continue
             ok = True
             for r in fr:
-                ok = cons_binding(L, a, r, f, base, text, task, authors, resolve) and ok
+                try:
+                    got = cons_binding(L, a, r, f, base, text, task, authors, resolve)
+                except Exit2 as e:
+                    if mode != "authoring":
+                        raise
+                    L.fail("canonical-unavailable", f"row {r['id']} ({base}#{f}): {e}")       # R3: a refusal in authoring mode
+                    got = False
+                if not got:
+                    refuse_row(r)
+                elif r["binding"] == "pending":
+                    st["pending"].append(r)
+                ok = got and ok
             consumed[(pg, f)] = ok
     obj = {"schema": "dream-finding-consumption-check.v1", "record": rec, "task": task, "trust": "same-uid",
            "rows": len(rows), "pages": pages, "unconsumed": sorted(f"{os.path.basename(p)}#{f}" for (p, f), ok in consumed.items() if not ok),
            "pending": sorted({f"{os.path.basename(r['page'])}#{r['finding']}" for r in rows if r["binding"] == "pending"}),             # review r14 L6
            "repairs": L.repairs,              # each repair or pending row's canonical reading: intake state and the close gate's predicate (review r14b F2)
            "findings": L.ids()}
-    return L, obj, f"OK consumption {rec} task={task} rows={len(rows)}"
+    return obj, st
+
+
+def cons_check(a):
+    """--consumption <record> --task <T> [--page <page>] [--prd-home <dir>] [--reviews <dir>] [--require-closed] [--json] (R8): R2-R5 for the record's
+    pages. Exit 0 when every finding is consumed, 1 when any is not, 2 when it cannot tell (Exit2: unreadable record, no wm-asks for a repair or pending
+    row, a canonical read that fails)."""
+    L = Lint()
+    if not a["task"]:
+        usage("--consumption needs --task <T>")
+    obj, st = cons_record(L, a, pages=[a["page"]] if a["page"] else [], mode="check")
+    return L, obj, f"OK consumption {a['consumption']} task={a['task']} rows={len(st['rows'])}"
 
 
 def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
@@ -3151,12 +3502,16 @@ def cons_binding(L, a, r, f, base, page_text, task, authors, resolve):
         if not a["reviews"]:
             return bad("consumption-context-missing", "a residual row needs --reviews")
         acc = r["accepted_by"]
-        dec = a["decisions"] or default_decisions()
-        if not os.path.isfile(dec):
-            return bad("consumption-context-missing", f"no decisions log at {dec} to find {acc}'s review launch row")
-        drows, _ = load_decisions(dec)
+        if a.get("drows") is not None:                  # authoring mode: the decisions rows the log check already read
+            drows = a["drows"]
+        else:
+            dec = a["decisions"] or default_decisions()
+            if not os.path.isfile(dec):
+                return bad("consumption-context-missing", f"no decisions log at {dec} to find {acc}'s review launch row")
+            drows, _ = load_decisions(dec)
         dream = [x for x in drows if x.get("decision") == "launch" and x.get("skill") == "dream" and x.get("task_id") == task and x.get("session")]
-        lineage = set(authors) | {x["session"] for x in dream if x.get("role", "author") == "author"}     # the R4 lineage (role author or none)
+        lineage = (set(authors) | set(a.get("lineage") or ())                    # authoring mode: the entry's Route session is an author too
+                   | {x["session"] for x in dream if x.get("role", "author") == "author"})    # the R4 lineage (role author or none)
         m4 = [x for x in dream if x["session"] == acc]
         if not m4 or m4[-1].get("role") != "review" or acc in lineage:                  # review r14 M3: the latest dream launch row, bind_reviews' rule
             return bad("consumption-residual-unaccepted", f"accepted_by {acc}: no review launch row under {task} outside the author lineage "
@@ -3307,6 +3662,8 @@ CONS_CHECK_ASCII = re.compile(r"[ -~]+")                    # review r14c M1: pr
 CONS_DURATION = re.compile(r"[0-9]+(\.[0-9]+)?[smhd]?")
 CONS_SIGNAL = re.compile(r"[A-Za-z0-9]+")
 CONS_TIMEOUT_FLAG = re.compile(r"--kill-after=[0-9]+(\.[0-9]+)?[smhd]?|--signal=[A-Za-z0-9]+|--preserve-status|--foreground|-v|--verbose")
+CONS_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")    # review r14d LOW 1: a first word bash reads as an assignment, not as the command
+CONS_BASH = ("bash", "/bin/bash", "/usr/bin/bash")              # review r14d LOW 2: the lint's bootstrap needs bash (`sh` is dash here)
 
 
 def cons_check_path(w):
@@ -3316,9 +3673,11 @@ def cons_check_path(w):
 
 
 def cons_runs_lint(check, record, successor):
-    """R3 (reviews r14 M1, r14b F1): the done-check is ONE plain command that runs this lint and nothing else, `[timeout [-k N|-s SIG|--…] N] [bash|sh]
+    """R3 (reviews r14 M1, r14b F1): the done-check is ONE plain command that runs this lint and nothing else, `[timeout [-k N|-s SIG|--…] N] [bash]
     <path to dream-run-note-lint.sh> <args>`: no quote, escape, operator, redirection, grouping, substitution, variable, glob, brace, `!` or comment, so the
-    words bash runs are the words read here (a check that could exit 0 without the lint gating it binds nothing). Review r14c M1: the text is printable
+    words bash runs are the words read here (a check that could exit 0 without the lint gating it binds nothing). Review r14d: the first word is no shell
+    assignment (`FOO=x/dream-run-note-lint.sh` makes bash run the next word), and the runner is bash, never sh (the lint's bootstrap reads
+    ${BASH_SOURCE[0]}, so under dash it fails whatever the record says). Review r14c M1: the text is printable
     ASCII and its words are split at spaces only, as bash splits them (no tab, no other whitespace); `~` only as a `~/` prefix (bash's other tilde forms,
     such as `~+`, expand to other directories); timeout takes only -k N, -s SIG, --kill-after=N, --signal=SIG, --preserve-status, --foreground, -v or
     --verbose before its duration (`--help` and `--version` exit 0 without running anything). The lint is named by a path (`~/`, absolute, or relative to
@@ -3334,6 +3693,8 @@ def cons_runs_lint(check, record, successor):
     toks, i = [w for w in text.split(" ") if w], 0
     if any(w.startswith("~") and not w.startswith("~/") for w in toks):
         return False, "a word starts with a `~` form other than `~/`"
+    if CONS_ASSIGNMENT.match(toks[0]):
+        return False, f"its first word {toks[0]} is a shell assignment (bash runs the next word as the command)"
     if toks[0] == "timeout":
         i = 1
         while i < len(toks) and toks[i].startswith("-"):
@@ -3346,7 +3707,9 @@ def cons_runs_lint(check, record, successor):
         if i >= len(toks) or not CONS_DURATION.fullmatch(toks[i]):
             return False, "its timeout has no duration"
         i += 1
-    if i < len(toks) and toks[i] in ("bash", "sh", "/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh"):
+    if i < len(toks) and toks[i] in ("sh", "/bin/sh", "/usr/bin/sh"):
+        return False, f"it runs the lint under {toks[i]}; the lint needs bash, so that check fails whatever the record says"
+    if i < len(toks) and toks[i] in CONS_BASH:
         i += 1
     if i >= len(toks) or os.path.basename(toks[i]) != "dream-run-note-lint.sh" or "/" not in toks[i]:
         return False, "its command is not a path to dream-run-note-lint.sh"
@@ -3423,6 +3786,7 @@ S_D, S_W, S_R1, S_R2, S_5 = (f"bbbbbbbb-0000-4000-8000-00000000000{i}" for i in 
 D_TS = "2026-11-15T00:10:00-08:00"
 E_TS = "2026-11-15T02:00:00-08:00"
 M_REL = "notes/reviews/2026-11-15T01:00:00-08:00-adversarial.md"
+FX_FINDINGS = "\n# Weakest link\n\nThe fixture's weakest link.\n\n# Mechanisms\n\n1. fixture mechanism — state LIVE\n"   # finding consumption R5: one finding
 TABLE_HEAD = "| invariant | still-broken implementation | counterexample | discriminating check | evidence |\n|---|---|---|---|---|\n"
 
 
@@ -3517,8 +3881,8 @@ class Fx:
         }
         self.files = {
             "built-prds/PRD-foo.md": "# foo stub\n", "built-prds/PRD-bar.md": "# bar stub\n",
-            "visions/wwhtbt.md": f"# wwhtbt page\nanswered_by: fable\nsession: {S_W}\n",
-            "visions/5whys.md": f"# five whys page\nsession: {S_5}\n",
+            "visions/wwhtbt.md": f"# wwhtbt page\nanswered_by: fable\nsession: {S_W}\n" + FX_FINDINGS,
+            "visions/5whys.md": f"# five whys page\nsession: {S_5}\n" + FX_FINDINGS,
             "notes/reviews/r1.txt": "foo APPROVE fable\n",
             M_REL: mx_file(["foo"]),
         }
@@ -3530,6 +3894,14 @@ class Fx:
         self.tail = []               # lines after the five record lines (a Mission: line)
         self.git = False
         self.mtimes = {}
+        # finding consumption R1 (entries on or after the cutover): `consume` writes a record binding every finding of each page the Analysis: line
+        # binds, by `test` rows in a scratch repository (cons-repo) whose file names them; `cons_rows` replaces it with these rows; `cons_line` is the
+        # entry's Consumption: line as written ("" for none)
+        self.consume = True
+        self.cons_rows = None
+        self.cons_line = None
+        self.path = None             # a directory put first on PATH (a scenario `wm-asks`)
+        self.no_asks = False         # PATH without any `wm-asks` (finding consumption: canonical-unavailable)
 
     def build(self):
         os.makedirs(self.home, exist_ok=True)
@@ -3545,6 +3917,7 @@ class Fx:
         if self.write_dec:
             with open(self.dec, "w", encoding="utf-8") as fh:
                 fh.write("".join(json.dumps(r) + "\n" for r in self.rows) + self.dec_extra)
+        cons = self.write_consumption()
         lines = ["# dream log (selftest)", ""]
         if self.prev_entry:
             lines += [f"## {self.prev_entry}  /dream  vision-earlier"] + list(self.prev_lines) + [""]
@@ -3556,11 +3929,63 @@ class Fx:
             if v is None:
                 continue
             lines += v if isinstance(v, list) else [v]
-        lines += ([self.failure] if self.failure else []) + self.tail + ["Open questions: none", ""]
+        lines += ([self.failure] if self.failure else []) + ([cons] if cons else []) + self.tail + ["Open questions: none", ""]
         os.makedirs(os.path.join(self.home, "notes"), exist_ok=True)
         with open(os.path.join(self.home, "notes", "dream-log.md"), "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines))
         return self
+
+    CONS_REL = "notes/consumption/fx.jsonl"
+
+    def write_consumption(self):
+        """Write the entry's consumption record (finding-consumption R1) from the pages as they are on disk; call again after editing a page the
+        record binds. -> the Consumption: line, or None."""
+        if self.cons_line is not None:
+            line = self.cons_line or None
+        elif self.cons_rows is not None:
+            line = "Consumption: " + self.CONS_REL
+        elif not self.consume or not (header_date(self.ts) is None or header_date(self.ts) >= TRIGGER_CUTOVER):
+            return None
+        else:
+            line = None
+        rows = self.cons_rows
+        if rows is None:
+            pages = cons_entry_pages(parse_analysis(self.entry.get("Analysis") or "", extended=True)[0])
+            texts = {}
+            for pg in pages:
+                full = pg if os.path.isabs(pg) else os.path.join(self.home, pg)
+                try:
+                    texts[pg] = read_text(full)
+                except OSError:
+                    return line
+                if cons_page_findings(texts[pg])[0] is None:
+                    return line
+            if not pages:
+                return line
+            names = ", ".join(f"{os.path.basename(pg)}#{','.join(cons_page_findings(texts[pg])[0])}" for pg in pages)
+            repo, commit = self.cons_repo(f"# binds {names}\n")
+            rows = [{"id": f"fx-c{i}-{n}", "page": pg, "page_sha256": hashlib.sha256(texts[pg].encode("utf-8")).hexdigest(), "finding": f,
+                     "binding": "test", "author_session": S_D, "repo": repo, "commit": commit, "path": "tests/cons.sh"}
+                    for i, pg in enumerate(pages) for n, f in enumerate(cons_page_findings(texts[pg])[0])]
+            line = line or "Consumption: " + self.CONS_REL
+        p = os.path.join(self.home, self.CONS_REL)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("".join((r if isinstance(r, str) else json.dumps(r)) + "\n" for r in rows))
+        return line
+
+    def cons_repo(self, text):
+        """A scratch git repository beside the home whose tests/cons.sh holds text; -> (path, 40-hex commit)."""
+        repo = os.path.join(self.root, "cons-repo")
+        env = dict(os.environ, HOME=self.root, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="selftest", GIT_AUTHOR_EMAIL="selftest@invalid",
+                   GIT_COMMITTER_NAME="selftest", GIT_COMMITTER_EMAIL="selftest@invalid")
+        os.makedirs(os.path.join(repo, "tests"), exist_ok=True)
+        with open(os.path.join(repo, "tests", "cons.sh"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+        cmds = ([["init", "-q"]] if not os.path.isdir(os.path.join(repo, ".git")) else []) + [["add", "-A"], ["commit", "-q", "--allow-empty", "-m", "fixture"]]
+        for c in cmds:
+            subprocess.run(["git", "-C", repo] + c, check=True, capture_output=True, env=env)
+        return repo, subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, env=env).stdout.strip()
 
     def git_commit(self):
         env = dict(os.environ, GIT_AUTHOR_NAME="selftest", GIT_AUTHOR_EMAIL="selftest@invalid",
@@ -3584,6 +4009,14 @@ def selftest():
         counter[0] += 1
         return Fx(os.path.join(top, f"fx{counter[0]:03d}"))
 
+    def fx_env(fx):
+        if not getattr(fx, "path", None) and not getattr(fx, "no_asks", False):
+            return env
+        dirs = env.get("PATH", "/usr/bin:/bin").split(os.pathsep)
+        if fx.no_asks:
+            dirs = [d for d in dirs if not os.path.exists(os.path.join(d, "wm-asks"))]
+        return dict(env, PATH=os.pathsep.join(([fx.path] if fx.path else []) + dirs))
+
     def run(fx, *extra, decisions=True, js=True):
         args = [script, os.path.join(fx.home, "notes", "dream-log.md"), "--last", "--prd-dir", fx.home]
         if decisions:
@@ -3591,7 +4024,7 @@ def selftest():
         if js:
             args.append("--json")
         args += list(extra)
-        p = subprocess.run(["bash"] + args, capture_output=True, text=True, env=env, timeout=120)
+        p = subprocess.run(["bash"] + args, capture_output=True, text=True, env=fx_env(fx), timeout=120)
         d = None
         if js and p.stdout.strip():
             try:
@@ -4156,7 +4589,7 @@ def selftest():
 
     def reuse_fx(page_sha=None, input_sha=None, omit=False, inputs="notes/inputs.sha256"):
         fx = tfx()
-        page = f"# wwhtbt page\ntask: A1\nsession: {S_W}\ncites file:notes/inputs/a.txt\n"
+        page = f"# wwhtbt page\ntask: A1\nsession: {S_W}\ncites file:notes/inputs/a.txt\n" + FX_FINDINGS
         fx.files["visions/wwhtbt.md"] = page
         fx.files["notes/inputs/a.txt"] = "input a\n"
         real = hashlib.sha256(b"input a\n").hexdigest()
@@ -4210,13 +4643,144 @@ def selftest():
     fx = tfx(f=f"skipped: blocked decision={OUT_TS}", failure="Failure: consequential-obstacle ledger:A1")
     fx.rows += [denied("5whysandrhyme", "malformed policy JSON: JSONDecodeError"), row(LATE_TS, "launch", "A7", "5whysandrhyme", "opus-xhigh", "claude-opus-5-5", "xhigh", S_F)]
     refuse("datr-trigger-skip-uncorroborated", fx, "analysis-trigger-unmet", ("not corroborated",))
-    five = f"# five whys page\nsession: {S_5}\n"
+    five = f"# five whys page\nsession: {S_5}\n" + FX_FINDINGS
     fx = tfx(f=f"reused visions/5whys.md sha256={hashlib.sha256(five.encode()).hexdigest()}", failure="Failure: recurring-failure ledger:A1")
     refuse("datr-trigger-reuse-uncited", fx, "analysis-trigger-unmet", ("does not cite page:visions/5whys.md",))
     fx = tfx(f=f"reused visions/5whys.md sha256={hashlib.sha256(five.encode()).hexdigest()}", failure="Failure: recurring-failure ledger:A1 page:visions/5whys.md")
     passes("datr-trigger-reuse-cited", fx)
     refuse("datr-transient-page", tfx(f="page visions/5whys.md", failure="Failure: transient run:retry-1"), "analysis-trigger-unmet", ("transient",))
     passes("datr-transient-inline", tfx(f="inline", failure="Failure: transient run:retry-1"))
+
+    # ---------- finding consumption (PRD-dream-finding-consumption AC 7): one dfcn-<case> line per R1-R8 refusal, each with its exact finding-id set,
+    # and passing twins. The authoring cases lint a covered entry on the cutover (R9) binding visions/wwhtbt.md (falsifier plus one SPEC mechanism);
+    # R3's canonical reads come from a scenario `wm-asks` printing `asks query` and `asks events` in the CLI's shapes (dfcn AC 2 and AC 5 use a real
+    # temp store); the check-mode cases (R8) lint a record at the home's root.
+    KILL = "#!/bin/sh\necho KILL-FX\n"
+    PG = "visions/wwhtbt.md"
+    page_fx = (f"# wwhtbt page\nanswered_by: fable\nsession: {S_W}\n\n# Weakest link\n\nThe falsifier `bash scripts/kill-fx.sh` prints KILL-FX.\n\n"
+               "# Mechanisms\n\n1. First — state SPEC\n2. Second — state LIVE\n")
+    page_bare = f"# wwhtbt page\nanswered_by: fable\nsession: {S_W}\n"
+
+    def h(t):
+        return hashlib.sha256(t.encode()).hexdigest()
+    prd_foo = ("# foo\n\n## Acceptance criteria\n\n1. P0 — Given wwhtbt.md#falsifier, When `bash scripts/kill-fx.sh` runs, Then it prints `KILL-FX`.\n"
+               "2. P0 — Given wwhtbt.md#falsifier, When `bash scripts/kill-fx.sh` runs, Then it prints `KILL-FX`.\n")
+    FAKE = ("#!/usr/bin/env python3\nimport json, sys\nsc = json.load(open(%r))\na = sys.argv[1:]\n"
+            "if a[:2] == ['asks', 'query'] and '--ids' in a:\n    ids = a[a.index('--ids') + 1].split(',')\n"
+            "    print(json.dumps([r for r in sc['rows'] if r['ask_id'] in ids]))\n"
+            "elif a[:2] == ['asks', 'events']:\n    print(json.dumps([dict(e, detail=json.dumps(e['detail'])) for e in sc['events'].get(a[2], [])]))\n"
+            "else:\n    sys.exit('scenario wm-asks: unexpected %%s' %% a)\n")
+
+    def crow(rid, finding, binding, page=PG, psha=None, **kw):
+        r = {"id": rid, "page": page, "page_sha256": psha or h(page_fx), "finding": finding, "binding": binding, "author_session": S_D}
+        r.update(kw)
+        return r
+
+    def cfx(m1=None, state=None, extra=(), drop_m1=False, page=None, fal=None):
+        fx = tfx()
+        fx.files[PG] = page if page is not None else page_fx
+        fx.files["scripts/kill-fx.sh"] = KILL
+        fx.files["built-prds/PRD-foo.md"] = None                     # a requirement row's PRD is queued (R3 reads build-queue/ or the home's root)
+        fx.files["build-queue/PRD-foo.md"] = prd_foo
+        if state:
+            fx.entry["State"] = state
+        fx.repo, fx.commit = fx.cons_repo("# binds wwhtbt.md#falsifier,mechanism:1\n")
+        good_fal = crow("c-fal", "falsifier", "requirement", prd="PRD-foo.md", ac=1,
+                        kill={"script": "scripts/kill-fx.sh", "sha256": h(KILL), "string": "KILL-FX"})
+        good_m1 = crow("c-m1", "mechanism:1", "test", repo=fx.repo, commit=fx.commit, path="tests/cons.sh")
+        fx.cons_rows = [fal or good_fal] + ([] if drop_m1 else [m1 or good_m1]) + list(extra)
+        return fx
+
+    def ledger(fx, rows, events=None):
+        d = os.path.join(fx.root, "scenario-bin")
+        os.makedirs(d, exist_ok=True)
+        sc = os.path.join(fx.root, "scenario.json")
+        with open(sc, "w", encoding="utf-8") as fh:
+            json.dump({"rows": rows, "events": events or {}}, fh)
+        with open(os.path.join(d, "wm-asks"), "w", encoding="utf-8") as fh:
+            fh.write(FAKE % sc)
+        os.chmod(os.path.join(d, "wm-asks"), 0o755)
+        fx.path = d
+        return fx
+
+    def lrows(fx, record, succ_check=None, ask_status="open"):
+        chk = succ_check if succ_check is not None else f"bash {script} --consumption {record} --task A102 --require-closed"
+        return [{"ask_id": "A101", "owner": "ctl", "what": "repair wwhtbt.md#mechanism:1", "status": ask_status, "check": "true"},
+                {"ask_id": "A102", "owner": "hermes", "what": "successor closes-after=row:A101", "status": "open", "check": chk}]
+    AREC = lambda fx: os.path.join(fx.home, "notes", "consumption", "fx.jsonl")      # noqa: E731  (the authoring record Fx writes)
+
+    def refuse_c(name, fx, fid, detail_has=()):
+        refuse(f"dfcn-{name}", fx, fid, detail_has)
+    passes("dfcn-consumed", cfx(), lambda d: expect(d["consumption"]["held"] == [] and d["consumption"]["unconsumed"] == []
+                                                    and d["consumption"]["record"] == "notes/consumption/fx.jsonl", d.get("consumption")))
+    fx = cfx(); fx.cons_line = ""
+    refuse_c("missing-record-line", fx, "consumption-missing", ("binds visions/wwhtbt.md",))
+    fx = cfx(); fx.cons_line = "Consumption: ../outside.jsonl"
+    refuse_c("record-outside-the-home", fx, "consumption-missing", ("is not a file under the PRD home",))
+    refuse_c("grammar", cfx(extra=["not one JSON object"]), "consumption-grammar", ("is not one JSON object",))
+    fx = cfx()
+    fx.cons_rows[1] = crow("c-m1", "mechanism:1", "test", repo=fx.repo, commit="abc", path="tests/cons.sh")
+    refuse_c("binding-invalid", fx, "consumption-binding-invalid", ("row c-m1", "key commit"))
+    refuse_c("binding-not-discriminating", cfx(fal=crow("c-fal", "falsifier", "requirement", prd="PRD-foo.md", ac=1)),
+             "consumption-binding-not-discriminating", ("row c-fal", "kill"))
+    fx = cfx(m1=crow("c-m1", "mechanism:1", "repair", ask="A101", owner="ctl", successor="A102"))
+    refuse_c("repair-unbound", ledger(fx, []), "consumption-repair-unbound", ("row c-m1", "A101"))
+    fx = cfx(m1=crow("c-m1", "mechanism:1", "repair", ask="A101", owner="ctl", successor="A102"))
+    refuse_c("repair-unproven", ledger(fx, lrows(fx, AREC(fx), succ_check="true")), "consumption-repair-unproven", ("row c-m1", "done-check"))
+    refuse_c("residual-without-a-review-launch-row", cfx(m1=crow("c-m1", "mechanism:1", "residual", owner="ctl", evidence=["ledger:A1"],
+                                                                accepted_by="rv-nobody")), "consumption-residual-unaccepted", ("row c-m1", "rv-nobody"))
+    refuse_c("pending-overdue", cfx(m1=crow("c-m1", "mechanism:1", "pending", owner="ctl", due="2020-01-01T00:00:00+00:00", ask="A101",
+                                           successor="A102")), "consumption-pending-overdue", ("row c-m1", "has passed"))
+    fx = cfx(m1=crow("c-m1", "mechanism:1", "repair", ask="A101", owner="ctl", successor="A102")); fx.no_asks = True
+    refuse_c("canonical-unavailable-is-a-refusal-here", fx, "canonical-unavailable", ("row c-m1",))
+    refuse_c("receipt-only", cfx(extra=[{"id": "c-rc", "binding": "session", "session": S_D}]), "consumption-receipt-only", ("c-rc",))
+    refuse_c("finding-unbound", cfx(drop_m1=True), "consumption-finding-unbound", ("wwhtbt.md#mechanism:1",))
+    fx = cfx()
+    fx.cons_rows = [dict(r, page_sha256="0" * 64) if r["id"] == "c-fal" else r for r in fx.cons_rows]
+    refuse_c("page-stale", fx, "consumption-page-stale", ("rows c-fal",))
+    fx = cfx(page=page_bare)
+    fx.cons_rows = [dict(r, page_sha256=h(page_bare)) for r in fx.cons_rows]
+    refuse_c("page-unparsed", fx, "consumption-page-unparsed", ("no falsifier section",))
+    refuse_c("falsifier-not-first", cfx(fal=crow("c-fal", "falsifier", "requirement", prd="PRD-foo.md", ac=2,
+                                                 kill={"script": "scripts/kill-fx.sh", "sha256": h(KILL), "string": "KILL-FX"})),
+             "falsifier-not-first", ("row c-fal", "AC 2"))
+    fx = cfx(m1=crow("c-m1", "mechanism:1", "pending", owner="ctl", due="2099-01-01T00:00:00+00:00", ask="A101", successor="A102", prd="PRD-foo.md"),
+             state="State: foo=linted foo=reviewed:APPROVE foo=eligible")
+    refuse_c("blocked", ledger(fx, lrows(fx, AREC(fx))), "consumption-blocked", ("slug foo=eligible", "row c-m1"))
+    fx = cfx(m1=crow("c-m1", "mechanism:1", "pending", owner="ctl", due="2099-01-01T00:00:00+00:00", ask="A101", successor="A102"),
+             state="State: foo=linted foo=reviewed:APPROVE foo=eligible")
+    passes("dfcn-pending-with-a-successor-holds-no-slug", ledger(fx, lrows(fx, AREC(fx))),
+           lambda d: expect(d["consumption"]["held"] == [] and d["consumption"]["pending"] == ["wwhtbt.md#mechanism:1"], d.get("consumption")))
+
+    def check_mode(name, fx, want_rc, fid, *extra, task="A1", detail=""):
+        fx.cons_line = ""
+        fx.build()
+        rec = os.path.join(fx.home, "record.jsonl")                 # at the home's root: without --prd-home, rows resolve against the record's directory
+        with open(rec, "w", encoding="utf-8") as fh:
+            fh.write("".join((r if isinstance(r, str) else json.dumps(r)) + "\n" for r in fx.cons_rows))
+        p = subprocess.run(["bash", script, "--consumption", rec, "--task", task, "--json", "--decisions", fx.dec,
+                            "--reviews", os.path.join(fx.home, "notes", "reviews")] + list(extra),
+                           capture_output=True, text=True, env=fx_env(fx), timeout=120)
+        try:
+            d = json.loads(p.stdout) if p.stdout.strip() else None
+        except ValueError:
+            d = None
+        ok = p.returncode == want_rc and (want_rc == 2 and fid in p.stderr or d is not None and d.get("findings") == ([fid] if fid else []))
+        ok = ok and (not detail or detail in p.stderr)
+        check(f"{'pass' if want_rc == 0 else 'refuse:' + (fid or '')}:dfcn-check-{name}", ok,
+              f"rc={p.returncode} findings={d and d.get('findings')} err={p.stderr.strip()[:300]}")
+    fx = cfx()
+    check_mode("consumed", fx, 0, None, "--prd-home", fx.home)
+    check_mode("context-missing", cfx(), 1, "consumption-context-missing", detail="needs --prd-home")
+    fx = cfx(m1=crow("c-m1", "mechanism:1", "repair", ask="A101", owner="ctl", successor="A102"))
+    ledger(fx, lrows(fx, os.path.join(fx.home, "record.jsonl")))
+    check_mode("repair-open", fx, 1, "consumption-repair-open", "--prd-home", fx.home, "--require-closed", task="A102", detail="still open")
+    fx = cfx()
+    fx.files["visions/other.md"] = page_fx
+    check_mode("page-the-record-does-not-bind", fx, 1, "consumption-finding-unbound", "--prd-home", fx.home, "--page", "visions/other.md",
+               detail="other.md#falsifier")
+    fx = cfx(m1=crow("c-m1", "mechanism:1", "repair", ask="A101", owner="ctl", successor="A102")); fx.no_asks = True
+    check_mode("canonical-unavailable-exits-2", fx, 2, "canonical-unavailable", "--prd-home", fx.home)
     env.pop("SKILL_ROUTING_POLICY", None)
 
     # ---------- --matrix mode

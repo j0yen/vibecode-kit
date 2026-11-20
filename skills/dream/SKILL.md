@@ -452,6 +452,7 @@ Lint: <clean | findings fixed>   Eligibility: <per slug>
 Task: <canonical id | none>   Consumer: <name | none>
 Route: <route> <model_id> <effort> session=<id> decision=<decisions.jsonl ts>
 Analysis: wwhtbt=<ran <path> | reused <path> | skipped: <reason>> 5whys=<page <path> | inline | skipped: <reason>> adversarial=<<path> uncovered=<n> | skipped: <reason>>
+Consumption: <record path>
 Review: <verdict file path> reviewer-session=<id> [result=<json path>]
 State: <slug>=<value> [<slug>=<value> ...]
 Mission: <name> edges=<path> [scope=<manifest>[,<manifest>...]] [repairs=<path>]
@@ -476,6 +477,44 @@ The six record lines, each on one line (`Mission:` only on a mission run):
   run without the line lints as before.
 - Paths are relative to the PRD home or absolute.
 
+**Consuming analysis findings.** On and after the cutover date written in the lint, a note
+whose `Analysis:` line binds a page (`wwhtbt=ran|reused`, `5whys=page|reused`) carries one
+`Consumption: <record path>` line naming the run's consumption record, a JSONL file under the
+PRD home (`notes/consumption/<ISO-ts>-<slug>.jsonl`), and so does a covered note while an earlier
+record of the same Task still has an unconsumed row; a note that binds no page and inherits no
+unconsumed row needs no line. The record binds every finding of each page: the falsifier
+(wwhtbt `# Weakest link`, 5whysandrhyme `WWHTBT (the weakest link):`) and each `# Mechanisms`
+item whose state word is not exactly `LIVE` or `MERGED`. Its grammar is
+`analysis-consumption.v1`, one JSON object per line: `id` (unique in the file), `page` (as
+written on the `Analysis:` line), `page_sha256`, `finding` (`falsifier` or `mechanism:<n>`, n the
+item's 1-based number under `# Mechanisms`), `binding`, `author_session`, the binding's own keys
+and an optional `note` (free text, never read as a binding). The five bindings:
+- `requirement`: `prd` (a queued PRD) and `ac`, whose AC line names `<page basename>#<finding>`
+  and carries a backticked command or a `tests/` path. A falsifier row adds `kill` =
+  {`script`, `sha256`, `string`}: the page's own falsifier script, its digest and the kill
+  string the AC line carries; it names AC 1 of a first PRD (no `Depends-on` inside the
+  mission), and a falsifier owned outside the run binds `repair`, `residual` or `pending`. A
+  mechanism row adds `control`, the discriminating control its AC test runs.
+- `repair`: `ask`, `owner` and `successor`. The canonical ask names `<page basename>#<finding>`,
+  the successor's text carries `closes-after=row:<ask>`, and the successor's done-check (or that
+  of a row it closes after) is one plain bash command running `dream-run-note-lint.sh
+  --consumption <record> --task <successor> --require-closed`; a satisfied repair shows an
+  `accept` FAIL then a run PASS at one sha.
+- `test`: `repo`, `commit` (40 hex) and `path`, a file at that commit naming the finding.
+- `residual`: `owner`, `evidence` (refs matching the routing policy's `ref_pattern`) and
+  `accepted_by`, a review session of the Task outside the author lineage whose own verdict file
+  holds the line `accepts <id>`; optional `prd`, and `part` for a residual part of a finding.
+- `pending`: `owner`, `due`, and `ask` and `successor` checked as for `repair`; optional `prd`.
+A session, run id, rc, report or receipt path binds nothing. An unconsumed finding (a pending
+row, a refused row, an unbound finding, a covered note's WWHTBT skip, or a 5whys skip under a
+trigger-class `Failure:`) holds only what it names: the slug of its `prd`, the first PRDs for
+an unbound falsifier, the successor alone for a row naming a canonical successor, and every
+`State:` slug for a row naming neither. A held slug cannot reach `eligible`, and an earlier
+record's unconsumed row keeps holding until a later record binds the same page and finding as
+consumed. `scripts/dream-run-note-lint.sh --consumption <record> --task <T> [--page <page>]
+[--prd-home <dir>] [--reviews <dir>] [--require-closed] [--json]` answers the same question for
+a done-check or a plugin: exit 0 consumed, 1 not, 2 cannot tell.
+
 After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md --last
 --json` on it. A note with a `Mission:` line is also checked for `mission-grammar`,
 `mission-edges-missing`, `edge-grammar`, `edge-unexplained`, `edge-unknown-unowned`,
@@ -487,7 +526,13 @@ After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md
 or a digest moving between two listed manifests) for `repair-grammar`,
 `mission-repairs-missing`, `repair-duplicate`, `repair-missing`, `repair-class-mismatch`,
 `sweep-missing`, `repair-author-mismatch`, `repair-hash-mismatch`, `repair-scope-mismatch`,
-`affected-consumer-unreviewed` and `repair-declined-unaccepted`. Fix a finding you can fix and rerun the lint before the reply. A finding
+`affected-consumer-unreviewed` and `repair-declined-unaccepted`. A note on or after the cutover
+is also checked for `consumption-missing`, `consumption-grammar`, `consumption-binding-invalid`,
+`consumption-binding-not-discriminating`, `consumption-repair-unbound`,
+`consumption-repair-unproven`, `consumption-residual-unaccepted`, `consumption-pending-overdue`,
+`consumption-receipt-only`, `consumption-finding-unbound`, `consumption-page-stale`,
+`consumption-page-unparsed`, `canonical-unavailable`, `falsifier-not-first` and
+`consumption-blocked`; its JSON lists the held slugs under `consumption.held`. Fix a finding you can fix and rerun the lint before the reply. A finding
 you cannot fix (`route-ungoverned-on-governed-host`; `analysis-page-unbound` for a page
 another worker wrote) stays in the note and is quoted in the reply with the lint's JSON.
 The reply quotes the `State:` line and the provenance labels, `snapshot` and `mission` among them

@@ -143,3 +143,17 @@ doubts a rule can see what it cost when it was missing. Append-only.
   producer's (A1300). The 2027-dated fixture families were re-dated before the cutover by a
   checked-in tool that regenerates every digest and scope id, so the cutover stays the merge date
   and every fixture keeps its output (Hermes H1/H2, 2026-11-19).
+- **An analysis finding counts as consumed only by the effect it names (2026-11-19, A1723).** The
+  lint read a bound analysis page's first lines for its session and nothing past them: the one
+  mission page on file (A1724's WWHTBT) listed eight mechanisms, all `state SPEC`, and its
+  falsifier waited in a JSON note, while chain-review findings already had a consumer (the
+  repairs file) and analysis findings had none, so a run could cite a page and drop everything
+  in it, and a receipt (a session, a report) stood in for consumption. From the cutover date
+  written in the lint, a note that binds a page carries a `Consumption:` line naming a record
+  that binds each finding to one of five bindings: a `requirement` (an AC that runs a command;
+  the falsifier on AC 1 of a first PRD), a `repair` (a canonical ask whose successor's done-check
+  runs this lint with `--require-closed`), a `test` (a file at a commit), a `residual` accepted
+  by a review session outside the author lineage, or a `pending` row with its owner, due date,
+  ask and successor. An unconsumed finding holds only the slugs it names, and the same answer is
+  available as `--consumption <record> --task <T>` for a canonical done-check or the A1673
+  plugin (PRD dream-finding-consumption).
