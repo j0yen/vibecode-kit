@@ -332,7 +332,15 @@ the note's `adversarial=` names the last, which the last manifest's header and t
 name too. Until every listed manifest's frozen header carries `matrix`, a manifest whose header
 has none keeps the matrix of the entry that first listed it: a repair round inside one run
 entry keeps the matrix name, and a continued legacy mission writes the new run's matrix, later
-than the previous entry. Updating `matrix` moves the edges file's digest between consecutive
+than the previous entry. A legacy manifest first listed before `LEGACY_MATRIX_SINCE` (a
+constant in the lint, recorded in `history.md`; an entry is dated by its `Route:` line's
+`decision=`, else by its header ts) that lists exactly one `*-adversarial.md` keeps that one as
+its matrix member, not compared with the entry's `adversarial=` name, when an entry of the
+mission not later than the linted one names it in `adversarial=` or its copy at the listed
+digest passes `--matrix` for the first-listing entry's `State:` slugs that are `prds` members
+of its frozen header; listing none, two or more, or one neither named nor passing, it keeps the
+rule above.
+Updating `matrix` moves the edges file's digest between consecutive
 manifests, so the repair row's `changed` lists the edges basename (it may also name the old
 matrix, checked against `before`, and the new one, checked against `after`), and the round does
 not cascade into `repair-hash-mismatch`.
@@ -368,7 +376,19 @@ of this run's author lineage (an author launch row under the `Task:`). Compare e
 contract and every affected consumer against the actual `before` and `after` hashes: `before`
 and `after` are consecutive `scope=` manifests, every basename that moved between two listed
 manifests is in some row's `changed`, and every consumer of a changed producer appears at its
-`after` digest in a later review's manifest. Reuse unchanged accepted evidence: a bounded
+`after` digest in a later review's manifest. A file a manifest lists by a relative path outside
+its own directory is keyed by that path (resolved against the manifest's directory and
+normalized): a row names it by path, `changed` and `added` relative to the `after` manifest's
+directory and `removed` relative to the `before` manifest's, with a `delta` record `{changed:
+[{path, before, after}], added: [{path, sha256}], removed: [{path, sha256}]}` whose digests
+equal the two manifests' (a `changed` path whose record sits under `delta.added` is served by
+it). A row without `delta` is a legacy row: its bare basenames keep the basename rule, and a
+basename that several entries of one manifest hold is listed in the JSON's `repairs.ambiguous`,
+never failed; a row with `delta` names such a file by path. A header member (a `prds`, `packet`
+or `contract` file, the matrix, the edges file, and the repairs file) is keyed by its basename
+in every pass and listed once per manifest; a row without `delta` that names one by path is
+checked by its basename, as a bare name is.
+Reuse unchanged accepted evidence: a bounded
 re-review covers changed ∪ affected, and an unaffected PRD keeps its earlier APPROVE. There is
 no blanket hold: only the rows' `changed` members and their affected consumers wait, until the
 mission's final APPROVE. A later chain reviewer, under any verdict, names each `declined`
