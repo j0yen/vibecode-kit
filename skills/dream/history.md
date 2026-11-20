@@ -178,7 +178,10 @@ doubts a rule can see what it cost when it was missing. Append-only.
   its own digest in a record). In the undeclared-change pass an entry in either compared
   manifest's directory is keyed by its basename, and one manifest listing one key at two
   digests, or two files of one basename, one in each directory of a compared pair, is
-  `mission-scope-mismatch` (the PRD author's Q1 and Q2 rulings on A1723 source request 4). Re-linted with these rules, the A1724 home's 28,250 hash
+  `mission-scope-mismatch` (the PRD author's Q1 and Q2 rulings on A1723 source request 4), and so
+  is one manifest listing for two files a basename that is a header member of the pair's other
+  manifest only (review r20 F1: such a name is keyed by basename in the pair, and its own
+  occurs-twice rule read only its own members). Re-linted with these rules, the A1724 home's 28,250 hash
   findings and its GEN1 `mission-scope-incomplete` clear, and two amended rows' unswept edges
   show as `sweep-missing`. R2 (sidecar schema), R3 (generation-local judgement and merged chain
   reviews), R5 (lineage) and the rest of R8 are not built.

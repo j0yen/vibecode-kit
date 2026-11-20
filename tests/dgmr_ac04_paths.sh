@@ -26,7 +26,10 @@
 # mission-scope-mismatch naming the key and both digests, g2 compared at neither, while g4's undeclared
 # move is still named; and two files of one basename,
 # one in each directory, each listed only by its own manifest (the frozen-copy shape) lint clean, the
-# over-strict control for a rule read across manifests.
+# over-strict control for a rule read across manifests. A basename that is a header member of m2 only
+# (notes.md in its packet), listed by m1 for two files (beside m1 and beside m2, or far away), whichever
+# digest is smaller, is mission-scope-mismatch, never a hidden move (review r20 F1); listed once, it lints
+# clean.
 set -uo pipefail
 # shellcheck source=tests/dgmr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dgmr_lib.sh"
@@ -77,6 +80,11 @@ for c in twin-hide twin-show; do
   has_fail mission-scope-mismatch "manifest $D: aux.json is listed for two files, one in each directory of the pair with notes/snapshots/m1/m1.sha256: aux.json at " " and ../../m1/aux.json at "
 done
 gx paths-twin-apart; run_mr; clean
+for c in member-asym-hide member-asym-show member-far-hide; do     # review r20 F1: a member of m2's header only
+  gx paths-$c; run_mr; findings_eq '["mission-scope-mismatch"]'
+  has_fail mission-scope-mismatch "manifest notes/snapshots/m1/m1.sha256: notes.md is a header member of $D, the other manifest of the pair, and is listed here for 2 files: " "../deep/m2/notes.md at "
+done
+gx paths-member-asym-once; run_mr; clean
 for c in dupkey-hide dupkey-show; do
   gx paths-$c; run_mr; findings_eq '["mission-scope-mismatch", "repair-hash-mismatch"]'
   has_fail mission-scope-mismatch "manifest $D: ../../../../data/g2/graph.json is listed at 2 digests (" "01f55843304a" "); one key names one file"

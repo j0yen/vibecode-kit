@@ -224,7 +224,8 @@ def c_paths(variant):
         r = M.rep_rows[0]
         if variant in ("ok", "wrong-pair", "no-record", "delta-bare", "added-removed", "added-wrong", "changed-added",
                        "member-twice", "repairs-twice", "a1724-rows", "a1724-rows-wrong", "cross-dir-declared",
-                       "record-spelling", "member-path-unmoved", "twin-hide", "twin-show", "twin-apart") \
+                       "record-spelling", "member-path-unmoved", "twin-hide", "twin-show", "twin-apart", "member-asym-hide",
+                       "member-asym-show", "member-far-hide", "member-asym-once") \
                 or variant.startswith("amended"):
             declare(M)
         if variant == "wrong-pair":
@@ -283,6 +284,22 @@ def c_paths(variant):
             M.m1["extra"].append(f"{sha(y1)}  aux.json")
             M.m2["extra"].append(f"{sha(y1)}  aux.json")
             M.files[M1DIR + "/aux.json"] = M.files[M2DIR + "/aux.json"] = y1
+        elif variant.startswith(("member-asym", "member-far")):   # review r20 F1: notes.md is a packet member of m2's header
+            ed = M.edges(matrix=M.mxb[1], mutate=lambda h, es: h.update(packet=["notes.md"]))      # only; m1 lists it for two
+            M.m2["members"][M.eb] = M.m2["copies"][M.eb] = ed       # files: X beside m2 by path at x1 and Y beside m1 bare
+            M.files[M.edges_rel] = ed                               # (far: Y in drafts/) at x2, x2 the smaller (hide) or the
+            for i in range(10000):                                  # larger (show); X moves x1 -> x2 undeclared. once (the
+                x1, x2 = f"notes v1 {i}\n".encode(), f"notes v2 {i}\n".encode()     # over-strict control): m1 lists X once,
+                if variant == "member-asym-once" or (sha(x2) < sha(x1)) == (variant != "member-asym-show"):      # unmoved
+                    break
+            px = rel_from(M.m1["rel"], M2DIR + "/notes.md")
+            if variant == "member-asym-once":
+                M.m1["extra"].append(f"{sha(x2)}  {px}")
+            else:
+                far = variant == "member-far-hide"
+                M.m1["extra"] += [f"{sha(x2)}  {'../../../drafts/notes.md' if far else 'notes.md'}", f"{sha(x1)}  {px}"]
+                M.files["drafts/notes.md" if far else M1DIR + "/notes.md"] = x2
+            M.m2["members"]["notes.md"] = M.m2["copies"]["notes.md"] = x2
         elif variant in ("dupkey-hide", "dupkey-show"):  # Q1: m2 lists g2 twice, at its bytes and (spelled with ./)
             p = rel_from(DEEP, DATA[1]).replace("/g2/", "/./g2/")    # at m1's digest, the smaller (hide), or at a
             dg = sha(M.v1[DATA[1]]) if variant == "dupkey-hide" else sha(b"g2 listed again\n")   # larger one (show);
@@ -335,7 +352,7 @@ for _v in ("plain", "ok", "wrong-pair", "no-record", "legacy-bare", "legacy-path
            "changed-added", "member-twice", "repairs-twice", "a1724-rows", "a1724-rows-wrong", "amended-unswept",
            "amended-unswept-held", "amended-swept", "amended-held", "amended-legacy-path", "member-path-unmoved",
            "cross-dir-undeclared", "cross-dir-declared", "record-spelling", "twin-hide", "twin-show", "twin-apart",
-           "dupkey-hide", "dupkey-show"):
+           "dupkey-hide", "dupkey-show", "member-asym-hide", "member-asym-show", "member-far-hide", "member-asym-once"):
     CASES["paths-" + _v] = c_paths(_v)
 
 

@@ -4,7 +4,8 @@
 # requires the exact finding-id set): analysis-skip-refused (R2), analysis-grammar, analysis-reuse-stale
 # and analysis-reuse-incomplete (R3), line-missing, failure-grammar and failure-class-mismatch (R4),
 # analysis-trigger-unmet (R5); at least one passing datr fixture; and the datr-cutover-zone twin (R7's cutover
-# instant, Q3 of A1723 source request 4): one instant written in two zones (-08:00 and Z), in the header and in a
+# instant, Q3 of A1723 source request 4): one instant written in two zones (-08:00 and Z, Z also as a lower-case z,
+# review r20 F2), in the header and in a
 # bound Route row's ts, passes just before the cutover and is refused (analysis-skip-refused) just after it, and an
 # after-side instant at -10:00, whose date text is the day before, is refused too.
 set -uo pipefail
@@ -21,7 +22,7 @@ for id in analysis-skip-refused analysis-grammar analysis-reuse-stale analysis-r
 done
 grep -q '^PASS pass:datr-' "$T/head.out" || fail "no passing datr fixture"
 for w in header route; do
-  for z in pst utc; do
+  for z in pst utc utcz; do
     grep -qxF "PASS pass:datr-cutover-zone-$w-before-$z" "$T/head.out" || fail "no passing datr-cutover-zone-$w-before-$z line"
     grep -qxF "PASS refuse:analysis-skip-refused:datr-cutover-zone-$w-after-$z" "$T/head.out" || fail "no refused datr-cutover-zone-$w-after-$z line"
   done

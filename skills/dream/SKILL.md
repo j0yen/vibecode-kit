@@ -440,8 +440,9 @@ each directory of a compared pair, is `mission-scope-mismatch`. A row without `d
 basename that several entries of one manifest hold is listed in the JSON's `repairs.ambiguous`,
 never failed; a row with `delta` names such a file by path. A header member (a `prds`, `packet`
 or `contract` file, the matrix, the edges file, and the repairs file) is keyed by its basename
-in every pass and listed once per manifest; a row without `delta` that names one by path is
-checked by its basename, as a bare name is.
+in every pass and listed once per manifest, and so is a header member of the other manifest of
+a compared pair; a row without `delta` that names one by path is checked by its basename, as a
+bare name is.
 Reuse unchanged accepted evidence: a bounded
 re-review covers changed ∪ affected, and an unaffected PRD keeps its earlier APPROVE. There is
 no blanket hold: only the rows' `changed` members and their affected consumers wait, until the

@@ -384,6 +384,18 @@ def key_collisions(m, members, dirs=()):
     return two, twins
 
 
+def member_twins(m, names):
+    """R4 collisions (Q1 ruling; review r20 F1): {basename: [(key, digest)]} for a basename in names, the header members
+    of the other manifest of a compared pair that are not this manifest's own, that this manifest lists for two or more
+    files. In the pair such a basename is keyed by basename (split_keys), so its files would compare as one; its own
+    occurs-twice rule reads only its own members. Either way it is mission-scope-mismatch, and the pair compares it not."""
+    by = {}
+    for raw, key, base, dg in m.get("entries") or []:
+        if base in names:
+            by.setdefault(base, {}).setdefault(key, set()).add(dg)
+    return {b: sorted((k, d) for k, ds in ks.items() for d in ds) for b, ks in by.items() if len(ks) > 1}
+
+
 def entry_date(e):
     """R1: an entry's date: its Route line's decision= instant, else its header ts."""
     for ln in e["lines"]:
@@ -1299,6 +1311,12 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
                                                    f"directory of the pair with {y['path']}: "
                                                    f"{' and '.join(f'{os.path.relpath(kk, xdir)} at {d}' for kk, d in kd)}; "
                                                    "an entry there is keyed by its basename")
+                for b, kd in sorted(member_twins(x, mem - x.get("members", set())).items()):
+                    once("mission-scope-mismatch", f"manifest {x['path']}: {b} is a header member of {y['path']}, the "
+                                                   f"other manifest of the pair, and is listed here for "
+                                                   f"{len({kk for kk, _ in kd})} files: "
+                                                   f"{' and '.join(f'{os.path.relpath(kk, xdir)} at {d}' for kk, d in kd)}; "
+                                                   "a header member is keyed by its basename, so one name names one file")
     ids = [m["id"] for m in mans]
     # R2: binding, line order against manifest index, launch order within one index
     if not chain and governed and task is not None:
@@ -1995,6 +2013,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
         (a2, at2), (b2, bt2) = key_collisions(a, mem, pdirs), key_collisions(b, mem, pdirs)
         cold = set(at2) | set(bt2) | {os.path.basename(x) for x in set(a2) | set(b2)
                                       if os.path.dirname(x) in pdirs or os.path.basename(x) in mem}
+        cold |= set(member_twins(a, mem - a.get("members", set()))) | set(member_twins(b, mem - b.get("members", set())))
         colk = set(a2) | set(b2)
         decl, decl_m, decl_p, legacy_bare = set(), set(), set(), set()
         for x in recs:
@@ -2444,7 +2463,7 @@ def after_cutover(ts, row_ts=False):
     """R7 (A1723 source request 4, Q3): a header timestamp, or a bound Route row's `ts` (row_ts), is at or after the cutover instant,
     `<TRIGGER_CUTOVER>T00:00:00-08:00`. One carrying an offset (any zone, `Z` included) is compared as an instant, so one instant written in two
     zones falls on one side; one without a readable offset keeps the date-text comparison (a header with no readable leading date counts as after)."""
-    t = parse_iso(ts) if isinstance(ts, str) else None
+    t = parse_iso(re.sub(r"z$", "Z", ts)) if isinstance(ts, str) else None     # RFC 3339 allows a lower-case z (review r20 F2)
     if t is not None:
         return t >= parse_iso(TRIGGER_CUTOVER + "T00:00:00-08:00")
     if row_ts:
@@ -5312,13 +5331,15 @@ def selftest():
     passes("datr-trigger-reuse-cited", fx)
     refuse("datr-transient-page", tfx(f="page visions/5whys.md", failure="Failure: transient run:retry-1"), "analysis-trigger-unmet", ("transient",))
     passes("datr-transient-inline", tfx(f="inline", failure="Failure: transient run:retry-1"))
-    # R7's cutover instant (Q3 of A1723 source request 4; AC 7's datr-cutover-zone twin): one instant written in two zones (-08:00 and Z; after the
-    # cutover also -10:00, whose date text is the day before), in the header and in a bound Route row's ts, just before and just after the cutover,
+    # R7's cutover instant (Q3 of A1723 source request 4; AC 7's datr-cutover-zone twin): one instant written in two zones (-08:00 and Z, Z also as
+    # RFC 3339's lower-case z, review r20 F2; after the cutover also -10:00, whose date text is the day before), in the header and in a bound Route
+    # row's ts, just before and just after the cutover,
     # gets one result per side: a free-text WWHTBT skip is kept before (43d5b39's output, no R6 fields) and refused after (R2)
     prev = (datetime.date.fromisoformat(TRIGGER_CUTOVER) - datetime.timedelta(days=1)).isoformat()
-    zone = {"-08:00": "pst", "-10:00": "hst", "Z": "utc"}
-    for side, stamps in (("before", (prev + "T23:59:59-08:00", TRIGGER_CUTOVER + "T07:59:59Z")),
-                         ("after", (TRIGGER_CUTOVER + "T00:00:00-08:00", TRIGGER_CUTOVER + "T08:00:00Z", prev + "T22:00:00-10:00"))):
+    zone = {"-08:00": "pst", "-10:00": "hst", "Z": "utc", "z": "utcz"}
+    for side, stamps in (("before", (prev + "T23:59:59-08:00", TRIGGER_CUTOVER + "T07:59:59Z", TRIGGER_CUTOVER + "T07:59:59z")),
+                         ("after", (TRIGGER_CUTOVER + "T00:00:00-08:00", TRIGGER_CUTOVER + "T08:00:00Z", TRIGGER_CUTOVER + "T08:00:00z",
+                                    prev + "T22:00:00-10:00"))):
         for where in ("header", "route"):
             for ts in stamps:
                 fx = tfx(w="skipped: a wiki page would be outside this task's scope")
@@ -5328,7 +5349,7 @@ def selftest():
                     fx.ts = prev + "T23:00:00-08:00"
                     fx.entry["Route"] = f"Route: fable-xhigh claude-fable-5-1 xhigh session={S_D} decision={ts}"
                     fx.rows.append(row(ts, "launch", "A1", "dream", "fable-xhigh", "claude-fable-5-1", "xhigh", S_D))
-                name = f"datr-cutover-zone-{where}-{side}-{zone['Z' if ts.endswith('Z') else ts[-6:]]}"
+                name = f"datr-cutover-zone-{where}-{side}-{zone[ts[-1] if ts[-1] in 'Zz' else ts[-6:]]}"
                 if side == "before":
                     passes(name, fx, lambda d: expect(d["analysis"] is not None and "covered" not in d["analysis"], d["analysis"]))
                 else:
