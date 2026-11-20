@@ -1613,7 +1613,9 @@ def _layers(text):
 
 def _drop_format(text):
     """The text without format characters (Unicode category Cf: zero-width space, joiners, word joiner, BOM, soft hyphen, bidi marks):
-    a name split by one ('pass<ZWSP>word') reads as the name (re-review 14 DEF-A)."""
+    a name split by one ('pass<ZWSP>word') reads as the name (re-review 14 DEF-A). ASCII text holds no format character."""
+    if text.isascii():
+        return text
     return "".join(c for c in text if unicodedata.category(c) != "Cf") if any(unicodedata.category(c) == "Cf" for c in text) else text
 
 
@@ -2261,7 +2263,22 @@ def _name_parts(word):
     return out
 
 
+_CRED_NOUN_CACHE = {}
+
+
 def _cred_noun(word, glued=True):
+    """_cred_noun_eval, evaluated once per distinct (word, glued): a pure function of one word and the flag over frozen module data, so a
+    name repeated through a long text costs one reading (repair 15 recovery). Bounded like _NOUN_RULE_CACHE."""
+    key = (word, bool(glued))
+    hit = _CRED_NOUN_CACHE.get(key)
+    if hit is None:
+        if len(_CRED_NOUN_CACHE) > 8192:
+            _CRED_NOUN_CACHE.clear()
+        hit = _CRED_NOUN_CACHE[key] = _cred_noun_eval(word, glued)
+    return hit
+
+
+def _cred_noun_eval(word, glued=True):
     """True when a prose name's last word is a credential noun; with glued=False only a bare noun counts (the chain of a name,
     'secret key', 'api key secret'): a word after a name that merely ends in a noun is the value, not more name."""
     for parts in _name_parts(word):
