@@ -689,6 +689,9 @@ CASES = {
     "r6-positive-quote": lambda: with_w('notes/snapshots/mw/m"w.sha256', lambda: r6_base()),
     "r6-malformed-bslash": lambda: with_w("notes/snapshots/mw/m" + chr(92) + "/w.sha256", lambda: r6_base(malformed=True)),   # r23l LOW-3
     "r6-positive-bslash": lambda: with_w("notes/snapshots/mw/m" + chr(92) + "/w.sha256", lambda: r6_base()),
+    "r6-scoped-quote": lambda: with_w('notes/snapshots/mw/m"w.sha256', lambda: r6_base(scoped=True)),   # review r23m LOW-1
+    "r6-scoped-bslash": lambda: with_w("notes/snapshots/mw/m" + chr(92) + "/w.sha256", lambda: r6_base(scoped=True)),
+    "r6-named-quote": lambda: with_w('notes/snapshots/mw/m"w.sha256', lambda: r6_base(named_row=True)),
     "r6-deep-value": lambda: r6_base(deep_value=True),
     "r6-surrogate-row": lambda: r6_base(surrogate_row=True),
     "r6-exists-slash": lambda: r6_base(exists=True, token_value=f"{W_REL}/"),
