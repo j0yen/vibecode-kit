@@ -374,7 +374,8 @@ def r6_mission(ln, scope, token=None, drop_scope=False):
 def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False, rep_side=None, mid=None,
             malformed=False, no_scope=False, still_listed=False, token_value=None, scoped_root=False, ungoverned=False,
             scoped_link=False, old_repairs=False, later_repairs=False, dangling=False, late_token=None,
-            scoped_list=False, named_row=False, nul_row=False, parent_file=False, surrogate_row=False):
+            scoped_list=False, named_row=False, nul_row=False, parent_file=False, surrogate_row=False,
+            deep_row=False, deep_value=False):
     """rounds(3)'s entry (14:00, m1 m2 m3) preceded by a pre-review entry at 10:30 whose scope= ends with the planned
     freeze W, never written (A1723's 4:16:48 AM entry and 124000Z); with token, the 14:00 entry carries withdrawn=W (the
     4:40:26 AM entry as the rule reads it). where: W is "last" or in the "middle" of the 10:30 list; exists: W is
@@ -401,7 +402,11 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
     "surrogate" (row 3's after is " ", "" or a lone surrogate), "before-list" (row 3's before is [W], its after m3), "array"
     (line 3 is the JSON list [W]), "repeated" (row 3 names W as after, then m3 as after again) and "repeated-nested" (the
     same after a nested object, so the row's own keys are the last object decoded); surrogate_row: a
-    launch row's reasons hold a lone surrogate."""
+    launch row's reasons hold a lone surrogate. Review r23i: "repeated-before" (row 3 names W as before and m3 as after,
+    then m2 as before again: read last-wins it names nothing), "deep" (line 3 is W inside 200000 nested lists, too deep
+    to decode); deep_row: a decisions line holding W inside 200000 nested lists ("other": the same nesting naming
+    nothing); deep_value: a launch row naming W in plan inside 5000 nested lists (decoded, and deeper than Python's
+    recursion limit)."""
     M = rounds(3)
     post = M.entries[-1]
     m1, m2, m3 = (m["rel"] for m in M.mans_decl)
@@ -440,6 +445,16 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
         M.row(at(10, 20), OTHER, reasons="a\u0000b")
     if surrogate_row:                    # review r23h L2: a decisions value that encodes as no file name
         M.row(at(10, 20), OTHER, reasons="\ud800")
+    if deep_row:                         # review r23i LOW-3: a line too deeply nested to decode, naming W or nothing
+        M.extra_dec = (getattr(M, "extra_dec", None) or []) + [
+            "[" * 200000 + (json.dumps(W_REL) if deep_row is True else "") + "]" * 200000]
+    if deep_value:                       # review r23i LOW-3: written after resign, like scoped_list: plan holds W in
+        r = M.row(at(10, 20), OTHER, reasons="a deep plan")                   # 5000 nested lists
+        M.rows.remove(r)
+        v = W_REL
+        for _ in range(5000):
+            v = [v]
+        M.extra_dec = (getattr(M, "extra_dec", None) or []) + [json.dumps(dict(r, plan=v))]
     if parent_file:                      # nothing can be at W: its folder notes/snapshots/mw is a file
         M.files[os.path.dirname(W_REL)] = "a file where W's folder would be\n"
     for flag, at_entry, rel in ((old_repairs, pre, "notes/missions/old.repairs.jsonl"),
@@ -459,12 +474,16 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
                 del rows[-1]["before"], rows[-1]["after"]
             if flag == "before-list":                      # review r23h L3 (H4): before is [W], after m3
                 rows[-1]["before"], rows[-1]["after"] = [W_REL], m3
+            if flag == "repeated-before":                  # review r23i LOW-2: before W, after m3, then before m2
+                rows[-1]["before"], rows[-1]["after"] = W_REL, m3
             text = repairs_text(rows)
-            if flag in ("array", "repeated", "repeated-nested"):   # review r23h L3 (H3): line 3 is [W]; L1: after W, then m3
-                raw = text.decode() if isinstance(text, bytes) else text
-                ls = raw.split("\n")
+            if flag in ("array", "repeated", "repeated-nested", "repeated-before", "deep"):   # review r23h L3 (H3): line 3
+                raw = text.decode() if isinstance(text, bytes) else text                     # is [W]; L1: after W, then m3;
+                ls = raw.split("\n")                                                       # r23i LOW-2 and LOW-3
                 assert ls[2].endswith("}") and W_REL in ls[2]
                 ls[2] = (json.dumps([W_REL]) if flag == "array" else
+                         "[" * 200000 + json.dumps(W_REL) + "]" * 200000 if flag == "deep" else
+                         ls[2][:-1] + ', "before": ' + json.dumps(m2) + "}" if flag == "repeated-before" else
                          ls[2][:-1] + (', "meta": {"note": "x"}' if flag == "repeated-nested" else "") + ', "after": '
                          + json.dumps(m3) + "}")
                 text = "\n".join(ls).encode() if isinstance(text, bytes) else "\n".join(ls)
@@ -592,6 +611,11 @@ CASES = {
     "r6-repairs-earlier-array": lambda: r6_base(old_repairs="array"),
     "r6-repairs-earlier-repeated": lambda: r6_base(old_repairs="repeated"),
     "r6-repairs-earlier-repeated-nested": lambda: r6_base(old_repairs="repeated-nested"),
+    "r6-repairs-earlier-repeated-before": lambda: r6_base(old_repairs="repeated-before"),
+    "r6-repairs-earlier-deep": lambda: r6_base(old_repairs="deep"),
+    "r6-deep-row": lambda: r6_base(deep_row=True),
+    "r6-deep-row-other": lambda: r6_base(deep_row="other"),
+    "r6-deep-value": lambda: r6_base(deep_value=True),
     "r6-surrogate-row": lambda: r6_base(surrogate_row=True),
     "r6-exists-slash": lambda: r6_base(exists=True, token_value=f"{W_REL}/"),
     "r6-exists-dot": lambda: r6_base(exists=True, token_value=f"{W_REL}/."),

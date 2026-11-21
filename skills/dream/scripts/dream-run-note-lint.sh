@@ -40,9 +40,11 @@
 # repository and a persisted: sha was shape-checked only) and exit 0; one
 # `FAIL <id>: <detail>` line per finding and exit 1; `ERROR <why>` on stderr and exit
 # 2 for an empty, missing or unreadable log, an unknown entry, an empty or unreadable
-# decisions log, or (no decisions log on this host and none given) an entry with a
-# claim only a decisions row can check. --json prints the one-line JSON object on
-# stdout on exit 0 and 1 (the text lines go to stderr), never on exit 2.
+# decisions log, (no decisions log on this host and none given) an entry with a
+# claim only a decisions row can check, or an input holding a value nested too deeply
+# to check (review r23i LOW-3; a line nested too deeply to decode reads as no JSON).
+# --json prints the one-line JSON object on stdout on exit 0 and 1 (the text lines go
+# to stderr), never on exit 2.
 #
 # Finding ids: line-missing route-grammar analysis-grammar review-grammar
 #   state-grammar analysis-page-missing persisted-sha-missing review-file-missing
@@ -560,7 +562,7 @@ def read_edges(path, shown, name=None):
     lines = text.split("\n")
     try:
         h = json.loads(lines[0])
-    except ValueError:
+    except (ValueError, RecursionError):
         h = None
     if not isinstance(h, dict) or any(k in h for k in EDGE_KEYS):
         return None, [], [("mission-edges-missing", f"{shown}: line 1 is not the header object")]
@@ -651,7 +653,7 @@ def read_edges(path, shown, name=None):
         nlines += 1
         try:
             e = json.loads(ln)
-        except ValueError:
+        except (ValueError, RecursionError):
             e = None
         if not isinstance(e, dict):
             bad(n, "(not a JSON object)", "an edge line must be one JSON object")
@@ -894,21 +896,26 @@ def withdrawn_scoped(w, resolve, dec):
             forms += [os.path.join(local, m[len(root) + 1:]) for root, local in sr.pairs if m.startswith(root + os.sep)]
         return any(path_keys(f) & wk for f in forms)
 
-    def strings(v, key):
-        if isinstance(v, str):
-            yield key, v
-        elif isinstance(v, list):
-            for x in v:
-                yield from strings(x, key)
-        elif isinstance(v, dict):
-            for k, x in v.items():
-                yield from strings(x, k)
+    def strings(v, key):                        # review r23i LOW-3: depth first in document order, with a stack of its own,
+        stack = [iter([(key, v)])]               # so a value nested deeper than Python's recursion limit is read whole
+        while stack:
+            for k, x in stack[-1]:
+                if isinstance(x, str):
+                    yield k, x
+                elif isinstance(x, list):        # a list's items keep its key
+                    stack.append(iter([(k, y) for y in x]))
+                    break
+                elif isinstance(x, dict):
+                    stack.append(iter(list(x.items())))
+                    break
+            else:
+                stack.pop()
     for n, ln in enumerate(read_text(dec["path"]).splitlines(), 1):
         if not ln.strip():
             continue
         try:
             r = json.loads(ln)
-        except ValueError:
+        except (ValueError, RecursionError):
             r = None
         if isinstance(r, dict):
             for k, v in strings(r, None):
@@ -988,7 +995,7 @@ def withdrawn_check(p, seq, resolve, dec):
                 tops = []                        # review r23h L1: each object's keys in order; the row's own come last
                 try:
                     r = json.loads(ln, object_pairs_hook=lambda ps: tops.append(ps) or dict(ps))
-                except ValueError:
+                except (ValueError, RecursionError):   # review r23i LOW-3: a line nested too deeply to decode is no JSON object
                     r = None
                 if not isinstance(r, dict):
                     bad.append((w, "repair-scope-mismatch", f"line {n} of {rp} is no JSON object, so a row naming it cannot be ruled out"))
@@ -1349,7 +1356,7 @@ def repairs_rows(mrec, resolve):
     for n, ln in enumerate(text.split("\n"), 1):
         try:
             r = json.loads(ln) if ln.strip() else None
-        except ValueError:
+        except (ValueError, RecursionError):
             r = None
         if isinstance(r, dict):
             out.append((n, r))
@@ -1387,7 +1394,7 @@ def sidecar_rows(data):
         if ln.strip():
             try:
                 out.append((n, json.loads(ln)))
-            except ValueError:
+            except (ValueError, RecursionError):
                 out.append((n, None))
     return out
 
@@ -1481,7 +1488,7 @@ def dup_keys(data):
             return dict(pairs)
         try:
             json.loads(ln, object_pairs_hook=hook)
-        except ValueError:
+        except (ValueError, RecursionError):
             pass
     return out
 
@@ -1728,7 +1735,7 @@ def chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, review
             try:
                 d = json.loads(read_text(resolve(res)))
                 cap = str(d["result"]) if isinstance(d, dict) and "result" in d else None
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
                 cap = None
             if cap is None:
                 L.fail("mission-verdict-missing", f"{f}: result {res} unreadable or holds no result text")
@@ -1971,7 +1978,7 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
                 continue
             try:
                 r = json.loads(ln)
-            except ValueError:
+            except (ValueError, RecursionError):
                 r = None
             if not isinstance(r, dict):
                 L.fail("repair-grammar", f"{tok}: row {n}: not a JSON object")
@@ -2741,7 +2748,7 @@ def load_decisions(path):
             continue
         try:
             r = json.loads(ln)
-        except ValueError:
+        except (ValueError, RecursionError):   # review r23i LOW-3: nested too deeply to decode
             bad += 1
             continue
         if isinstance(r, dict):
@@ -3055,7 +3062,7 @@ def routing_evidence_rules():
     try:
         ev = json.loads(read_text(p)).get("evidence") or {}
         return re.compile(ev["ref_pattern"]), {str(x).lower() for x in ev.get("placeholders") or []}
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, re.error) as e:
+    except (OSError, ValueError, RecursionError, KeyError, TypeError, AttributeError, re.error) as e:
         raise Exit2(f"routing policy {p} unreadable or has no evidence.ref_pattern ({e}); cannot check the Failure: refs")
 
 
@@ -3067,7 +3074,7 @@ def review_file_verdicts(path):
         return []
     try:
         d = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         d = None
     if isinstance(d, dict) and isinstance(d.get("result"), str):
         text = d["result"]
@@ -4064,7 +4071,7 @@ def check_result(L, rv, path, vlines):
     shown = rv["file"]
     try:
         d = json.loads(read_text(path))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         L.fail("review-result-mismatch", f"{shown}: result {rv['result']} missing or not JSON")
         return "self"
     if not isinstance(d, dict):
@@ -4234,7 +4241,7 @@ def cons_wm_asks(args):
         raise Exit2(f"wm-asks asks {' '.join(args)} exited {p.returncode}: {(p.stderr or p.stdout).strip()[:200]}")
     try:
         return json.loads(p.stdout)
-    except ValueError as e:
+    except (ValueError, RecursionError) as e:
         raise Exit2(f"wm-asks asks {' '.join(args)} printed no JSON ({e})")
 
 
@@ -4273,7 +4280,7 @@ def cons_record(L, a, pages=(), mode="check"):
             continue
         try:
             r = json.loads(ln)
-        except ValueError:
+        except (ValueError, RecursionError):
             L.fail("consumption-grammar", f"line {n} is not one JSON object")
             refuse_row({})
             continue
@@ -4601,7 +4608,7 @@ def cons_detail(e):
     d = e.get("detail")
     try:
         d = json.loads(d) if isinstance(d, str) else d
-    except ValueError:
+    except (ValueError, RecursionError):
         d = {}
     return d if isinstance(d, dict) else {}
 
@@ -4763,6 +4770,17 @@ def cons_runs_lint(check, record, successor):
 
 
 def main(argv):
+    """Review r23i LOW-3: an input holding a value nested deeper than Python can follow ends in the ERROR line and
+    exit 2, never a traceback, wherever the lint meets it (json decodes some 57000 levels on an 8 MB stack, while str()
+    prints some 47000; a line too deeply nested to decode is read as no JSON where it is read)."""
+    try:
+        return checked_main(argv)
+    except RecursionError as e:
+        print(f"ERROR an input is nested too deeply to check ({e})", file=sys.stderr)
+        return 2
+
+
+def checked_main(argv):
     try:
         a = parse_args(argv)
         if a["selftest"]:
@@ -5051,7 +5069,7 @@ def selftest():
         if js:
             args.append("--json")
         args += list(extra)
-        p = subprocess.run(["bash"] + args, capture_output=True, text=True, env=fx_env(fx), timeout=120)
+        p = subprocess.run(["bash"] + args, capture_output=True, text=True, env=fx_env(fx))
         d = None
         if js and p.stdout.strip():
             try:
@@ -5616,7 +5634,7 @@ def selftest():
 
     # ---------- exit 2 fixtures (no JSON)
     def exit2(name, args, has):
-        p = subprocess.run(["bash", script] + args + ["--json"], capture_output=True, text=True, env=env, timeout=120)
+        p = subprocess.run(["bash", script] + args + ["--json"], capture_output=True, text=True, env=env)
         check(f"exit2:{name}", p.returncode == 2 and not p.stdout.strip() and has in p.stderr,
               f"rc={p.returncode} out={p.stdout[:200]} err={p.stderr.strip()[:300]}")
     fx = new().build()
@@ -5871,7 +5889,7 @@ def selftest():
             fh.write("".join((r if isinstance(r, str) else json.dumps(r)) + "\n" for r in fx.cons_rows))
         p = subprocess.run(["bash", script, "--consumption", rec, "--task", task, "--json", "--decisions", fx.dec,
                             "--reviews", os.path.join(fx.home, "notes", "reviews")] + list(extra),
-                           capture_output=True, text=True, env=fx_env(fx), timeout=120)
+                           capture_output=True, text=True, env=fx_env(fx))
         try:
             d = json.loads(p.stdout) if p.stdout.strip() else None
         except ValueError:
@@ -5898,11 +5916,11 @@ def selftest():
     fx = new().build()
     mp = os.path.join(fx.home, M_REL)
     p = subprocess.run(["bash", script, "--matrix", mp, "--states", "foo=linted", "--json"],
-                       capture_output=True, text=True, env=env, timeout=120)
+                       capture_output=True, text=True, env=env)
     check("pass:matrix-mode", p.returncode == 0 and json.loads(p.stdout or "{}").get("adversarial", {}).get("uncovered") == 1,
           f"rc={p.returncode} err={p.stderr.strip()[:300]}")
     p = subprocess.run(["bash", script, "--matrix", mp, "--states", "foo=linted bar=linted", "--json"],
-                       capture_output=True, text=True, env=env, timeout=120)
+                       capture_output=True, text=True, env=env)
     check("refuse:matrix-mode-slug", p.returncode == 1 and json.loads(p.stdout or "{}").get("findings") == ["adversarial-slug-missing"],
           f"rc={p.returncode} out={p.stdout[:300]}")
 

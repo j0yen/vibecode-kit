@@ -27,7 +27,10 @@
 # (e) also refuses an earlier row with no after (its key spelled After) or neither key (M1), an after that is blank (M1),
 # empty (L3, R4) or a lone surrogate (L2), a before that is a list (L3, H4), a JSON line that is a list (L3, H3) and a row
 # repeating its after key (L1), also after a nested object; a decisions value that is a lone surrogate names nothing, and
-# neither ends in a traceback (L2).
+# neither ends in a traceback (L2). Review r23i: (e) also refuses an earlier row repeating its before key (LOW-2); a
+# repairs line or a decisions line too deeply nested to decode reads as no JSON object (the decisions line refuses when
+# it names W, and names nothing otherwise), and a decisions value nested deeper than Python's recursion limit is read
+# whole; none ends in a traceback (LOW-3).
 set -uo pipefail
 # shellcheck source=tests/dlcr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dlcr_lib.sh"
@@ -120,6 +123,55 @@ has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repa
 cx r6-repairs-earlier-repeated-nested; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'  # the row's own keys
 has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl repeats its after key"
 cx r6-surrogate-row; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"   # r23h L2: names nothing, no traceback
+cx r6-repairs-earlier-repeated-before; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'  # r23i LOW-2
+has_fail repair-scope-mismatch "withdrawn=$WM" "row 3 of notes/missions/old.repairs.jsonl repeats its before key"
+cx r6-repairs-earlier-deep; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'   # r23i LOW-3
+has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl is no JSON object"
+cx r6-deep-row; run_mr; has_fail mission-grammar "withdrawn=$WM" "which is no JSON object, names it"; has_id mission-edges-missing
+cx r6-deep-row-other; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"     # r23i LOW-3: names nothing
+cx r6-deep-value; run_mr; has_fail mission-grammar "withdrawn=$WM" "names it in plan, so it may have been reviewed"
+# review r23i LOW-3, every other reader: each json.loads above the selftest (whose own reads parse this lint's output) sits
+# in a try whose handlers name RecursionError, so a line nested too deeply to decode reads as no JSON there too
+unguarded=$(python3 -I - "$LINT" <<'PY'
+import ast, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+code = src.split("\n#__PYTHON__\n", 1)[1].split("\n#__PYTHON_END__", 1)[0]
+off = src[:src.index("\n#__PYTHON__\n")].count("\n") + 2      # the lint file's line of the code's line 0
+cut = code[:code.index("\n# ---------------------------------------------------------------- selftest (R7)")].count("\n") + 2
+bad, seen = [], 0
+
+
+def names(h):
+    t = h.type
+    return {getattr(x, "id", None) for x in (t.elts if isinstance(t, ast.Tuple) else [t] if t is not None else [])}
+
+
+def walk(node, guarded):
+    global seen
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+        guarded = False                  # a body defined here runs later, outside this try
+    if isinstance(node, ast.Try):
+        inner = guarded or any("RecursionError" in names(h) for h in node.handlers)
+        for x in node.body:
+            walk(x, inner)
+        for x in node.handlers + node.orelse + node.finalbody:
+            walk(x, guarded)
+        return
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "loads" \
+            and getattr(node.func.value, "id", None) == "json" and node.lineno < cut:
+        seen += 1
+        if not guarded:
+            bad.append(node.lineno)
+    for x in ast.iter_child_nodes(node):
+        walk(x, guarded)
+
+
+walk(ast.parse(code), False)
+print(f"{seen} {' '.join(str(n + off) for n in bad)}".strip())
+PY
+) || fail "r23i LOW-3: the json.loads scan did not run"
+[ "${unguarded%% *}" -ge 16 ] && [ "$unguarded" = "${unguarded%% *}" ] \
+  || fail "r23i LOW-3: json.loads sites (count, then the lint's unguarded lines): $unguarded"
 cx r6-repairs-earlier-latin1; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'   # r23g L2
 has_fail repair-scope-mismatch "withdrawn=$WM" "notes/missions/old.repairs.jsonl cannot be read (not UTF-8)"
 cx r6-repairs-earlier-missing; run_mr; findings_eq '["mission-edges-missing", "repair-scope-mismatch", "mission-grammar"]'
