@@ -17,17 +17,17 @@ launch=$(printf '%s\n' "$p2" | grep -n 'review\.snapshot' | head -1 | cut -d: -f
 [ -n "$launch" ] || fail "Phase 2 does not name review.snapshot"
 p2j=$(printf '%s\n' "$p2" | tr '\n' ' ' | tr -s ' ')
 for s in 'review.snapshot' '--session-id' 'sha256sum' "relative to the manifest's" 'absolute'; do
-  printf '%s' "$p2j" | grep -qF -- "$s" || fail "Phase 2 reviewer launch does not name $s"
+  printf '%s' "$p2j" | grep >/dev/null -F -- "$s" || fail "Phase 2 reviewer launch does not name $s"
 done
 p3=$(section '## Phase 3 — Draft')
 rv=$(printf '%s\n' "$p3" | para '**Review:**')
 [ -n "$rv" ] || fail "Phase 3 has no **Review:** paragraph"
-printf '%s' "$rv" | grep -qF "binds to the snapshot's bytes" || fail "Phase 3 Review paragraph does not say an APPROVE binds to the snapshot's bytes: $rv"
-printf '%s' "$rv" | grep -qF 'APPROVE' && printf '%s' "$rv" | grep -qiF 'new review' || fail "Phase 3 Review paragraph does not say a later edit needs a new review"
+printf '%s' "$rv" | grep >/dev/null -F "binds to the snapshot's bytes" || fail "Phase 3 Review paragraph does not say an APPROVE binds to the snapshot's bytes: $rv"
+printf '%s' "$rv" | grep >/dev/null -F 'APPROVE' && printf '%s' "$rv" | grep >/dev/null -iF 'new review' || fail "Phase 3 Review paragraph does not say a later edit needs a new review"
 p4=$(section '## Phase 4 — Persist')
-printf '%s\n' "$p4" | tr '\n' ' ' | tr -s ' ' | grep -qF '`snapshot`' || fail "Phase 4 reply labels do not include \`snapshot\`"
+printf '%s\n' "$p4" | tr '\n' ' ' | tr -s ' ' | grep >/dev/null -F '`snapshot`' || fail "Phase 4 reply labels do not include \`snapshot\`"
 for s in '`verified`' '`legacy`'; do
-  printf '%s\n' "$p4" | tr '\n' ' ' | grep -qF -- "$s" || fail "Phase 4 does not name the snapshot label $s"
+  printf '%s\n' "$p4" | tr '\n' ' ' | grep >/dev/null -F -- "$s" || fail "Phase 4 does not name the snapshot label $s"
 done
 out=$(bash "$here/dream_analysis_skills_ref.sh" 2>&1); rc=$?
 [ "$rc" = 0 ] || fail "dream_analysis_skills_ref.sh rc=$rc: $out"

@@ -20,7 +20,7 @@ fm=$(awk 'NR==1&&$0!="---"{exit} NR==1{next} $0=="---"{exit} {print}' "$f")
 # `## ` line inside a ``` fence (the Phase 4 run-note template) is not a heading.
 section() { awk -v h="$1" '/^```/{fence=!fence} !fence&&/^## /{f=(index($0,h)==1);next} f' "$f"; }
 fail=0
-printf '%s\n' "$fm" | grep -qE '^fable-spawn: true$' || { echo "FAIL frontmatter missing ^fable-spawn: true$"; fail=1; }
+grep -qE '^fable-spawn: true$' <<< "$fm" || { echo "FAIL frontmatter missing ^fable-spawn: true$"; fail=1; }
 for k in model effort; do
   hit=$(printf '%s\n' "$fm" | grep -nE "^$k:" || true)
   [ -z "$hit" ] || { echo "FAIL frontmatter pins $k (the routing policy is the one source): ${hit//$'\n'/; }"; fail=1; }
@@ -30,12 +30,12 @@ pins=$(grep -nE 'Fable at max|effort: max|model: fable' "$f" || true)
 
 p3=$(section '## Phase 3 — Draft')
 for s in 'skill-routing/policy\.json' '--route-request' 'Route: ungoverned'; do
-  printf '%s\n' "$p3" | grep -qE -- "$s" || { echo "FAIL Phase 3 does not name $s"; fail=1; }
+  grep -qE -- "$s" <<< "$p3" || { echo "FAIL Phase 3 does not name $s"; fail=1; }
 done
 
 v=$(section '## Phase 2 — Vision')
 for s in '`/wwhtbt`' '`/5whysandrhyme`' 'decisions/\*-wwhtbt.md'; do
-  printf '%s\n' "$v" | grep -qE "$s" || { echo "FAIL Phase 2 does not reference $s"; fail=1; }
+  grep -qE "$s" <<< "$v" || { echo "FAIL Phase 2 does not reference $s"; fail=1; }
 done
 
 # Run record (PRD-dream-run-record R5): Phase 4 template lines, the lint step, the
@@ -44,13 +44,13 @@ done
 # the behavioral control.
 p4=$(section '## Phase 4 — Persist')
 for s in 'Task:' 'Route:' 'Analysis:' 'Review:' 'State:'; do
-  printf '%s\n' "$p4" | grep -qE -- "^$s " || { echo "FAIL Phase 4 template lacks a $s line"; fail=1; }
+  grep -qE -- "^$s " <<< "$p4" || { echo "FAIL Phase 4 template lacks a $s line"; fail=1; }
 done
 for s in 'adversarial=' 'dream-run-note-lint.sh'; do
-  printf '%s\n' "$p4" | grep -qF -- "$s" || { echo "FAIL Phase 4 does not name $s"; fail=1; }
+  grep -qF -- "$s" <<< "$p4" || { echo "FAIL Phase 4 does not name $s"; fail=1; }
 done
 for s in '`ran' '`reused' '`skipped' '`inline`' '--session-id'; do
-  printf '%s\n' "$v" | grep -qF -- "$s" || { echo "FAIL Phase 2 does not name $s"; fail=1; }
+  grep -qF -- "$s" <<< "$v" || { echo "FAIL Phase 2 does not name $s"; fail=1; }
 done
 adv=$(printf '%s\n' "$p3" | awk '/^\*\*Adversarial pass/{f=1} f&&/^$/{exit} f')
 if [ -z "$adv" ]; then
@@ -62,7 +62,7 @@ else
            'Alternative bypasses and ordering' 'Falsifier quality' 'Whole-scope coverage and handoff' \
            '## PRD-<slug>' '### <family name>' 'unconditional fallback:' '`conditional fallback:' \
            '## Uncovered' 'final message'; do
-    printf '%s' "$advj" | grep -qiF -- "$s" || { echo "FAIL Adversarial pass paragraph does not name $s"; fail=1; }
+    grep -qiF -- "$s" <<< "$advj" || { echo "FAIL Adversarial pass paragraph does not name $s"; fail=1; }
   done
   a_ln=$(printf '%s\n' "$p3" | grep -n '^\*\*Adversarial pass' | head -1 | cut -d: -f1)
   r_ln=$(printf '%s\n' "$p3" | grep -n '^\*\*Review:\*\*' | head -1 | cut -d: -f1)

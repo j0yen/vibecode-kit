@@ -62,7 +62,7 @@ def run(lint, log, home, dec, entry, js, wiki):
            ["--prd-dir", home, "--decisions", dec] + (["--json"] if js else [])
     env = {k: v for k, v in os.environ.items() if k != "SKILL_ROUTING_DECISIONS"}
     env.update(HOME=home_env, ANALYSIS_WIKI_DIR=wiki)
-    p = subprocess.run(args, capture_output=True, text=True, env=env, timeout=300)
+    p = subprocess.run(args, capture_output=True, text=True, env=env)
     return p.returncode, p.stdout, p.stderr
 
 

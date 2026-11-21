@@ -12,7 +12,7 @@ setup_mx
 mx last-differs; run_mr
 has_fail mission-scope-mismatch "notes/snapshots/m3/m3.sha256" "$(mxb 10)" "$(mxb 11)"
 mx live-differs; run_mr
-has_fail mission-scope-mismatch "live edges header" "2027-03-01T23:00:00-08:00-adversarial.md" "$(mxb 11)"
+has_fail mission-scope-mismatch "live edges header" "2026-11-18T23:00:00-08:00-adversarial.md" "$(mxb 11)"
 for c in matrix-empty matrix-int matrix-path matrix-not-md matrix-prd matrix-vision; do
   mx "$c"; run_mr; has_fail edge-grammar "field matrix"
 done

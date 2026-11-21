@@ -109,7 +109,19 @@ Ground every claim; cite file, PR, issue, or URL.
 
 **Failure check (every seed, one line):** `Failure under this seed: yes — <what broke,
 with the observation> | no — <why this is an opportunity>`. It goes in the vision and
-the run log.
+the run log. The run note (Phase 4) also carries it typed: `Failure: none` or
+`Failure: <class> <ref> [<ref> ...]`, the class one of `recurring-failure`,
+`failed-acceptance`, `consequential-obstacle`, `transient` or `other`, each ref matching the
+routing policy's `evidence.ref_pattern` and naming none of its `evidence.placeholders`.
+Verdict files the author does not write set a floor: a REJECT of a slug the entry's `State:`
+names, in any verdict file under the home's `notes/reviews/` bound to a review launch row of
+the Task since its previous entry (named on a `Review:` line or not), makes the class at least
+`failed-acceptance`; a FIX or REJECT of that slug after its earlier FIX or REJECT in this home
+makes it `recurring-failure` (a first FIX is answered by the repairs file). A verdict file whose
+first lines name several review sessions counts for the latest-launched one (a re-review cites
+earlier sessions). An entry that is not covered (Phase 2) keeps today's rules and its `Failure:`
+line is not read, unless verdict files set a floor for it: then it carries the line at the
+floor, and the trigger classes' `/5whysandrhyme` rule applies to it.
 
 **Five whys (failure seeds).** Ask why up to five levels, each answered by an
 observation, stopping at a level outside the system's control. PRDs target the deepest
@@ -141,8 +153,32 @@ line (Phase 4):
 
 | skill | run | reuse | skip |
 |---|---|---|---|
-| `/wwhtbt` | `ran <page>`: its subject is in scope and no valid page covers the seed | `reused <page>`: an existing page's end-state names the seed's subject and no input it cites has changed; the vision records the path and the reason | `skipped: <reason>` (an amendment of an approved vision, say) |
-| `/5whysandrhyme` | `page <page>`: a failure within the fleet's incident scope | — | `inline`: a failure outside that scope keeps the Phase 1 why-chain; `skipped: <reason>`: not a failure seed |
+| `/wwhtbt` | `ran <page>`: its subject is in scope and no valid page covers the seed | `reused <page>`: an existing page's end-state names the seed's subject and no input it cites has changed; the vision records the path and the reason. A covered entry (below) writes `reused <page> sha256=<64 hex> inputs=<manifest>`: `sha256=` is the page's current digest and `inputs=` a `sha256sum` manifest under the PRD home listing every absolute path and `file:` ref the page cites plus the entry's seed file, which the lint checks with `sha256sum -c` in the manifest's own directory | `skipped: <reason>` (an amendment of an approved vision, say); a covered entry skips only as `skipped: blocked decision=<ts>` (below) |
+| `/5whysandrhyme` | `page <page>`: a failure within the fleet's incident scope, and always for the `Failure:` classes `recurring-failure`, `failed-acceptance` and `consequential-obstacle`, the page bound to a 5whysandrhyme launch row of the entry's Task | `reused <page> sha256=<64 hex>`: one analysis per incident across runs, the page bound to a 5whysandrhyme launch row of any task and cited on the `Failure:` line as `page:<path>` | `inline`: a failure outside that scope keeps the Phase 1 why-chain, and a `transient` failure takes `inline` or `skipped: transient`; `skipped: <reason>`: not a failure seed; for the three trigger classes only `skipped: blocked decision=<ts>` |
+
+**Covered entries and recorded skips.** From the cutover date written in the run-note lint,
+an entry is covered when it carries or inherits a `Mission:` line, its `State:` names a slug no
+earlier entry of its `Task:` names or carries `drafted`, its `Seeds:` line carries a token the
+Task's previous entry did not, or a PRD its `State:` names differs from that slug's digest in the
+newest manifest an earlier entry of the Task binds (a manifest that cannot be read, or is not
+its review row's `scope_id`, counts as changed). The entry's date is its header's, or its dream
+launch row's when that is later. A covered entry records a page it ran, an exact reuse as above
+(the manifest is written with the page and reused unchanged: one regenerated at reuse proves
+nothing), or `skipped: blocked decision=<ts>`: the decisions log holds a `denied` row of that
+skill and Task at that `ts`, before the entry's header, whose whole reasons are one of the
+resolver's own outage texts (`policy file not found`, `policy is malformed`, `malformed policy
+JSON: <Error>`, `ledger lookup unavailable; cannot verify ledger:<id> (fail closed)`,
+`<skill>: policy require_permission_mode must be a non-empty string (fail closed)`, or its
+policy-error form `<skill>: policy ... (policy error, fail closed)`; the `policy-missing:` texts
+for a policy file the caller named, `SKILL_ROUTE_POLICY` or `--policy`, and that infix inside
+caller text the resolver quotes are the caller's to cure, and a denial the caller induced, such as
+a malformed policy it chose or a `PATH` without `wm-asks`, excuses no skip even when its text is
+an outage's: corroborating that is A1300's producer), and no launch row of that skill, for any task, falls
+between that row and the entry's header, both ends included (a launch row without a readable
+timestamp counts). A request the caller can fix, a live-worker denial (the
+analysis is running; reuse its page when it lands) or an uncorroborated outage is refused, and so
+is any other skip text. When the run has no wiki-write scope, write the page under the PRD home's
+`notes/analysis/`: it binds there by its launch row as anywhere else.
 
 A run with `Task: none` records `reused` or `skipped:`, never `ran`. Launch a governed
 analysis with a session id drawn first, so its page binds to its launch row before the
@@ -156,7 +192,12 @@ the frozen files the reviewer reads (the PRDs, the vision, the matrix), its path
 or relative to the manifest's own directory, because `sha256sum -c` is run there. The
 launcher's row then carries `role` review, `scope` and `scope_id`; a request without a
 snapshot launches as an author, which the lint refuses on a `Review:` line. Keep the
-manifest until the run note is linted.
+manifest until the run note is linted. A review row written on another host records that
+host's absolute `scope`. The case-11 gate reads it on this host only through the lint's
+`--scope-root <recorded root>=<PRD home>`, taken from the delivered decisions source that
+names the root, and every content check still applies. A recorded root of `/` (or only
+slashes), or one that holds or lies inside this run's PRD home, by the path given or its real
+path, is refused.
 
 **Mission trace and edge map (before decomposition).** When a run drafts a mission (several
 PRDs over one shared chain), write `notes/missions/<name>.edges.jsonl` under the PRD home
@@ -286,7 +327,19 @@ asks for a counterexample, the affected consumers, the minimal correction, a
 discriminating control and one failure class of `provenance`, `missing-producer-runner`,
 `authority-bypass`, `unreachable-transition`, `semantic-incompatibility`,
 `false-green-acceptance`, written as one row of `<verdict file>.findings.jsonl`, numbered
-from the note's next free id and never re-using an id from an earlier sidecar. The final
+from the note's next free id and never re-using an id from an earlier sidecar. A sidecar is
+never rewritten: only the review's own session, resumed (a launch row with role review, its
+`scope_id` and `resume`, later than that session's first such launch row that is not a
+resume), may write `<verdict file>.findings.corrected-<n>.jsonl`, whose first row is
+`{"corrects": <the sidecar's sha256>, "session": <that session>}` and whose other rows are
+the sidecar's, in order, changing only `prds` and `consumers`, with no key repeated in a row. The lint reads it for the
+finding grammar and the repairs rows, keeps the original's failures in the JSON's
+`findings_historical`, and refuses any other correction as `sidecar-correction-unbound`. A
+sidecar row may name a consumer `external:<name>` that its review's frozen edges header does not
+declare when the manifest listed next in `scope=` freezes a header that declares `<name>` and the
+mission author's (not the reviewer's) repairs row from the review's manifest to that next one
+names the edges file in `changed`; the lint keeps the original failure in `findings_historical`
+with `declared_by` (that manifest and repairs row). The final
 message ends with one `findings=<sha256 of the sidecar, or none>` line, the per-PRD verdict
 lines and one `mission=<APPROVE|FIX|REJECT> <session>` line verbatim, and the `result=`
 capture carries those same lines. The run note's `Mission:` line gains `scope=` (the
@@ -332,7 +385,19 @@ the note's `adversarial=` names the last, which the last manifest's header and t
 name too. Until every listed manifest's frozen header carries `matrix`, a manifest whose header
 has none keeps the matrix of the entry that first listed it: a repair round inside one run
 entry keeps the matrix name, and a continued legacy mission writes the new run's matrix, later
-than the previous entry. Updating `matrix` moves the edges file's digest between consecutive
+than the previous entry. A post-review entry may name the previous entry's matrix when the previous entry is of the
+same task, its `adversarial=` path, its `uncovered=` and its `Mission:` `scope=` equal the
+previous entry's, and its `Review:` lines are the previous entry's (a previous `Review: none`
+counts as no lines) plus at least one new line, each new line's session having as its latest
+launch row for the task a review of the last listed manifest (its `scope_id`). A legacy manifest first listed before `LEGACY_MATRIX_SINCE` (a
+constant in the lint, recorded in `history.md`; an entry is dated by its `Route:` line's
+`decision=`, else by its header ts) that lists exactly one `*-adversarial.md` keeps that one as
+its matrix member, not compared with the entry's `adversarial=` name, when an entry of the
+mission not later than the linted one names it in `adversarial=` or its copy at the listed
+digest passes `--matrix` for the first-listing entry's `State:` slugs that are `prds` members
+of its frozen header; listing none, two or more, or one neither named nor passing, it keeps the
+rule above.
+Updating `matrix` moves the edges file's digest between consecutive
 manifests, so the repair row's `changed` lists the edges basename (it may also name the old
 matrix, checked against `before`, and the new one, checked against `after`), and the round does
 not cascade into `repair-hash-mismatch`.
@@ -341,7 +406,8 @@ not cascade into `repair-hash-mismatch`.
 approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one that
 touches more than one repo or surface, is reviewed alone and persists in a batch of
 one. Write each verdict as `<slug> APPROVE|FIX|REJECT <reviewer>`, one line per PRD, to a
-review file. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
+review file; a line counts as a verdict only when its first token is a PRD slug
+(`[a-z0-9][a-z0-9-]*`), so a table row or other prose beside the verdicts is ignored. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
 slug's current PRD file with the digest in its reviewer's `review.snapshot` manifest, so a
 later edit to that PRD needs a new review (FIX and REJECT are not pinned). On a note whose
 `Mission:` line carries `scope=`, only the latest chain review (in `Review:` line order)
@@ -360,7 +426,9 @@ consumers (the finding's `prds` and `consumers`, read from the edges copy frozen
 batch: `{finding, class, author_session, before, after, changed, sweep, disposition}`, where
 `disposition` is `repaired`, `declined` (with a `reason`) or `amended` (an author change
 between two reviews that answers no finding: `finding` and `class` null, a `reason`, and
-`changed` naming what moved). Once any repairs row exists, the repairs file is a packet
+`changed` naming what moved). A `repaired` row's `changed` names one of the finding's PRDs or a
+contract file of an external among its `consumers`; for a finding whose `prds` is empty, the
+mission's edges file or a member of its edges header's `packet` counts too, never the repairs file itself. Once any repairs row exists, the repairs file is a packet
 member: list its basename in every `scope=` manifest later than the earliest `before` any
 row names, including that row's own `after`, so write the row (it names `after` by path)
 before freezing `after`. Feedback goes to the same author: `author_session` is a session
@@ -368,7 +436,29 @@ of this run's author lineage (an author launch row under the `Task:`). Compare e
 contract and every affected consumer against the actual `before` and `after` hashes: `before`
 and `after` are consecutive `scope=` manifests, every basename that moved between two listed
 manifests is in some row's `changed`, and every consumer of a changed producer appears at its
-`after` digest in a later review's manifest. Reuse unchanged accepted evidence: a bounded
+`after` digest in a later review's manifest. A repaired row's `before` may also be a listed
+manifest later than its issuing review's when no chain review is bound to a manifest after
+that review's, up to `before`, and each of those is the `after` of some repairs row (a partial
+repair frozen without a review). A later `amended` row may carry `consolidates: [<row numbers>]`
+naming earlier `amended` rows of its pair by the same author: its `changed` and `sweep` are
+their union, no row is consolidated twice, and the duplicate check judges it in their place,
+keeping their duplicates in the JSON's `repairs_historical`; anything else is
+`repair-consolidation-mismatch`. A file a manifest lists by a relative path outside
+its own directory is keyed by that path (resolved against the manifest's directory and
+normalized): a row names it by path, `changed` and `added` relative to the `after` manifest's
+directory and `removed` relative to the `before` manifest's, with a `delta` record `{changed:
+[{path, before, after}], added: [{path, sha256}], removed: [{path, sha256}]}` whose digests
+equal the two manifests' (a `changed` path whose record sits under `delta.added` is served by
+it). In the undeclared-change pass, an entry in either compared manifest's directory is keyed by
+its basename. One manifest listing one key at two digests, or two files of one basename, one in
+each directory of a compared pair, is `mission-scope-mismatch`. A row without `delta` is a legacy row: its bare basenames keep the basename rule, and a
+basename that several entries of one manifest hold is listed in the JSON's `repairs.ambiguous`,
+never failed; a row with `delta` names such a file by path. A header member (a `prds`, `packet`
+or `contract` file, the matrix, the edges file, and the repairs file) is keyed by its basename
+in every pass and listed once per manifest, and so is a header member of the other manifest of
+a compared pair; a row without `delta` that names one by path is checked by its basename, as a
+bare name is.
+Reuse unchanged accepted evidence: a bounded
 re-review covers changed ∪ affected, and an unaffected PRD keeps its earlier APPROVE. There is
 no blanket hold: only the rows' `changed` members and their affected consumers wait, until the
 mission's final APPROVE. A later chain reviewer, under any verdict, names each `declined`
@@ -416,9 +506,10 @@ Lint: <clean | findings fixed>   Eligibility: <per slug>
 Task: <canonical id | none>   Consumer: <name | none>
 Route: <route> <model_id> <effort> session=<id> decision=<decisions.jsonl ts>
 Analysis: wwhtbt=<ran <path> | reused <path> | skipped: <reason>> 5whys=<page <path> | inline | skipped: <reason>> adversarial=<<path> uncovered=<n> | skipped: <reason>>
+Consumption: <record path>
 Review: <verdict file path> reviewer-session=<id> [result=<json path>]
 State: <slug>=<value> [<slug>=<value> ...]
-Mission: <name> edges=<path> [scope=<manifest>[,<manifest>...]] [repairs=<path>]
+Mission: <name> edges=<path> [scope=<manifest>[,<manifest>...]] [repairs=<path>] [withdrawn=<manifest>[,<manifest>...]]
 Open questions: <items>
 ```
 The six record lines, each on one line (`Mission:` only on a mission run):
@@ -437,21 +528,84 @@ The six record lines, each on one line (`Mission:` only on a mission run):
   `edges=`, `scope=` and `repairs=` tokens it omits, never names another edge map, and carries
   the line whenever its `State:` names a member of the mission (the live header's `prds`, the
   edges copy frozen beside every `scope=` manifest, and earlier entries' `State:` slugs). A
-  run without the line lints as before.
+  run without the line lints as before. A freeze named last in `scope=` before it is written,
+  and then never written, is dropped by a later entry's `withdrawn=<manifest>`: only when
+  nothing is at the manifest's path, as written or normalized; no line of the decisions source
+  scopes or names it (in a JSON row, any string value that resolves to the manifest; a line
+  that is no JSON object, when it names it); it is the last element of the latest earlier list
+  that names it; no row of any repairs file the Task's entries name names it (a file that
+  cannot be read, a line that is no JSON object, or a row whose `before` or `after` is no
+  path string rules nothing out); and that
+  entry's own `scope=` is the previous entry's list without it, followed only by appended
+  manifests. The token is never inherited, and the
+  earlier entries are left as written.
 - Paths are relative to the PRD home or absolute.
+
+**Consuming analysis findings.** On and after the cutover date written in the lint, a note
+whose `Analysis:` line binds a page (`wwhtbt=ran|reused`, `5whys=page|reused`) carries one
+`Consumption: <record path>` line naming the run's consumption record, a JSONL file under the
+PRD home (`notes/consumption/<ISO-ts>-<slug>.jsonl`), and so does a covered note while an earlier
+record of the same Task still has an unconsumed row; a note that binds no page and inherits no
+unconsumed row needs no line. The record binds every finding of each page: the falsifier
+(wwhtbt `# Weakest link`, 5whysandrhyme `WWHTBT (the weakest link):`) and each `# Mechanisms`
+item whose state word is not exactly `LIVE` or `MERGED`. Its grammar is
+`analysis-consumption.v1`, one JSON object per line: `id` (unique in the file), `page` (as
+written on the `Analysis:` line), `page_sha256`, `finding` (`falsifier` or `mechanism:<n>`, n the
+item's 1-based number under `# Mechanisms`), `binding`, `author_session`, the binding's own keys
+and an optional `note` (free text, never read as a binding). The five bindings:
+- `requirement`: `prd` (a queued PRD) and `ac`, whose AC line names `<page basename>#<finding>`
+  and carries a backticked command or a `tests/` path. A falsifier row adds `kill` =
+  {`script`, `sha256`, `string`}: the page's own falsifier script, its digest and the kill
+  string the AC line carries; it names AC 1 of a first PRD (no `Depends-on` inside the
+  mission), and a falsifier owned outside the run binds `repair`, `residual` or `pending`. A
+  mechanism row adds `control`, the discriminating control its AC test runs.
+- `repair`: `ask`, `owner` and `successor`. The canonical ask names `<page basename>#<finding>`,
+  the successor's text carries `closes-after=row:<ask>`, and the successor's done-check (or that
+  of a row it closes after) is one plain bash command running `dream-run-note-lint.sh
+  --consumption <record> --task <successor> --require-closed`; a satisfied repair shows an
+  `accept` FAIL then a run PASS at one sha.
+- `test`: `repo`, `commit` (40 hex) and `path`, a file at that commit naming the finding.
+- `residual`: `owner`, `evidence` (refs matching the routing policy's `ref_pattern`) and
+  `accepted_by`, a review session of the Task outside the author lineage whose own verdict file
+  holds the line `accepts <id>`; optional `prd`, and `part` for a residual part of a finding.
+- `pending`: `owner`, `due`, and `ask` and `successor` checked as for `repair`; optional `prd`.
+A session, run id, rc, report or receipt path binds nothing. An unconsumed finding (a pending
+row, a refused row, an unbound finding, a covered note's WWHTBT skip, or a 5whys skip under a
+trigger-class `Failure:`) holds only what it names. A row naming `prd` holds that slug, and a
+refused one every `State:` slug too when that PRD is none of the run's. A row naming no `prd`
+holds the successor alone when the canonical ledger shows that successor still open with its
+done-check running this lint, and every `State:` slug otherwise, as an unbound mechanism and that
+5whys skip do. An unbound falsifier, a refused falsifier row and the WWHTBT skip hold the first
+PRDs (every member when none is first). A note whose Task cannot be read (no `Task:` line, or
+one from which no Task id can be read) holds every `State:` slug, since no earlier record of
+its Task can be checked; a `Task: none` note has no Task whose earlier records apply. A held
+slug cannot
+reach `eligible`, and an earlier record's unconsumed row keeps holding until a later record
+binds the same page and finding as consumed, or binds that page whole at its current bytes
+(every current finding consumed) once the finding has left the page. `scripts/dream-run-note-lint.sh --consumption <record> --task <T> [--page <page>]
+[--prd-home <dir>] [--reviews <dir>] [--require-closed] [--json]` answers the same question for
+a done-check or a plugin: exit 0 consumed, 1 not, 2 cannot tell.
 
 After appending the note, run `scripts/dream-run-note-lint.sh notes/dream-log.md --last
 --json` on it. A note with a `Mission:` line is also checked for `mission-grammar`,
 `mission-edges-missing`, `edge-grammar`, `edge-unexplained`, `edge-unknown-unowned`,
 `edge-node-unlisted` and `mission-prd-unlisted`, and one whose line carries `scope=` for
 `mission-scope-mismatch`, `mission-scope-incomplete`, `mission-review-missing`,
-`mission-verdict-missing`, `mission-finding-incomplete`, `mission-snapshot-stale` and
+`mission-verdict-missing`, `mission-finding-incomplete`, `sidecar-correction-unbound`,
+`mission-snapshot-stale` and
 `mission-approval-blocked` (the last also without `scope=`, for a member reaching
 `eligible`), and for its repairs (`repairs=`, or a finding followed by a later chain review,
 or a digest moving between two listed manifests) for `repair-grammar`,
 `mission-repairs-missing`, `repair-duplicate`, `repair-missing`, `repair-class-mismatch`,
 `sweep-missing`, `repair-author-mismatch`, `repair-hash-mismatch`, `repair-scope-mismatch`,
-`affected-consumer-unreviewed` and `repair-declined-unaccepted`. Fix a finding you can fix and rerun the lint before the reply. A finding
+`affected-consumer-unreviewed`, `repair-declined-unaccepted` and
+`repair-consolidation-mismatch`. A note on or after the cutover
+is also checked for `consumption-missing`, `consumption-grammar`, `consumption-binding-invalid`,
+`consumption-binding-not-discriminating`, `consumption-repair-unbound`,
+`consumption-repair-unproven`, `consumption-residual-unaccepted`, `consumption-pending-overdue`,
+`consumption-receipt-only`, `consumption-finding-unbound`, `consumption-page-stale`,
+`consumption-page-unparsed`, `canonical-unavailable`, `falsifier-not-first` and
+`consumption-blocked`; its JSON lists the held slugs under `consumption.held`. Fix a finding you can fix and rerun the lint before the reply. A finding
 you cannot fix (`route-ungoverned-on-governed-host`; `analysis-page-unbound` for a page
 another worker wrote) stays in the note and is quoted in the reply with the lint's JSON.
 The reply quotes the `State:` line and the provenance labels, `snapshot` and `mission` among them

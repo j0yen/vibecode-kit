@@ -12,7 +12,7 @@ ids=$(printf '%s\n' "$ents" | grep -F 'dream-repairs-file-in-packet' | cut -f1 |
 [ -n "$ids" ] || fail "no history.md entry names dream-repairs-file-in-packet"
 [ "$(printf '%s\n' "$ids" | wc -l)" = 1 ] || fail "more than one history.md entry names dream-repairs-file-in-packet: $ids"
 e=$(printf '%s\n' "$ents" | awk -F'\t' -v k="$ids" '$1==k{sub(/^[^\t]*\t/,""); print}' | tr '\n' ' ' | sed 's/[[:space:]]\{1,\}/ /g')
-printf '%s' "$e" | grep -qE '^- \*\*.*\(2026-11-[0-9][0-9][^)]*\)\.\*\*' || fail "the entry is not in the file's form '- **<title> (2026-11-..).**': $e"
+printf '%s' "$e" | grep >/dev/null -E '^- \*\*.*\(2026-11-[0-9][0-9][^)]*\)\.\*\*' || fail "the entry is not in the file's form '- **<title> (2026-11-..).**': $e"
 for s in 'dream-failure-class-sweep' 'run2r' "$RP_SENTENCE"; do
   case "$e" in *"$s"*) ;; *) fail "the entry lacks: $s";; esac
 done

@@ -8,9 +8,11 @@ and `decisions.jsonl` into a temporary directory with a private HOME, copies
 passing mission. Each test case starts from the passing mission or one variant and edits its
 copy. Paths below are relative to this directory. Session ids are synthetic: `...0001` is the
 author session `dddddddd-0000-4000-8000-000000000001`, and `...0002`, `...0003` and `...0004`
-are reviewer sessions of the same form. Times are on 2027-01-04 at -08:00 unless a variant says
+are reviewer sessions of the same form. Times are on 2026-11-17 at -08:00 unless a variant says
 otherwise. The fixture files stay byte-unchanged after they land (PRD-dream-failure-class-sweep
-R8).
+R8), with one exception: PRD-dream-analysis-trigger-record's H1 amendment re-dated them from
+2027-01-04 to 2026-11-17 (before that PRD's cutover; times of day and order kept) with
+`tests/fixtures/redate.py`, which regenerated every digest, manifest and `scope_id` below.
 
 The tests that read it are `tests/drmr_ac01_approval_blocked.sh` to
 `tests/drmr_ac07_ids_compat.sh` (AC 1 to AC 7). `tests/drmr_ac07_ids_compat.sh` also recomputes
@@ -24,7 +26,7 @@ Each review row of a `decisions.jsonl` records the `scope_id` of the manifest it
 computed once through `--scope-id`; author rows record none. 28 review rows record one of five
 values:
 
-- `2c538f54eb13a3077f6fd1629d18fa09a8bb633439f41f7a6b91e19e48367e83`, recorded by 20 rows: the
+- `41784a6b999220e1acf95c787d5d9094a610e96271093794b2ca6bab0473f227`, recorded by 20 rows: the
   review row of `decisions.jsonl`; every review row of `fix`, `later-unlisted` (three),
   `noscope`, `perprd-fix`, `preinstall-line`, `preinstall-noline`, `rereview` (two), `reused-id`
   (two), `sidecar-accepts` and `sidecar-deleted`; the t1 row of `prefix`, `twomanifest` and
@@ -35,20 +37,20 @@ values:
   `variants/twomanifest-fix/home/notes/snapshots/t1/snapshot.sha256`,
   `variants/superseded/home/notes/snapshots/s1/snapshot.sha256` and
   `variants/superseded-bc/home/notes/snapshots/s1/snapshot.sha256`.
-- `b15026c7a923981f8660ef7d1d4124d324681ad47cd8e34c307e4b2cee296333`, recorded by 3 rows: the t2
+- `6e2e822048d94d4ab01ec2842efbf164102dbb6641f750d5cbd48dd619d6d357`, recorded by 3 rows: the t2
   row of `prefix`, `twomanifest` and `twomanifest-fix`. Its manifests:
   `variants/prefix/home/notes/snapshots/t2/snapshot.sha256`,
   `variants/twomanifest/home/notes/snapshots/t2/snapshot.sha256` and
   `variants/twomanifest-fix/home/notes/snapshots/t2/snapshot.sha256`.
-- `4c487ac25a19077f8bb8440704505738aff772a3e7620295152448738d502b69`, recorded by 2 rows: the s2
+- `a708551a2f2597a1411247a499ad9335561a342928729cef91cf1f96fa155763`, recorded by 2 rows: the s2
   row of `superseded` and `superseded-bc`. Its manifests:
   `variants/superseded/home/notes/snapshots/s2/snapshot.sha256` and
   `variants/superseded-bc/home/notes/snapshots/s2/snapshot.sha256`.
-- `43bba67caa1fd5103d0662cd05fc753b32a31f1b018d615bdfa37ae35f635523`, recorded by 2 rows: the
+- `6507035cdefb24247364b29b71eabc7a3014832e4fcae4b08382c7e7214ed983`, recorded by 2 rows: the
   review row of `single` and `single-split`. Its manifests:
   `variants/single/home/notes/snapshots/single/snapshot.sha256` and
   `variants/single-split/home/notes/snapshots/single/snapshot.sha256`.
-- `56fd70da58320cb62a1c0508bb160216578013a7b553ec5154f9770d01dc13e0`, recorded by 1 row: the
+- `4a683f457b2d39a3bb03f2c470326b0772302cb95531567fc9a07001d72b2665`, recorded by 1 row: the
   review row of `unknown`. Its manifest:
   `variants/unknown/home/notes/snapshots/unknown/snapshot.sha256`.
 
@@ -69,7 +71,7 @@ copy is byte-equal to its live file.
 - `home/built-prds/PRD-b.md`: PRD stub b.
 - `home/built-prds/PRD-c.md`: PRD stub c.
 - `home/contracts/x-contract.md`: external x's contract.
-- `home/notes/dream-log.md`: one entry, `## 2027-01-04T12:00:00-08:00`, Task `MR-1`: `Route:`
+- `home/notes/dream-log.md`: one entry, `## 2026-11-17T12:00:00-08:00`, Task `MR-1`: `Route:`
   names the author session; `Review:` names `notes/reviews/chain/verdict.txt`, reviewer-session
   `...0002` and `result=notes/reviews/chain/result.json`; `State:` has a, b and c `linted` and
   `reviewed:APPROVE`; the `Mission:` line is `drmr-mission` with
@@ -77,12 +79,12 @@ copy is byte-equal to its live file.
 - `home/notes/missions/drmr-mission.edges.jsonl`: the edges file: a header (`prds` a, b and c,
   `external` x with `contract` `contracts/x-contract.md`, `packet` `drmr-vision.md`) and three
   edges: E1 a → b and E2 b → c `known`, E3 c → external:x `external`.
-- `home/notes/reviews/2027-01-04T09:10:00-08:00-adversarial.md`: the adversarial matrix.
+- `home/notes/reviews/2026-11-17T09:10:00-08:00-adversarial.md`: the adversarial matrix.
 - `home/notes/reviews/chain/result.json`: the chain review's `result=` capture; its text carries
   `findings=none` and the verdict file's four lines.
 - `home/notes/reviews/chain/verdict.txt`: the chain review's verdict file: `a APPROVE`,
   `b APPROVE`, `c APPROVE` and `mission=APPROVE`, each with `...0002`.
-- `home/notes/snapshots/2027-01-04T09:10:00-08:00-adversarial.md`: frozen copy of the matrix.
+- `home/notes/snapshots/2026-11-17T09:10:00-08:00-adversarial.md`: frozen copy of the matrix.
 - `home/notes/snapshots/drmr-mission.edges.jsonl`: frozen copy of the edges file.
 - `home/notes/snapshots/drmr-vision.md`: frozen copy of the vision stub.
 - `home/notes/snapshots/mission.sha256`: the manifest `scope=` names: the sha256 of the seven
@@ -110,7 +112,7 @@ eligible, the note is `mission-approval-blocked` naming slug a and E4.
 - `variants/unknown/home/notes/missions/drmr-mission.edges.jsonl`
 - `variants/unknown/home/notes/reviews/unknown/result.json`
 - `variants/unknown/home/notes/reviews/unknown/verdict.txt`
-- `variants/unknown/home/notes/snapshots/unknown/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/unknown/home/notes/snapshots/unknown/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/unknown/home/notes/snapshots/unknown/PRD-a.md`
 - `variants/unknown/home/notes/snapshots/unknown/PRD-b.md`
 - `variants/unknown/home/notes/snapshots/unknown/PRD-c.md`
@@ -153,7 +155,7 @@ member is refused with "no chain review of the last manifest". AC 5: a changed r
 - `variants/twomanifest/home/notes/reviews/t1/verdict.txt`
 - `variants/twomanifest/home/notes/reviews/t2/result.json`
 - `variants/twomanifest/home/notes/reviews/t2/verdict.txt`
-- `variants/twomanifest/home/notes/snapshots/t1/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/twomanifest/home/notes/snapshots/t1/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/twomanifest/home/notes/snapshots/t1/PRD-a.md`
 - `variants/twomanifest/home/notes/snapshots/t1/PRD-b.md`
 - `variants/twomanifest/home/notes/snapshots/t1/PRD-c.md`
@@ -161,7 +163,7 @@ member is refused with "no chain review of the last manifest". AC 5: a changed r
 - `variants/twomanifest/home/notes/snapshots/t1/drmr-vision.md`
 - `variants/twomanifest/home/notes/snapshots/t1/snapshot.sha256`
 - `variants/twomanifest/home/notes/snapshots/t1/x-contract.md`
-- `variants/twomanifest/home/notes/snapshots/t2/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/twomanifest/home/notes/snapshots/t2/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/twomanifest/home/notes/snapshots/t2/PRD-a.md`
 - `variants/twomanifest/home/notes/snapshots/t2/PRD-b.md`
 - `variants/twomanifest/home/notes/snapshots/t2/PRD-c.md`
@@ -193,7 +195,7 @@ is `mission-review-missing` naming `notes/reviews/t1/verdict.txt` and the verdic
 - `variants/twomanifest-fix/home/notes/reviews/t2/result.json`
 - `variants/twomanifest-fix/home/notes/reviews/t2/verdict.txt`
 - `variants/twomanifest-fix/home/notes/reviews/t2/verdict.txt.findings.jsonl`
-- `variants/twomanifest-fix/home/notes/snapshots/t1/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/twomanifest-fix/home/notes/snapshots/t1/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/twomanifest-fix/home/notes/snapshots/t1/PRD-a.md`
 - `variants/twomanifest-fix/home/notes/snapshots/t1/PRD-b.md`
 - `variants/twomanifest-fix/home/notes/snapshots/t1/PRD-c.md`
@@ -201,7 +203,7 @@ is `mission-review-missing` naming `notes/reviews/t1/verdict.txt` and the verdic
 - `variants/twomanifest-fix/home/notes/snapshots/t1/drmr-vision.md`
 - `variants/twomanifest-fix/home/notes/snapshots/t1/snapshot.sha256`
 - `variants/twomanifest-fix/home/notes/snapshots/t1/x-contract.md`
-- `variants/twomanifest-fix/home/notes/snapshots/t2/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/twomanifest-fix/home/notes/snapshots/t2/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/twomanifest-fix/home/notes/snapshots/t2/PRD-a.md`
 - `variants/twomanifest-fix/home/notes/snapshots/t2/PRD-b.md`
 - `variants/twomanifest-fix/home/notes/snapshots/t2/PRD-c.md`
@@ -339,7 +341,7 @@ names slug a and the s1 file.
 - `variants/superseded/home/notes/reviews/s1/verdict.txt`
 - `variants/superseded/home/notes/reviews/s2/result.json`
 - `variants/superseded/home/notes/reviews/s2/verdict.txt`
-- `variants/superseded/home/notes/snapshots/s1/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/superseded/home/notes/snapshots/s1/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/superseded/home/notes/snapshots/s1/PRD-a.md`
 - `variants/superseded/home/notes/snapshots/s1/PRD-b.md`
 - `variants/superseded/home/notes/snapshots/s1/PRD-c.md`
@@ -347,7 +349,7 @@ names slug a and the s1 file.
 - `variants/superseded/home/notes/snapshots/s1/drmr-vision.md`
 - `variants/superseded/home/notes/snapshots/s1/snapshot.sha256`
 - `variants/superseded/home/notes/snapshots/s1/x-contract.md`
-- `variants/superseded/home/notes/snapshots/s2/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/superseded/home/notes/snapshots/s2/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/superseded/home/notes/snapshots/s2/PRD-a.md`
 - `variants/superseded/home/notes/snapshots/s2/PRD-b.md`
 - `variants/superseded/home/notes/snapshots/s2/PRD-c.md`
@@ -370,7 +372,7 @@ names slug a and the s1 file.
 - `variants/superseded-bc/home/notes/reviews/s1/verdict.txt`
 - `variants/superseded-bc/home/notes/reviews/s2/result.json`
 - `variants/superseded-bc/home/notes/reviews/s2/verdict.txt`
-- `variants/superseded-bc/home/notes/snapshots/s1/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/superseded-bc/home/notes/snapshots/s1/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/superseded-bc/home/notes/snapshots/s1/PRD-a.md`
 - `variants/superseded-bc/home/notes/snapshots/s1/PRD-b.md`
 - `variants/superseded-bc/home/notes/snapshots/s1/PRD-c.md`
@@ -378,7 +380,7 @@ names slug a and the s1 file.
 - `variants/superseded-bc/home/notes/snapshots/s1/drmr-vision.md`
 - `variants/superseded-bc/home/notes/snapshots/s1/snapshot.sha256`
 - `variants/superseded-bc/home/notes/snapshots/s1/x-contract.md`
-- `variants/superseded-bc/home/notes/snapshots/s2/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/superseded-bc/home/notes/snapshots/s2/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/superseded-bc/home/notes/snapshots/s2/PRD-a.md`
 - `variants/superseded-bc/home/notes/snapshots/s2/PRD-b.md`
 - `variants/superseded-bc/home/notes/snapshots/s2/PRD-c.md`
@@ -416,7 +418,7 @@ with its reason, and its one edge is E1 a → external:x. It has its own manifes
 - `variants/single/home/notes/missions/drmr-single.edges.jsonl`
 - `variants/single/home/notes/reviews/single/result.json`
 - `variants/single/home/notes/reviews/single/verdict.txt`
-- `variants/single/home/notes/snapshots/single/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/single/home/notes/snapshots/single/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/single/home/notes/snapshots/single/PRD-a.md`
 - `variants/single/home/notes/snapshots/single/drmr-single.edges.jsonl`
 - `variants/single/home/notes/snapshots/single/drmr-vision.md`
@@ -433,7 +435,7 @@ with its reason, and its one edge is E1 a → external:x. It has its own manifes
 - `variants/single-split/home/notes/missions/drmr-single.edges.jsonl`
 - `variants/single-split/home/notes/reviews/single/result.json`
 - `variants/single-split/home/notes/reviews/single/verdict.txt`
-- `variants/single-split/home/notes/snapshots/single/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/single-split/home/notes/snapshots/single/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/single-split/home/notes/snapshots/single/PRD-a.md`
 - `variants/single-split/home/notes/snapshots/single/drmr-single.edges.jsonl`
 - `variants/single-split/home/notes/snapshots/single/drmr-vision.md`
@@ -444,7 +446,7 @@ with its reason, and its one edge is E1 a → external:x. It has its own manifes
 
 `twomanifest`'s files and rows under a two-entry note: entry 1, at 08:00 with `Review: none`,
 lists t1 and t2 in `scope=`, and entry 2 lists t1 alone: `mission-grammar` naming entry 1's
-timestamp, 2027-01-04T08:00:00-08:00.
+timestamp, 2026-11-17T08:00:00-08:00.
 
 - `variants/prefix/decisions.jsonl`
 - `variants/prefix/home/contracts/y-contract.md`
@@ -455,7 +457,7 @@ timestamp, 2027-01-04T08:00:00-08:00.
 - `variants/prefix/home/notes/reviews/t1/verdict.txt`
 - `variants/prefix/home/notes/reviews/t2/result.json`
 - `variants/prefix/home/notes/reviews/t2/verdict.txt`
-- `variants/prefix/home/notes/snapshots/t1/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/prefix/home/notes/snapshots/t1/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/prefix/home/notes/snapshots/t1/PRD-a.md`
 - `variants/prefix/home/notes/snapshots/t1/PRD-b.md`
 - `variants/prefix/home/notes/snapshots/t1/PRD-c.md`
@@ -463,7 +465,7 @@ timestamp, 2027-01-04T08:00:00-08:00.
 - `variants/prefix/home/notes/snapshots/t1/drmr-vision.md`
 - `variants/prefix/home/notes/snapshots/t1/snapshot.sha256`
 - `variants/prefix/home/notes/snapshots/t1/x-contract.md`
-- `variants/prefix/home/notes/snapshots/t2/2027-01-04T09:10:00-08:00-adversarial.md`
+- `variants/prefix/home/notes/snapshots/t2/2026-11-17T09:10:00-08:00-adversarial.md`
 - `variants/prefix/home/notes/snapshots/t2/PRD-a.md`
 - `variants/prefix/home/notes/snapshots/t2/PRD-b.md`
 - `variants/prefix/home/notes/snapshots/t2/PRD-c.md`

@@ -35,12 +35,12 @@ while IFS=$'\t' read -r man canon _launcher; do
     refused:line-rule|refused:prd-repeat)
       [ "$rc" = 1 ] || fail "$man: rc=$rc want 1 ($canon): $out"
       [ "$(printf '%s\n' "$out" | wc -l)" = 1 ] || fail "$man: more than one detail line: $out"
-      printf '%s' "$out" | grep -qF "review-scope-mismatch" && printf '%s' "$out" | grep -qF "$man" || fail "$man: detail names no id/path: $out"
-      printf '%s' "$out" | grep -qF "${canon#refused:}" || fail "$man: detail does not name ${canon#refused:}: $out"
-      if [ "$canon" = refused:line-rule ]; then printf '%s' "$out" | grep -qE 'line [0-9]+' || fail "$man: no line number: $out"
-      else printf '%s' "$out" | grep -qF 'PRD-rs-alpha.md' || fail "$man: basename not named: $out"; fi ;;
+      printf '%s' "$out" | grep >/dev/null -F "review-scope-mismatch" && printf '%s' "$out" | grep >/dev/null -F "$man" || fail "$man: detail names no id/path: $out"
+      printf '%s' "$out" | grep >/dev/null -F "${canon#refused:}" || fail "$man: detail does not name ${canon#refused:}: $out"
+      if [ "$canon" = refused:line-rule ]; then printf '%s' "$out" | grep >/dev/null -E 'line [0-9]+' || fail "$man: no line number: $out"
+      else printf '%s' "$out" | grep >/dev/null -F 'PRD-rs-alpha.md' || fail "$man: basename not named: $out"; fi ;;
     *)
-      printf '%s' "$canon" | grep -qE '^[0-9a-f]{64}$' || fail "$man: canonical column '$canon' is neither hex nor refused:"
+      printf '%s' "$canon" | grep >/dev/null -E '^[0-9a-f]{64}$' || fail "$man: canonical column '$canon' is neither hex nor refused:"
       [ "$rc" = 0 ] && [ "$out" = "$canon" ] || fail "$man: --scope-id rc=$rc '$out' want '$canon'"
       bc=$(LC_ALL=C awk '{n=split($2,p,"/"); print $1 "  " p[n]}' "$RSFIX/$man" | LC_ALL=C sort -u | sha256sum | cut -d' ' -f1)
       [ "$bc" = "$canon" ] || fail "$man: launcher canonical text gives $bc, tsv $canon" ;;
@@ -59,7 +59,7 @@ vid=$(python3 -c 'import json,sys; print([r for r in map(json.loads,open(sys.arg
 st=$("$LINT" --selftest 2>&1); rc=$?
 [ "$rc" = 0 ] || fail "selftest rc=$rc: $(printf '%s\n' "$st" | grep -v '^PASS' | head -20)"
 for id in review-scope-mismatch review-snapshot-stale; do
-  printf '%s\n' "$st" | grep -q "^PASS refuse:$id:" || fail "selftest has no passing refusal fixture for $id"
+  printf '%s\n' "$st" | grep >/dev/null "^PASS refuse:$id:" || fail "selftest has no passing refusal fixture for $id"
 done
-printf '%s\n' "$st" | grep -q '^PASS pass:snapshot-verified' || fail "selftest has no passing verified fixture"
+printf '%s\n' "$st" | grep >/dev/null '^PASS pass:snapshot-verified' || fail "selftest has no passing verified fixture"
 pass "$rows vectors; $(printf '%s\n' "$st" | tail -1)"

@@ -17,6 +17,6 @@ for c in run3 run3-old; do
 done
 mx run3; o=$(bash "$T/base.sh" "$LOG" --last --prd-dir "$H" --decisions "$DEC" 2>&1); rc=$?
 [ "$rc" = 1 ] || fail "control: 8559929e lint rc=$rc on run3 (want 1): $o"
-printf '%s\n' "$o" | grep -qE '^FAIL mission-scope-incomplete: .*lists no .*-adversarial\.md' || fail "control: no matrix mission-scope-incomplete at 8559929e: $o"
-printf '%s\n' "$o" | grep -qE '^FAIL repair-hash-mismatch: .*-adversarial\.md: claimed changed' || fail "control: no matrix repair-hash-mismatch at 8559929e: $o"
+printf '%s\n' "$o" | grep >/dev/null -E '^FAIL mission-scope-incomplete: .*lists no .*-adversarial\.md' || fail "control: no matrix mission-scope-incomplete at 8559929e: $o"
+printf '%s\n' "$o" | grep >/dev/null -E '^FAIL repair-hash-mismatch: .*-adversarial\.md: claimed changed' || fail "control: no matrix repair-hash-mismatch at 8559929e: $o"
 pass "run3 shape (rows naming old+new, and old only) exits 0 verified; 8559929e refuses it"

@@ -44,7 +44,7 @@ run1() { local c="$T/$1.md" out rc
   [ -n "$(rp_missing "$(rp_para "$c" "$2")")" ] || fail "$1: fixture still carries R1's sentence in '$2'"
   out=$(DREAM_SKILL_MD="$c" bash "$AC8" 2>&1); rc=$?
   [ "$rc" = 1 ] || fail "$1: drfc_ac08 rc=$rc (want 1): $out"
-  printf '%s\n' "$out" | grep -F "paragraph '$2' lacks R1's sentence" | grep -qF -- "$3" \
+  printf '%s\n' "$out" | grep -F "paragraph '$2' lacks R1's sentence" | grep >/dev/null -F -- "$3" \
     || fail "$1: no FAIL naming paragraph '$2' and clause '$3': $out"
 }
 mk no-wc "s = sub_in(s, P1, S, '')"
@@ -71,13 +71,13 @@ done
 # empty path: exit 2 naming it (Technical considerations, edge cases); missing and unreadable paths
 # keep the landed test's refusal (exit 1, "skill file missing or unreadable: <path>")
 out=$(DREAM_SKILL_MD='' bash "$AC8" 2>&1); rc=$?
-{ [ "$rc" = 2 ] && printf '%s' "$out" | grep -qF "''"; } || fail "empty path: rc=$rc: $out"
+{ [ "$rc" = 2 ] && printf '%s' "$out" | grep >/dev/null -F "''"; } || fail "empty path: rc=$rc: $out"
 out=$(DREAM_SKILL_MD="$T/nope/SKILL.md" bash "$AC8" 2>&1); rc=$?
-{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "skill file missing or unreadable: $T/nope/SKILL.md"; } || fail "missing path: rc=$rc: $out"
+{ [ "$rc" = 1 ] && printf '%s' "$out" | grep >/dev/null -F "skill file missing or unreadable: $T/nope/SKILL.md"; } || fail "missing path: rc=$rc: $out"
 note=""
 if [ "$(id -u)" != 0 ]; then
   cp "$SK" "$T/unreadable.md"; chmod 000 "$T/unreadable.md"
   out=$(DREAM_SKILL_MD="$T/unreadable.md" bash "$AC8" 2>&1); rc=$?
-  { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "skill file missing or unreadable: $T/unreadable.md"; } || fail "unreadable path: rc=$rc: $out"
+  { [ "$rc" = 1 ] && printf '%s' "$out" | grep >/dev/null -F "skill file missing or unreadable: $T/unreadable.md"; } || fail "unreadable path: rc=$rc: $out"
 else note=" (unreadable case skipped as root)"; fi
 pass "3 removal copies + 4 clause drops refused naming paragraph and clause; empty path exit 2, missing/unreadable path refused as landed$note"

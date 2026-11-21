@@ -31,7 +31,7 @@ sic() { local got; got=$(printf '%s\n' "$ERR" | grep -c "^FAIL mission-scope-inc
 only() { sic 1 "$1"
   [ "$(printf '%s\n' "$ERR" | grep -c '^FAIL mission-scope-incomplete: ')" = 1 ] || fail "${CASE}: another mission-scope-incomplete: $ERR"
   jtrue 'set(d["findings"]) <= {"mission-scope-incomplete", "mission-snapshot-stale"} and "mission-scope-incomplete" in d["findings"]' "${CASE}: findings"
-  printf '%s\n' "$ERR" | grep '^FAIL mission-snapshot-stale: ' | grep -vq "^FAIL mission-snapshot-stale: $FC_RB: " && fail "${CASE}: a snapshot-stale not about $FC_RB: $ERR"
+  printf '%s\n' "$ERR" | grep '^FAIL mission-snapshot-stale: ' | grep >/dev/null -v "^FAIL mission-snapshot-stale: $FC_RB: " && fail "${CASE}: a snapshot-stale not about $FC_RB: $ERR"
   return 0; }
 CASE=compliant-base; use base; run_fc; [ "$RC" = 0 ] || fail "$CASE: rc=$RC $ERR"; sic 0
 CASE=compliant-three; use three; run_fc; [ "$RC" = 0 ] || fail "$CASE: rc=$RC $ERR"; sic 0

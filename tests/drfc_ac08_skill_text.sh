@@ -43,17 +43,17 @@ par=$(printf '%s' "$rv" | grep -o 'After the first systemic finding or material 
 for s in provenance missing-producer-runner authority-bypass unreachable-transition semantic-incompatibility false-green-acceptance \
   'provenance only' 'failure-class sweep' 'incident' 'same author' '`before`' '`after`' 'bounded re-review' 'advisory' '`accepts`' \
   'declined' 'no blanket hold' '`changed` names only the packet files it moved (it may be empty), and `sweep` is optional'; do
-  printf '%s' "$par" | grep -qF -- "$s" || fail "the repair paragraph lacks '$s'"
+  printf '%s' "$par" | grep >/dev/null -F -- "$s" || fail "the repair paragraph lacks '$s'"
 done
 p4=$(section '## Phase 4 — Persist' | tr '\n' ' ' | tr -s ' ')
-printf '%s' "$p4" | grep -qF -- 'repairs=' || fail "Phase 4 does not show repairs="
+printf '%s' "$p4" | grep >/dev/null -F -- 'repairs=' || fail "Phase 4 does not show repairs="
 hdr=$(sed -n '1,90p' "$LINT")
 for id in repair-grammar mission-repairs-missing repair-duplicate repair-missing repair-class-mismatch sweep-missing repair-author-mismatch repair-hash-mismatch repair-scope-mismatch affected-consumer-unreviewed repair-declined-unaccepted; do
-  printf '%s' "$p4" | grep -qF -- "$id" || fail "Phase 4 lint step does not name $id"
+  printf '%s' "$p4" | grep >/dev/null -F -- "$id" || fail "Phase 4 lint step does not name $id"
   grep -q -- "$id" <<<"$hdr" || fail "lint header finding-id list lacks $id"
 done
 e=$(awk '/^- \*\*/{if(f)exit; f=0} /^- \*\*.*[Ff]ailure-class sweep/{f=1} f' "$REPO/skills/dream/history.md" | tr '\n' ' ')
 [ -n "$e" ] || fail "history.md has no failure-class sweep entry"
-for s in R3B5-05 'three rounds'; do printf '%s' "$e" | grep -qF -- "$s" || fail "the failure-class sweep history entry lacks '$s'"; done
+for s in R3B5-05 'three rounds'; do printf '%s' "$e" | grep >/dev/null -F -- "$s" || fail "the failure-class sweep history entry lacks '$s'"; done
 bash "$REPO/tests/dream_analysis_skills_ref.sh" >"$T_OUT" 2>&1 || fail "dream_analysis_skills_ref.sh: $(tail -3 "$T_OUT")"
 pass "R1 sentence in both paragraphs + freeze list, Phase 3 repair paragraph, Phase 4 repairs= + ids, header ids, history, skills ref"

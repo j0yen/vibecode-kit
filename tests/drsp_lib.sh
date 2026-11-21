@@ -300,16 +300,16 @@ kb() {
   pair "$c"
   [ "$SAME" = 1 ] || fail "$c: head differs from base ($(diff <(cat "$T/r/$c.base.txt.out" "$T/r/$c.base.txt.err") <(printf '%s\n' "$OUT") | head -5 | tr '\n' ' '); rc base=$(cat "$T/r/$c.base.txt.rc") head=$RC)"
   [ "$RC" = 1 ] || fail "$c: rc=$RC want 1: $OUT"
-  printf '%s\n' "$OUT" | grep -qF "FAIL review-snapshot-stale: notes/reviews/k.txt: reviewer-session $S_K: slug a: " \
+  printf '%s\n' "$OUT" | grep >/dev/null -F "FAIL review-snapshot-stale: notes/reviews/k.txt: reviewer-session $S_K: slug a: " \
     || fail "$c: no review-snapshot-stale naming K ($S_K) and slug a: $OUT"
-  printf '%s' "$JS" | jget 'd["findings"]' | grep -qF '"review-snapshot-stale"' || fail "$c: JSON findings lack review-snapshot-stale: $JS"
+  printf '%s' "$JS" | jget 'd["findings"]' | grep >/dev/null -F '"review-snapshot-stale"' || fail "$c: JSON findings lack review-snapshot-stale: $JS"
   for id in "$@"; do
-    printf '%s\n' "$OUT" | grep -q "^FAIL $id: " || fail "$c: no $id finding: $OUT"
+    printf '%s\n' "$OUT" | grep >/dev/null "^FAIL $id: " || fail "$c: no $id finding: $OUT"
   done
   if [ "${GRAMMAR:-0}" = 1 ]; then
-    printf '%s\n' "$OUT" | grep -q "^FAIL mission-grammar: " || fail "$c: no mission-grammar for its broken Mission: line: $OUT"
+    printf '%s\n' "$OUT" | grep >/dev/null "^FAIL mission-grammar: " || fail "$c: no mission-grammar for its broken Mission: line: $OUT"
   else
-    printf '%s\n' "$OUT" | grep -q "^FAIL mission-grammar: " && fail "$c: mission-grammar on a valid Mission: line: $OUT"
+    printf '%s\n' "$OUT" | grep >/dev/null "^FAIL mission-grammar: " && fail "$c: mission-grammar on a valid Mission: line: $OUT"
   fi
   case "$JS" in *'"superseded"'*) fail "$c: a superseded key on a refused note: $JS";; esac
   echo "ok $c: base==head bytes, rc=1, review-snapshot-stale K/a${*:+, $*}"
@@ -325,7 +325,7 @@ ch() {
   local got; got=$(printf '%s' "$JS" | python3 -c 'import sys,json; print(" ".join(sorted(set(json.load(sys.stdin)["findings"]))))')
   [ "$got" = "$ids" ] || fail "$c: findings [$got] want [$ids]: $OUT"
   for s in "$@"; do
-    printf '%s\n' "$OUT" | grep '^FAIL ' | grep -qF -- "$s" || fail "$c: no FAIL line carries '$s': $OUT"
+    printf '%s\n' "$OUT" | grep '^FAIL ' | grep >/dev/null -F -- "$s" || fail "$c: no FAIL line carries '$s': $OUT"
   done
   echo "ok $c: rc=$RC findings [$ids]"
 }

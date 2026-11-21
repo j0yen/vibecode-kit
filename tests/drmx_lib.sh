@@ -16,7 +16,7 @@ mx() { rm -rf "${W:?}"; python3 -I "$MFX" "$1" "$W" || fail "fixture $1 did not 
 base_lint() { git -C "$REPO" show "$BASE_SHA:skills/dream/scripts/dream-run-note-lint.sh" > "$T/base.sh" 2>/dev/null \
   || fail "git show $BASE_SHA:skills/dream/scripts/dream-run-note-lint.sh failed"; }
 # mxb <hour>: the basename of the fixture matrix written at <hour>:00 on the fixture day
-mxb() { printf '2027-03-01T%02d:00:00-08:00-adversarial.md' "$1"; }
+mxb() { printf '2026-11-18T%02d:00:00-08:00-adversarial.md' "$1"; }
 # clean: exit 0, no finding
 clean() { [ "$RC" = 0 ] || fail "${CASE}: rc=$RC (want 0): $ERR"; findings_eq '[]'; }
 # compat <base lint> <head lint> <report file> [<python predicate on (tag, mode, entry) naming a note

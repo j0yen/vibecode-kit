@@ -42,7 +42,7 @@ held() { # <slug...>: dependent_slugs is exactly these slugs, each held by the d
   jtrue "[(x['slug'], x['reason']) for x in d['mission']['dependent_slugs']] == [(s, 'declined F1 (row 1)') for s in [${want%, }]]" "declined hold [$*]"
 }
 has_fail mission-approval-blocked "slug c=eligible" "declined F1 (row 1)"
-if printf '%s\n' "$ERR" | grep -q '^FAIL mission-approval-blocked: slug d='; then fail "d (two hops from F1) held: $ERR"; fi
+if printf '%s\n' "$ERR" | grep >/dev/null '^FAIL mission-approval-blocked: slug d='; then fail "d (two hops from F1) held: $ERR"; fi
 held a b c
 # the other direction: F1 on c (prds) and d (consumers), its sweep widened to E1-E3; b, the
 # producer of E2 b -> c, is held by that hop alone, and a (two hops) is not
@@ -51,7 +51,7 @@ side "$R1D" "R[0]['prds'] = ['PRD-c.md']; R[0]['consumers'] = ['PRD-d.md']"; res
 redit "R[0]['sweep'] = ['E1', 'E2', 'E3']"
 run_fc; findings_eq '["repair-declined-unaccepted", "mission-approval-blocked"]'
 has_fail mission-approval-blocked "slug b=eligible" "declined F1 (row 1)"
-if printf '%s\n' "$ERR" | grep -q '^FAIL mission-approval-blocked: slug a='; then fail "a (two hops from F1) held: $ERR"; fi
+if printf '%s\n' "$ERR" | grep >/dev/null '^FAIL mission-approval-blocked: slug a='; then fail "a (two hops from F1) held: $ERR"; fi
 held b c d
 use reused-id; run_fc; has_id mission-finding-incomplete; unacc "re-used id"
 use declined; rm -f -- "${H:?}/$R2D/verdict.txt.findings.jsonl"; capture "$R2D/result.json" "L[:] = [('findings=none' if l.startswith('findings=') else l) for l in L]"

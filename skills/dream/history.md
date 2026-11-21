@@ -126,3 +126,139 @@ doubts a rule can see what it cost when it was missing. Append-only.
   names the note's `adversarial=` matrix, a renamed matrix in `changed` is checked on its own side
   of the row, and a header without `matrix` keeps the matrix of the entry that first listed the
   manifest, so the existing notes lint unchanged (PRD dream-matrix-per-manifest).
+- **An analysis is run, reused exactly, or skipped only on a recorded outage (2026-11-19, A1723).**
+  Of the 20 governed run-note entries on carbon (four PRD homes, read 2026-11-19), 18 said
+  `wwhtbt=skipped` with free text and 2 ran a page; nine are missions. The skips were for reasons
+  that had since gone away (a Fable-only route, a wiki path out of scope). The lint accepted any skip text, a `reused` it could not verify, and a failure recorded
+  only in prose, so a skip made for a reason that still holds looked the same as one that no
+  longer does. From the cutover date written in the lint, a covered entry (a mission, new material,
+  or a PRD moved since the last manifest a reviewer bound) records a page it ran, a reuse whose page
+  digest and input manifest verify, or a skip naming a denied route-outage row that no later launch
+  of the same skill contradicts. A typed `Failure:` line names the class, whose floor comes from
+  verdict files the author does not write, and the three trigger classes need a bound
+  5whysandrhyme page. Pages may live under the PRD home's `notes/analysis/`, which removes the
+  wiki-scope reason for skipping (PRD dream-analysis-trigger-record). An outage skip names one of
+  the resolver's own outage texts, whole; the `policy-missing:` texts and any denial the caller
+  induced are the caller's to cure, and proving an outage was not induced is the route-source
+  producer's (A1300). The 2027-dated fixture families were re-dated before the cutover by a
+  checked-in tool that regenerates every digest and scope id, so the cutover stays the merge date
+  and every fixture keeps its output (Hermes H1/H2, 2026-11-19).
+- **An analysis finding counts as consumed only by the effect it names (2026-11-19, A1723).** The
+  lint read a bound analysis page's first lines for its session and nothing past them: the one
+  mission page on file (A1724's WWHTBT) listed eight mechanisms, all `state SPEC`, and its
+  falsifier waited in a JSON note, while chain-review findings already had a consumer (the
+  repairs file) and analysis findings had none, so a run could cite a page and drop everything
+  in it, and a receipt (a session, a report) stood in for consumption. From the cutover date
+  written in the lint, a note that binds a page carries a `Consumption:` line naming a record
+  that binds each finding to one of five bindings: a `requirement` (an AC that runs a command;
+  the falsifier on AC 1 of a first PRD), a `repair` (a canonical ask whose successor's done-check
+  runs this lint with `--require-closed`), a `test` (a file at a commit), a `residual` accepted
+  by a review session outside the author lineage, or a `pending` row with its owner, due date,
+  ask and successor. An unconsumed finding holds only the slugs it names, and the same answer is
+  available as `--consumption <record> --task <T>` for a canonical done-check or the A1673
+  plugin (PRD dream-finding-consumption).
+- **Legacy matrices and path keys in mission records (2026-11-19, A1723, parent A1296).** The
+  A1724 mission record (GEN1-GEN10) linted with 28,250 `repair-hash-mismatch` findings and one
+  `mission-scope-incomplete` under the installed lint (vibecode-kit 43d5b39), the matrix and
+  basename-key defects of the F28 lint-owner handoff: its rows name packet files outside the
+  manifests' directories by relative path with `delta` records, which the lint compared by
+  basename, so five `graph.json` files at different paths collided; and its GEN1 manifest,
+  frozen before the edges header carried `matrix`, lists the one matrix its first entry named
+  while the entry first listing it named a later one. Two rules of PRD
+  dream-generation-aware-mission-records are built. R1: a legacy-header manifest first listed
+  before `LEGACY_MATRIX_SINCE` = 2026-11-18T06:04:49-08:00 keeps the one matrix it lists when
+  an entry names it in `adversarial=` or its copy passes the matrix grammar at its listed
+  digest. That instant is the commit instant of the per-manifest matrix lint (vibecode-kit
+  43d5b39), from which an edges header could carry `matrix`; it falls before every fixture
+  the trigger-record cutover re-dated onto 2026-11-18, so those families keep their side of it. R4: an entry a manifest lists by a path outside the directories of the
+  manifests compared is keyed by that path, a row names it by path with a `delta` record
+  checked against both manifests, a legacy row's ambiguous bare basename is listed in
+  `repairs.ambiguous`, and header members, the repairs file among them, stay basename-keyed in
+  every pass, so a row without `delta` may name one by path (the repairs ledger cannot carry
+  its own digest in a record). In the undeclared-change pass an entry in either compared
+  manifest's directory is keyed by its basename, and one manifest listing one key at two
+  digests, or two files of one basename, one in each directory of a compared pair, is
+  `mission-scope-mismatch` (the PRD author's Q1 and Q2 rulings on A1723 source request 4), and so
+  is one manifest listing for two files a basename that is a header member of the pair's other
+  manifest only (review r20 F1: such a name is keyed by basename in the pair, and its own
+  occurs-twice rule read only its own members). Re-linted with these rules, the A1724 home's 28,250 hash
+  findings and its GEN1 `mission-scope-incomplete` clear, and two amended rows' unswept edges
+  show as `sweep-missing`. R2 (sidecar schema), R3 (generation-local judgement and merged chain
+  reviews), R5 (lineage) and the rest of R8 are not built.
+- **Producer-contract repairs for an append-only mission record (2026-11-20, A1723).** The
+  A1723 mission record could not be corrected where its own history was wrong: rows 111-114
+  repaired their findings after a partial repair was frozen with no chain review (round 11b),
+  so their `before` was not the issuing review's manifest; review 12's sidecar row R12-F3 named
+  no PRD and an undeclared external, bound by its `findings=` line; and three `amended` rows of
+  one manifest pair named the same files. The repairs file and sidecars are append-only, so
+  three rules were added (the A1723 supervisor's decision 3, specified by the PRD author with
+  negative, positive and over-strict controls). A repaired row's `before` may be a later listed
+  manifest when every manifest between is unreviewed and the `after` of a repairs row. The
+  review's own session, resumed, may write `<verdict>.findings.corrected-<n>.jsonl` changing
+  only `prds` and `consumers`, read in the original's place with its failures kept in
+  `findings_historical` (`sidecar-correction-unbound` otherwise). A later `amended` row may
+  `consolidates` earlier ones of its pair, judged for duplicates in their place with theirs kept
+  in `repairs_historical` (`repair-consolidation-mismatch` otherwise). Each falls back to the
+  existing finding when its conditions fail, and no recorded row or sidecar is rewritten.
+  Review r21 then executed two gaps in the correction rule. A review session whose only launch
+  row was itself marked `resume`, or whose resume row was stamped before its review launch, had
+  its correction read, though nothing showed a resumption after the review. And a corrected row
+  repeating a key compared equal as parsed, while a first-wins reader saw the other value. The
+  resume row must now be later than the session's first review launch that is not a resume, and
+  a repeated key is refused.
+  Two more repairs followed (the PRD author's addenda 2 and 3). Review 13's sidecar rows 1-3
+  named a consumer, `external:<name>`, that the review's frozen header did not declare. The
+  author declared it at the next freeze (the 093500Z header) with an edges row (row 136). The
+  lint now accepts such a consumer when the manifest listed next declares it and the author's
+  repairs row from the review's manifest to that one names the edges file. The original failure
+  is kept in `findings_historical` with `declared_by`. Review 14's post-review entry (1:53:07 AM)
+  named the matrix of the pre-review entry (1:22:59 AM) for the same round, which the recency
+  rule read as an earlier run's matrix. A post-review entry may now carry the previous entry's
+  matrix forward when the previous entry is of the same task, the matrix path, `uncovered=` and
+  `scope=` are unchanged, and it keeps the previous entry's `Review:` lines (`Review: none`
+  counts as none) and adds at least one, each new line's session having as its latest launch row
+  for the task a review of the last listed manifest (review r23 L2, L3).
+  A sixth followed (addendum 4). The 4:16:48 AM entry named the round-18 freeze 124000Z in
+  `scope=` before writing it, as the skill orders, and the freeze was then stopped on Hermes'
+  4:18 AM checkpoint, so the manifest was never written. The log is append-only: keeping the name
+  fails the continuity check, and dropping it fails the list comparison. A later entry may now
+  carry `withdrawn=<manifest>`, which drops the manifest from both checks. It applies only when
+  nothing is at its path, no line of the decisions source scopes or names it, it is the last
+  element of the latest earlier list naming it, no row of any repairs file the Task names names
+  it, and the entry's own `scope=` is the previous list without it, followed only by appended
+  manifests. Any unmet condition keeps today's findings. Review r23e made two conditions exact: the
+  path is looked up as written and as normalized (`x/` names the file x), and a repairs file the
+  lint cannot read, or a line of it that is no JSON object but names the manifest, rules nothing
+  out. A decisions line counts as in the lint's header: in a JSON row, any string value that
+  resolves to the manifest; a line that is no JSON object, when it names it.
+  A seventh followed (addendum 5). Chain review 19's verdict file holds a markdown table, and
+  its row `| FIX and UNKNOWN hold; only explicitly free proceeds | Met. ...` has FIX as its
+  second token, so the lint read it as the verdict FIX for the slug `|`: three findings on every
+  later run, on a reviewer-owned file no entry can repair. A verdict line's first token must now
+  be a PRD slug (`[a-z0-9][a-z0-9-]*`); any other line is prose. dream-persist.sh reads a
+  separate file of verdict lines only, so it is unchanged.
+  An eighth followed (addenda 6 and 7). A `repaired` row's `changed` had to name one of the
+  finding's PRDs or a contract file of an external it names, so a finding that names no PRD and
+  whose correction is to the edge map (chain review 20's R20-F3) or to a packet record (R19-F4
+  and R20-F2, which moved the binding record) failed `repair-grammar` whatever it changed. For a
+  finding whose `prds` is empty, the mission's edges file and the members of the edges header's
+  `packet` now count too, except the repairs file, which moves with every row written. A finding
+  that names PRDs keeps the old set. Review r23g then closed the rest of the withdrawn check's
+  (e): a line of an earlier repairs file that is no JSON object, or a row whose `before` or
+  `after` is no path string, now rules nothing out, as an unreadable file already did.
+- **Reading a review scope recorded on another host (2026-11-20, A1723).** A1113's nine
+  chain reviews ran on Carbon, and their launch rows record `scope` under Carbon's PRD home
+  (`/home/jsy/.cache/dream-a1113/prds-clone`). The continuation on RedBaron holds the same
+  manifests at the same home-relative paths, under another root. The lint read an absolute
+  `scope` literally, so on RedBaron the case-11 union cleared the nine
+  `review-provenance-missing` findings but left nine `review-scope-mismatch`. The PRD author
+  ruled the explicit root map (source request 6, Q5, option A), and the lint gained
+  `--scope-root <recorded root>=<this run's PRD home>`, which the gate passes for a delivered
+  source whose `observed.json` names the root. A row's absolute `scope` under the recorded
+  root is read at the same relative path under the local home. Both paths are recorded, in
+  `scope_roots` and the review's `scope_read`. Every content check stands, and the sweep and
+  pin checks take a mapped read only when it canonicalizes to the row's `scope_id`. A scope
+  under no recorded root is read as before. Review r22 found the containment check reading
+  only the home's real path (a home given through a link gave a false refusal) and a root of
+  `//` accepted; both halves now check the home as given and its real path, and refuse a root
+  that is only slashes.

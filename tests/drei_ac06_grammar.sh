@@ -72,6 +72,6 @@ import sys
 p = sys.argv[1]; L = open(p).read().split("\n")
 i = max(k for k, l in enumerate(L) if l.startswith("State:")); L.insert(i + 1, "Mission: drei-mission edges=notes/missions/other.edges.jsonl"); open(p, "w").write("\n".join(L))
 PY
-run_ei; printf '%s' "$JS" | jget 'd["findings"]' | grep -qF '"mission-grammar"' || fail "other edges=: $ERR"
+run_ei; printf '%s' "$JS" | jget 'd["findings"]' | grep >/dev/null -F '"mission-grammar"' || fail "other edges=: $ERR"
 has_fail mission-grammar "edges=notes/missions/other.edges.jsonl"
 pass "mission-grammar x4 on one entry, continuity x3, inheritance, edges= change refused"

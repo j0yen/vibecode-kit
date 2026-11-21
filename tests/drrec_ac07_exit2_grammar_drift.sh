@@ -22,9 +22,9 @@ setline State "State: foo=approved"
 js=$(lint --json 2>/dev/null); rc=$?
 [ "$rc" = 1 ] || fail "approved: rc=$rc"
 printf '%s' "$js" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["exit"]==1 and d["findings"]==["state-grammar"], d' || fail "approved json: $js"
-out=$(lint 2>&1); printf '%s\n' "$out" | grep -q '^FAIL state-grammar' || fail "approved text: $out"
+out=$(lint 2>&1); printf '%s\n' "$out" | grep >/dev/null '^FAIL state-grammar' || fail "approved text: $out"
 cp "$T/log.orig" "$LOG"; setline Route ""
-out=$(lint 2>&1); printf '%s\n' "$out" | grep -q '^FAIL line-missing: Route' || fail "no Route: $out"
+out=$(lint 2>&1); printf '%s\n' "$out" | grep >/dev/null '^FAIL line-missing: Route' || fail "no Route: $out"
 js=$(lint --json 2>/dev/null); expect_exact "$?" 1 "$js" line-missing
 # drift test (R5): landed passes; each R5 string removed from its section fails by name
 D="$REPO/tests/dream_analysis_skills_ref.sh"; S="$REPO/skills/dream/SKILL.md"
@@ -46,7 +46,7 @@ sys.exit(0 if n else 3)
 PY
   o=$(DREAM_SKILL_MD="$T/copy.md" bash "$D" 2>&1); rc=$?
   [ "$rc" = 1 ] || fail "copy lacking [$str] in [$sec]: rc=$rc"
-  printf '%s\n' "$o" | grep '^FAIL' | grep -qiF -- "$str" || fail "copy lacking [$str]: FAIL does not name it: $o"
+  printf '%s\n' "$o" | grep '^FAIL' | grep >/dev/null -iF -- "$str" || fail "copy lacking [$str]: FAIL does not name it: $o"
 done <<'LIST'
 ## Phase 4|Task:
 ## Phase 4|Route:
@@ -94,5 +94,5 @@ out=rest[:e]+['']+para+rest[e:]
 open(sys.argv[2],'w').write('\n'.join(out))
 PY
 o=$(DREAM_SKILL_MD="$T/moved.md" bash "$D" 2>&1); rc=$?
-[ "$rc" = 1 ] && printf '%s\n' "$o" | grep -q '^FAIL.*before' || fail "moved paragraph not refused: rc=$rc $o"
+[ "$rc" = 1 ] && printf '%s\n' "$o" | grep >/dev/null '^FAIL.*before' || fail "moved paragraph not refused: rc=$rc $o"
 pass
