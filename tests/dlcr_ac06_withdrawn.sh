@@ -30,7 +30,8 @@
 # neither ends in a traceback (L2). Review r23i: (e) also refuses an earlier row repeating its before key (LOW-2); a
 # repairs line or a decisions line too deeply nested to decode reads as no JSON object (the decisions line refuses when
 # it names W, and names nothing otherwise), and a decisions value nested deeper than Python's recursion limit is read
-# whole; none ends in a traceback (LOW-3).
+# whole; none ends in a traceback (LOW-3). Review r23j LOW-1: such a decisions line that writes W only in \u escapes
+# refuses too.
 set -uo pipefail
 # shellcheck source=tests/dlcr_lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/dlcr_lib.sh"
@@ -129,6 +130,7 @@ cx r6-repairs-earlier-deep; run_mr; findings_eq '["mission-edges-missing", "repa
 has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl is no JSON object"
 cx r6-deep-row; run_mr; has_fail mission-grammar "withdrawn=$WM" "which is no JSON object, names it"; has_id mission-edges-missing
 cx r6-deep-row-other; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"     # r23i LOW-3: names nothing
+cx r6-deep-row-escaped; run_mr; has_fail mission-grammar "withdrawn=$WM" "which is no JSON object, names it"   # r23j LOW-1
 cx r6-deep-value; run_mr; has_fail mission-grammar "withdrawn=$WM" "names it in plan, so it may have been reviewed"
 # review r23i LOW-3, every other reader: each json.loads above the selftest (whose own reads parse this lint's output) sits
 # in a try whose handlers name RecursionError, so a line nested too deeply to decode reads as no JSON there too

@@ -28,7 +28,7 @@ jtrue 'sorted(h["detail"].split(": field ")[1].split(":")[0] for h in d["mission
   "the original's prds and consumers failures kept under findings_historical"
 for c in r2-author-session r2-other-reviewer r2-no-resume-row r2-wrong-digest r2-changes-id r2-changes-class \
          r2-changes-counterexample r2-changes-correction r2-changes-control r2-resume-only-row r2-resume-before r2-dupkey \
-         r2-dup-in-original; do
+         r2-dup-in-original r2-deep-dupkey; do
   cx "$c"; run_mr; findings_eq '["sidecar-correction-unbound", "mission-finding-incomplete", "repair-grammar"]'
   has_fail mission-finding-incomplete "$SC: row 1: field prds"
   jtrue '"findings_historical" not in d["mission"] and "sidecar_corrected" not in d["mission"]["chain_reviews"][0]' "$c: the correction is not read"
@@ -41,6 +41,7 @@ for c in r2-author-session r2-other-reviewer r2-no-resume-row r2-wrong-digest r2
     r2-resume-before) has_fail sidecar-correction-unbound "$CS: no launch row resuming session" "is later than its review launch at";;
     r2-dupkey) has_fail sidecar-correction-unbound "$CS: a key repeated in one row (row 2: class)";;
     r2-dup-in-original) has_fail sidecar-correction-unbound "$CS: the original sidecar repeats a key in one row (row 1: class)";;
+    r2-deep-dupkey) has_fail sidecar-correction-unbound "$CS: a key repeated in one row (row 2: ";;   # r23j MEDIUM-1: `class`, or nested too deeply
     r2-changes-id) has_fail sidecar-correction-unbound "$CS: row 2: id 'F9' is not original row 1's 'F1'";;
     *) has_fail sidecar-correction-unbound "$CS: row 2 (F1): changes ${c#r2-changes-}; only prds and consumers may change";;
   esac

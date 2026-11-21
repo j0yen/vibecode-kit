@@ -874,12 +874,21 @@ def path_string(v):
     return True
 
 
+def json_unescaped(ln):
+    """Review r23j LOW-1: a line's text with each JSON string escape (`\\uXXXX`, `\\/`, a backslash before `"`, `\\` or one of
+    `bfnrt`) read as the character it stands for: a line that does not decode is searched this way too, since a path may be spelled
+    in escapes."""
+    esc = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+    return re.sub(r'\\(?:u([0-9a-fA-F]{4})|(["\\/bfnrt]))',
+                  lambda m: chr(int(m.group(1), 16)) if m.group(1) else esc.get(m.group(2), m.group(2)), ln)
+
+
 def withdrawn_scoped(w, resolve, dec):
     """Repair 6 (b): why a line of the decisions source may have scoped manifest w, or None. Every line is read,
     whatever its task, role or session. In a JSON row, every string value (its scope, a list's items, any other field)
     is compared as a path: as written, and for an absolute path under a --scope-root also as mapped; one that resolves
     to w counts (review r23d L2). A line that is no JSON object counts when it names w as written, resolved or relative
-    to the PRD home. With no decisions source read, nothing rules a row out."""
+    to the PRD home, also with its JSON string escapes read (review r23j LOW-1). With no decisions source read, nothing rules a row out."""
     if dec is None:
         return "no decisions source was read, so a launch row scoping it cannot be ruled out"
     full = resolve(w)
@@ -923,7 +932,7 @@ def withdrawn_scoped(w, resolve, dec):
                     how = "scopes it" if k == "scope" else f"names it in {k}"
                     return (f"decisions line {n} (session {r.get('session')}, role {r.get('role')}) {how}, "
                             "so it may have been reviewed")
-        elif any(x in ln for x in names):
+        elif any(x in ln or x in json_unescaped(ln) for x in names):   # review r23j LOW-1: W spelled in JSON escapes too
             return f"decisions line {n}, which is no JSON object, names it, so a launch row scoping it cannot be ruled out"
     return None
 
@@ -1473,7 +1482,8 @@ CORRECTED_RE = re.compile(r"\.findings\.corrected-([1-9][0-9]*)\.jsonl$")
 
 def dup_keys(data):
     """[(line number, key)] for each key repeated inside one JSON object of a JSONL file, at any depth (review r21 L2: a
-    parsed row keeps the last of two equal keys, so value equality would pass a byte change a first-wins reader sees)."""
+    parsed row keeps the last of two equal keys, so value equality would pass a byte change a first-wins reader sees); a line
+    nested too deeply for this decode counts as one (review r23j MEDIUM-1)."""
     out = []
     for n, ln in enumerate(data.decode("utf-8", "replace").split("\n"), 1):
         if not ln.strip():
@@ -1488,8 +1498,10 @@ def dup_keys(data):
             return dict(pairs)
         try:
             json.loads(ln, object_pairs_hook=hook)
-        except (ValueError, RecursionError):
-            pass
+        except ValueError:
+            pass                         # a line that is no JSON: sidecar_rows refuses it
+        except RecursionError:           # review r23j MEDIUM-1: this hooked decode may stop a level or so before sidecar_rows'
+            out.append((n, "(nested too deeply to check for repeated keys)"))   # plain one: never read as no repeat
     return out
 
 

@@ -165,6 +165,17 @@ def r2_resume_before():
     return M
 
 
+def r2_deep_dupkey():
+    """review r23j MEDIUM-1: the corrected row puts "class" first as 200000 nested lists around an object, before its own
+    "class": too deep for either decode, so dup_keys must report it, whatever the stack lets sidecar_rows decode."""
+    M = corrected(r2_base())
+    lines = M.files[CORR_REL].decode().split("\n")
+    assert lines[1].startswith("{")
+    lines[1] = '{"class": ' + "[" * 200000 + "{}" + "]" * 200000 + ", " + lines[1][1:]
+    M.files[CORR_REL] = "\n".join(lines).encode()
+    return M
+
+
 def r2_dupkey():
     """review r21 L2: the corrected row repeats "class"; a parsed row keeps the last (the original's) value."""
     M = corrected(r2_base())
@@ -405,7 +416,7 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
     launch row's reasons hold a lone surrogate. Review r23i: "repeated-before" (row 3 names W as before and m3 as after,
     then m2 as before again: read last-wins it names nothing), "deep" (line 3 is W inside 200000 nested lists, too deep
     to decode); deep_row: a decisions line holding W inside 200000 nested lists ("other": the same nesting naming
-    nothing); deep_value: a launch row naming W in plan inside 5000 nested lists (decoded, and deeper than Python's
+    nothing; "escaped", review r23j LOW-1: W written only in \\u escapes); deep_value: a launch row naming W in plan inside 5000 nested lists (decoded, and deeper than Python's
     recursion limit)."""
     M = rounds(3)
     post = M.entries[-1]
@@ -445,9 +456,10 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
         M.row(at(10, 20), OTHER, reasons="a\u0000b")
     if surrogate_row:                    # review r23h L2: a decisions value that encodes as no file name
         M.row(at(10, 20), OTHER, reasons="\ud800")
-    if deep_row:                         # review r23i LOW-3: a line too deeply nested to decode, naming W or nothing
-        M.extra_dec = (getattr(M, "extra_dec", None) or []) + [
-            "[" * 200000 + (json.dumps(W_REL) if deep_row is True else "") + "]" * 200000]
+    if deep_row:                         # review r23i LOW-3: a line too deeply nested to decode, naming W or nothing; r23j
+        named = {True: json.dumps(W_REL), "other": "",                                     # LOW-1: W in JSON escapes
+                 "escaped": '"' + "".join("\\u%04x" % ord(ch) for ch in W_REL) + '"'}[deep_row]
+        M.extra_dec = (getattr(M, "extra_dec", None) or []) + ["[" * 200000 + named + "]" * 200000]
     if deep_value:                       # review r23i LOW-3: written after resign, like scoped_list: plan holds W in
         r = M.row(at(10, 20), OTHER, reasons="a deep plan")                   # 5000 nested lists
         M.rows.remove(r)
@@ -538,6 +550,7 @@ CASES = {
     "r2-resume-only-row": r2_resume_only_row,
     "r2-resume-before": r2_resume_before,
     "r2-dupkey": r2_dupkey,
+    "r2-deep-dupkey": r2_deep_dupkey,
     "r2-dup-in-original": r2_dup_in_original,
     "r3-original": lambda: r3_base(consolidate=False),
     "r3-positive": lambda: r3_base(),
@@ -615,6 +628,7 @@ CASES = {
     "r6-repairs-earlier-deep": lambda: r6_base(old_repairs="deep"),
     "r6-deep-row": lambda: r6_base(deep_row=True),
     "r6-deep-row-other": lambda: r6_base(deep_row="other"),
+    "r6-deep-row-escaped": lambda: r6_base(deep_row="escaped"),
     "r6-deep-value": lambda: r6_base(deep_value=True),
     "r6-surrogate-row": lambda: r6_base(surrogate_row=True),
     "r6-exists-slash": lambda: r6_base(exists=True, token_value=f"{W_REL}/"),

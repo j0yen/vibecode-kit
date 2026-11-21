@@ -5,7 +5,8 @@
 # no read permission: review-result-mismatch naming it as missing or not JSON, the line
 # labelled self. Run over the verified note (role review), where both labels would
 # otherwise be checked/verified. Fails, never skips, under euid 0. Review r23i LOW-3: a
-# result= JSON nested too deeply to decode is review-result-mismatch, missing or not JSON;
+# result= JSON nested too deeply to decode is review-result-mismatch, missing or not JSON (a stack
+# large enough to decode it: not a JSON object, review r23j LOW-2);
 # one that decodes but whose result str() cannot print (its depth taken between the two
 # limits this host's stack sets) ends in the lint's ERROR line and exit 2; never a traceback.
 set -uo pipefail
@@ -37,7 +38,7 @@ python3 -I -c 'import sys; sys.stdout.write("[" * 200000 + "]" * 200000 + "\n")'
 js=$(lint --json 2>"$T/err"); rc=$?; no_traceback "$(cat "$T/err")"
 expect_exact "$rc" 1 "$js" review-result-mismatch
 out=$(lint 2>&1); l=$(findline review-result-mismatch "$out") || fail "deep result: $out"
-printf '%s' "$l" | grep >/dev/null -F 'missing or not JSON' || fail "deep result: reason not named: $l"
+printf '%s' "$l" | grep >/dev/null -E 'missing or not JSON|is not a JSON object' || fail "deep result: reason not named: $l"
 win=$(python3 -I - <<'PY'
 import json
 
