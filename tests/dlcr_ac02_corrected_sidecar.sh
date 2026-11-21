@@ -41,10 +41,24 @@ for c in r2-author-session r2-other-reviewer r2-no-resume-row r2-wrong-digest r2
     r2-resume-before) has_fail sidecar-correction-unbound "$CS: no launch row resuming session" "is later than its review launch at";;
     r2-dupkey) has_fail sidecar-correction-unbound "$CS: a key repeated in one row (row 2: class)";;
     r2-dup-in-original) has_fail sidecar-correction-unbound "$CS: the original sidecar repeats a key in one row (row 1: class)";;
-    r2-deep-dupkey) has_fail sidecar-correction-unbound "$CS: a key repeated in one row (row 2: ";;   # r23j MEDIUM-1: `class`, or nested too deeply
+    r2-deep-dupkey)                    # r23j MEDIUM-1; r23k LOW-2: built deeper than json decodes on this stack
+      if [ "$(cut -d' ' -f2 "$W/deep-levels.txt")" = found ]; then
+        has_fail sidecar-correction-unbound "$CS: a key repeated in one row (row 2: (nested too deeply to check for repeated keys))"
+      else
+        echo "note: json decodes 1000000 nested lists on this stack, so no deeper row is built here and r2-deep-dupkey's repeated class is read whole"
+        has_fail sidecar-correction-unbound "$CS: a key repeated in one row (row 2: class)"
+      fi;;
     r2-changes-id) has_fail sidecar-correction-unbound "$CS: row 2: id 'F9' is not original row 1's 'F1'";;
     *) has_fail sidecar-correction-unbound "$CS: row 2 (F1): changes ${c#r2-changes-}; only prds and consumers may change";;
   esac
 done
+cx r2-deep-dup-in-original; run_mr; has_id sidecar-correction-unbound   # r23k LOW-3: the original's own deep row (odups)
+jtrue '"sidecar_corrected" not in d["mission"]["chain_reviews"][0]' "r2-deep-dup-in-original: the correction is not read"
+if [ "$(cut -d' ' -f2 "$W/deep-levels.txt")" = found ]; then
+  has_fail sidecar-correction-unbound "$CS: the original sidecar repeats a key in one row (row 1: (nested too deeply to check for repeated keys))"
+else
+  echo "note: json decodes 1000000 nested lists on this stack, so no deeper row is built here and r2-deep-dup-in-original's repeated class is read whole"
+  has_fail sidecar-correction-unbound "$CS: the original sidecar repeats a key in one row (row 1: class)"
+fi
 today r2-positive; findings_eq '["mission-finding-incomplete", "repair-grammar"]'
-pass "the original R12-F3 shape refused; the reviewer's own resumed correction read, the original failures historical; thirteen refused corrections (r21 L1 and L2, r23 L1 included); the installed rule refuses the positive"
+pass "the original R12-F3 shape refused; the reviewer's own resumed correction read, the original failures historical; fifteen refused corrections (r21 L1 and L2, r23 L1, r23j MEDIUM-1 and r23k LOW-3 included); the installed rule refuses the positive"

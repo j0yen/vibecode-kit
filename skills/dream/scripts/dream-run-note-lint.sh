@@ -877,10 +877,12 @@ def path_string(v):
 def json_unescaped(ln):
     """Review r23j LOW-1: a line's text with each JSON string escape (`\\uXXXX`, `\\/`, a backslash before `"`, `\\` or one of
     `bfnrt`) read as the character it stands for: a line that does not decode is searched this way too, since a path may be spelled
-    in escapes."""
+    in escapes. A surrogate pair of escapes is read as the one character above U+FFFF it spells, the only
+    way JSON escapes spell one (json.dumps does by default); a lone surrogate stays as it is (review r23k LOW-1)."""
     esc = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
-    return re.sub(r'\\(?:u([0-9a-fA-F]{4})|(["\\/bfnrt]))',
-                  lambda m: chr(int(m.group(1), 16)) if m.group(1) else esc.get(m.group(2), m.group(2)), ln)
+    s = re.sub(r'\\(?:u([0-9a-fA-F]{4})|(["\\/bfnrt]))',
+               lambda m: chr(int(m.group(1), 16)) if m.group(1) else esc.get(m.group(2), m.group(2)), ln)
+    return s.encode("utf-16", "surrogatepass").decode("utf-16", "surrogatepass")   # review r23k LOW-1: pairs joined
 
 
 def withdrawn_scoped(w, resolve, dec):

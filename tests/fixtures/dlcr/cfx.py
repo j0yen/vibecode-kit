@@ -130,10 +130,11 @@ def r2_base():
     return rewrite_repairs(M)
 
 
-def corrected(M, session=None, corrects=None, change=None, resume_row=True):
-    """The corrected sidecar (prds and consumers given), and the resumed launch row of r1's session."""
+def corrected(M, session=None, corrects=None, change=None, resume_row=True, rows=None):
+    """The corrected sidecar (prds and consumers given), and the resumed launch row of r1's session. rows: the original's
+    rows, for an original that does not decode here (review r23k LOW-3)."""
     orig = M.files[SC_REL]
-    rows = [json.loads(x) for x in orig.decode().split("\n") if x.strip()]
+    rows = rows if rows is not None else [json.loads(x) for x in orig.decode().split("\n") if x.strip()]
     body = []
     for r in rows:
         c = dict(r, prds=["PRD-foo.md"], consumers=["PRD-bar.md"])
@@ -165,14 +166,37 @@ def r2_resume_before():
     return M
 
 
+def deep_levels(cap=1000000):
+    """review r23k LOW-2: a nesting depth too deep for json.loads on this stack, so that a deep case reaches the lint's report
+    of a line too deep to check on any stack where such a line can be built: twice the deepest list json decodes here (found
+    by halving, each try one decode), and at least 200000 -> (depth, True); (200000, False) when cap levels decode (a large
+    or unlimited stack), where the case decodes whole and its repeated key is read instead."""
+    def decodes(n):
+        try:
+            json.loads("[" * n + "]" * n)
+            return True
+        except RecursionError:
+            return False
+    if decodes(cap):
+        return 200000, False
+    lo, hi = 1000, cap
+    while hi - lo > 1:
+        m = (lo + hi) // 2
+        lo, hi = (m, hi) if decodes(m) else (lo, m)
+    return max(200000, 2 * hi), True
+
+
 def r2_deep_dupkey():
-    """review r23j MEDIUM-1: the corrected row puts "class" first as 200000 nested lists around an object, before its own
-    "class": too deep for either decode, so dup_keys must report it, whatever the stack lets sidecar_rows decode."""
+    """review r23j MEDIUM-1: the corrected row puts "class" first as nested lists around an object, before its own
+    "class": too deep for either decode (review r23k LOW-2: deeper than json decodes on this stack, see deep_levels), so
+    dup_keys must report it, whatever the stack lets sidecar_rows decode."""
     M = corrected(r2_base())
+    d, found = deep_levels()
     lines = M.files[CORR_REL].decode().split("\n")
     assert lines[1].startswith("{")
-    lines[1] = '{"class": ' + "[" * 200000 + "{}" + "]" * 200000 + ", " + lines[1][1:]
+    lines[1] = '{"class": ' + "[" * d + "{}" + "]" * d + ", " + lines[1][1:]
     M.files[CORR_REL] = "\n".join(lines).encode()
+    M.deep_levels = (d, found)
     return M
 
 
@@ -341,6 +365,26 @@ def r2_dup_in_original():
     return corrected(rewrite_repairs(M))
 
 
+def r2_deep_dup_in_original():
+    """review r23k LOW-3: r2-dup-in-original with its repeated "class" first as nested lists around an object, deeper than
+    json decodes on this stack (deep_levels), so that the original's own report of a line too deep to check (odups) is read.
+    The corrected rows are the original's before the change (corrected(rows=)), since the changed row does not decode here."""
+    M = r2_base()
+    rows = [json.loads(x) for x in M.files[SC_REL].decode().split("\n") if x.strip()]
+    d, found = deep_levels()
+    orig = M.files[SC_REL].decode().rstrip("\n").split("\n")
+    orig[0] = '{"class": ' + "[" * d + "{}" + "]" * d + ", " + orig[0][1:]
+    sb = ("\n".join(orig) + "\n").encode()
+    rv1 = M.review("notes/reviews/r1", S["R1"], [("foo", "FIX"), ("bar", "APPROVE")], "FIX", findings=[{}], sidecar_bytes=sb)
+    lines = entry_lines(M)
+    for i, ln in enumerate(lines):
+        if ln.startswith("Review: notes/reviews/r1/"):
+            lines[i] = rv1
+    M = corrected(rewrite_repairs(M), rows=rows)
+    M.deep_levels = (d, found)
+    return M
+
+
 def r4_other_task_author():
     """r4 whose only edges row is by a session whose author launch row is of another task."""
     x = "cccccccc-0000-4000-8000-0000000000ee"
@@ -458,7 +502,8 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
         M.row(at(10, 20), OTHER, reasons="\ud800")
     if deep_row:                         # review r23i LOW-3: a line too deeply nested to decode, naming W or nothing; r23j
         named = {True: json.dumps(W_REL), "other": "",                                     # LOW-1: W in JSON escapes
-                 "escaped": '"' + "".join("\\u%04x" % ord(ch) for ch in W_REL) + '"'}[deep_row]
+                 "escaped": '"' + "".join(chr(92) + "/" if ch == "/" else chr(92) + ("u%04X" if i % 2 else "u%04x") % ord(ch)
+                                          for i, ch in enumerate(W_REL)) + '"'}[deep_row]   # r23k LOW-3: `/` as `\/`, both hex cases
         M.extra_dec = (getattr(M, "extra_dec", None) or []) + ["[" * 200000 + named + "]" * 200000]
     if deep_value:                       # review r23i LOW-3: written after resign, like scoped_list: plan holds W in
         r = M.row(at(10, 20), OTHER, reasons="a deep plan")                   # 5000 nested lists
@@ -536,6 +581,13 @@ def r6_base(token=True, where="last", exists=False, scoped=False, reorder=False,
     return M
 
 
+def with_w(w, build):
+    """review r23k LOW-1 and LOW-3: a case built with W spelled otherwise (cfx.py builds one case per run)."""
+    global W_REL
+    W_REL = w
+    return build()
+
+
 CASES = {
     "r1-positive": lambda: r1_base(),
     "r1-intermediate-reviewed": lambda: r1_base(intermediate_reviewed=True),
@@ -552,6 +604,7 @@ CASES = {
     "r2-dupkey": r2_dupkey,
     "r2-deep-dupkey": r2_deep_dupkey,
     "r2-dup-in-original": r2_dup_in_original,
+    "r2-deep-dup-in-original": r2_deep_dup_in_original,
     "r3-original": lambda: r3_base(consolidate=False),
     "r3-positive": lambda: r3_base(),
     "r3-other-pair": r3_other_pair,
@@ -629,6 +682,8 @@ CASES = {
     "r6-deep-row": lambda: r6_base(deep_row=True),
     "r6-deep-row-other": lambda: r6_base(deep_row="other"),
     "r6-deep-row-escaped": lambda: r6_base(deep_row="escaped"),
+    "r6-deep-row-astral": lambda: with_w("notes/snapshots/mw/m" + chr(0x1F600) + ".sha256", lambda: r6_base(deep_row=True)),
+    "r6-deep-row-short": lambda: with_w("notes/snapshots/mw/m" + chr(92) + chr(8) + "w.sha256", lambda: r6_base(deep_row=True)),
     "r6-deep-value": lambda: r6_base(deep_value=True),
     "r6-surrogate-row": lambda: r6_base(surrogate_row=True),
     "r6-exists-slash": lambda: r6_base(exists=True, token_value=f"{W_REL}/"),
@@ -724,6 +779,9 @@ def main(argv):
     if not getattr(M, "no_resign", False):
         resign(M)
     M.write(argv[1])
+    if getattr(M, "deep_levels", None):     # review r23k LOW-2: the depth a deep case used, and whether json stops before it
+        with open(os.path.join(argv[1], "deep-levels.txt"), "w", encoding="utf-8") as fh:
+            fh.write("%d %s\n" % (M.deep_levels[0], "found" if M.deep_levels[1] else "none"))
     if getattr(M, "extra_dec", None):        # Repair 6: decisions lines that are no JSON object
         with open(os.path.join(argv[1], "decisions.jsonl"), "a", encoding="utf-8") as fh:
             fh.write("".join(x + "\n" for x in M.extra_dec))

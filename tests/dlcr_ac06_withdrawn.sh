@@ -130,7 +130,10 @@ cx r6-repairs-earlier-deep; run_mr; findings_eq '["mission-edges-missing", "repa
 has_fail repair-scope-mismatch "withdrawn=$WM" "line 3 of notes/missions/old.repairs.jsonl is no JSON object"
 cx r6-deep-row; run_mr; has_fail mission-grammar "withdrawn=$WM" "which is no JSON object, names it"; has_id mission-edges-missing
 cx r6-deep-row-other; run_mr; clean; withdrawn_is "[[\"$T14\", [\"$WM\"], true]]"     # r23i LOW-3: names nothing
-cx r6-deep-row-escaped; run_mr; has_fail mission-grammar "withdrawn=$WM" "which is no JSON object, names it"   # r23j LOW-1
+cx r6-deep-row-escaped; run_mr; has_fail mission-grammar "withdrawn=$WM" "which is no JSON object, names it"   # r23j LOW-1; r23k LOW-3: `\/`, both hex cases
+WA="notes/snapshots/mw/m$(printf '\360\237\230\200').sha256"; WE="notes/snapshots/mw/m$(printf '\\\b')w.sha256"   # W with U+1F600; W with a backslash and a backspace
+cx r6-deep-row-astral; run_mr; has_fail mission-grammar "withdrawn=$WA" "which is no JSON object, names it"; has_id mission-edges-missing   # r23k LOW-1: a surrogate pair
+cx r6-deep-row-short; run_mr; has_fail mission-grammar "withdrawn=$WE" "which is no JSON object, names it"; has_id mission-edges-missing   # r23k LOW-3: `\\` and `\b`
 cx r6-deep-value; run_mr; has_fail mission-grammar "withdrawn=$WM" "names it in plan, so it may have been reviewed"
 # review r23i LOW-3, every other reader: each json.loads above the selftest (whose own reads parse this lint's output) sits
 # in a try whose handlers name RecursionError, so a line nested too deeply to decode reads as no JSON there too
