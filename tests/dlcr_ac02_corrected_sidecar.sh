@@ -45,7 +45,7 @@ for c in r2-author-session r2-other-reviewer r2-no-resume-row r2-wrong-digest r2
       if [ "$(cut -d' ' -f2 "$W/deep-levels.txt")" = found ]; then
         has_fail sidecar-correction-unbound "$CS: a key repeated in one row (row 2: (nested too deeply to check for repeated keys))"
       else
-        echo "note: json decodes 1000000 nested lists on this stack, so no deeper row is built here and r2-deep-dupkey's repeated class is read whole"
+        echo "note: json decodes 4000000 nested lists on this stack (one larger than about 512 MB), so no deeper row is built here and r2-deep-dupkey's repeated class is read whole"
         has_fail sidecar-correction-unbound "$CS: a key repeated in one row (row 2: class)"
       fi;;
     r2-changes-id) has_fail sidecar-correction-unbound "$CS: row 2: id 'F9' is not original row 1's 'F1'";;
@@ -57,7 +57,7 @@ jtrue '"sidecar_corrected" not in d["mission"]["chain_reviews"][0]' "r2-deep-dup
 if [ "$(cut -d' ' -f2 "$W/deep-levels.txt")" = found ]; then
   has_fail sidecar-correction-unbound "$CS: the original sidecar repeats a key in one row (row 1: (nested too deeply to check for repeated keys))"
 else
-  echo "note: json decodes 1000000 nested lists on this stack, so no deeper row is built here and r2-deep-dup-in-original's repeated class is read whole"
+  echo "note: json decodes 4000000 nested lists on this stack (one larger than about 512 MB), so no deeper row is built here and r2-deep-dup-in-original's repeated class is read whole"
   has_fail sidecar-correction-unbound "$CS: the original sidecar repeats a key in one row (row 1: class)"
 fi
 today r2-positive; findings_eq '["mission-finding-incomplete", "repair-grammar"]'

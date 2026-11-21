@@ -134,6 +134,12 @@ cx r6-deep-row-escaped; run_mr; has_fail mission-grammar "withdrawn=$WM" "which 
 WA="notes/snapshots/mw/m$(printf '\360\237\230\200').sha256"; WE="notes/snapshots/mw/m$(printf '\\\b')w.sha256"   # W with U+1F600; W with a backslash and a backspace
 cx r6-deep-row-astral; run_mr; has_fail mission-grammar "withdrawn=$WA" "which is no JSON object, names it"; has_id mission-edges-missing   # r23k LOW-1: a surrogate pair
 cx r6-deep-row-short; run_mr; has_fail mission-grammar "withdrawn=$WE" "which is no JSON object, names it"; has_id mission-edges-missing   # r23k LOW-3: `\\` and `\b`
+WQ='notes/snapshots/mw/m"w.sha256'; WB='notes/snapshots/mw/m\/w.sha256'   # review r23l: W with a quote; W with a backslash before its `/`
+applies() { local v; v=$(printf '%s' "$JS" | jget 'd["mission"]["withdrawn"][-1]["applies"]'); [ "$v" = true ] || fail "$1: the token does not apply"; }
+cx r6-deep-row-quote; run_mr; has_fail mission-grammar "withdrawn=$WQ" "which is no JSON object, names it"; has_id mission-edges-missing   # r23l LOW-2: `\"`
+cx r6-positive-quote; run_mr; clean; applies r6-positive-quote
+cx r6-malformed-bslash; run_mr; has_fail mission-grammar "withdrawn=$WB" "which is no JSON object, names it"   # r23l LOW-3: found raw only
+cx r6-positive-bslash; run_mr; clean; applies r6-positive-bslash
 cx r6-deep-value; run_mr; has_fail mission-grammar "withdrawn=$WM" "names it in plan, so it may have been reviewed"
 # review r23i LOW-3, every other reader: each json.loads above the selftest (whose own reads parse this lint's output) sits
 # in a try whose handlers name RecursionError, so a line nested too deeply to decode reads as no JSON there too
@@ -197,4 +203,4 @@ for c in r6-scoped r6-not-last r6-reordered r6-after-w r6-malformed-row r6-not-l
   v=$(printf '%s' "$JS" | jget 'd["mission"]["withdrawn"][-1]["applies"]'); [ "$v" = false ] || fail "$c: the token applies"
 done
 today r6-positive; has_fail mission-grammar "withdrawn=$WM" "unknown token"; has_id mission-edges-missing
-pass "(review r23e: W/, W/. and W/../mw.sha256 refused as existing; a missing, unreadable or unparsed earlier repairs file refused, its clean twin applies; a NUL token is grammar) a planned freeze never written is withdrawn by the dropping entry, by an entry appended after it, and stays withdrawn for later entries (a later void token keeps it); an existing (also a dangling link or behind an unreadable folder), scoped (any role, a list scope, any field, under a --scope-root, through a link or on an unparsed decisions line), not-last, reordered, repairs-named (by any entry's repairs file), repeated, still-listed or unlisted manifest, no decisions source and no own scope= refused; the original and the earlier dropping entry stay refused; the installed rule refuses the positive"
+pass "(review r23l: a W holding a quote, named in escapes on a line too deep to decode, and one holding a backslash, named on a line that is no JSON, refused, their positives applying; review r23e: W/, W/. and W/../mw.sha256 refused as existing; a missing, unreadable or unparsed earlier repairs file refused, its clean twin applies; a NUL token is grammar) a planned freeze never written is withdrawn by the dropping entry, by an entry appended after it, and stays withdrawn for later entries (a later void token keeps it); an existing (also a dangling link or behind an unreadable folder), scoped (any role, a list scope, any field, under a --scope-root, through a link or on an unparsed decisions line), not-last, reordered, repairs-named (by any entry's repairs file), repeated, still-listed or unlisted manifest, no decisions source and no own scope= refused; the original and the earlier dropping entry stay refused; the installed rule refuses the positive"

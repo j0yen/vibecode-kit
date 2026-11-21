@@ -166,11 +166,12 @@ def r2_resume_before():
     return M
 
 
-def deep_levels(cap=1000000):
+def deep_levels(cap=4000000):
     """review r23k LOW-2: a nesting depth too deep for json.loads on this stack, so that a deep case reaches the lint's report
     of a line too deep to check on any stack where such a line can be built: twice the deepest list json decodes here (found
-    by halving, each try one decode), and at least 200000 -> (depth, True); (200000, False) when cap levels decode (a large
-    or unlimited stack), where the case decodes whole and its repeated key is read instead."""
+    by halving, each try one decode), and at least 200000 -> (depth, True); (200000, False) when cap levels decode (review
+    r23l LOW-1: a stack larger than about 512 MB, or an unlimited one, where a deeper row would take gigabytes to build), where
+    the case decodes whole and its repeated key is read instead."""
     def decodes(n):
         try:
             json.loads("[" * n + "]" * n)
@@ -684,6 +685,10 @@ CASES = {
     "r6-deep-row-escaped": lambda: r6_base(deep_row="escaped"),
     "r6-deep-row-astral": lambda: with_w("notes/snapshots/mw/m" + chr(0x1F600) + ".sha256", lambda: r6_base(deep_row=True)),
     "r6-deep-row-short": lambda: with_w("notes/snapshots/mw/m" + chr(92) + chr(8) + "w.sha256", lambda: r6_base(deep_row=True)),
+    "r6-deep-row-quote": lambda: with_w('notes/snapshots/mw/m"w.sha256', lambda: r6_base(deep_row=True)),   # review r23l LOW-2
+    "r6-positive-quote": lambda: with_w('notes/snapshots/mw/m"w.sha256', lambda: r6_base()),
+    "r6-malformed-bslash": lambda: with_w("notes/snapshots/mw/m" + chr(92) + "/w.sha256", lambda: r6_base(malformed=True)),   # r23l LOW-3
+    "r6-positive-bslash": lambda: with_w("notes/snapshots/mw/m" + chr(92) + "/w.sha256", lambda: r6_base()),
     "r6-deep-value": lambda: r6_base(deep_value=True),
     "r6-surrogate-row": lambda: r6_base(surrogate_row=True),
     "r6-exists-slash": lambda: r6_base(exists=True, token_value=f"{W_REL}/"),
