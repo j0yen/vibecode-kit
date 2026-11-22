@@ -63,6 +63,7 @@
 #   sweep-missing repair-author-mismatch repair-hash-mismatch repair-scope-mismatch
 #   affected-consumer-unreviewed repair-declined-unaccepted repair-consolidation-mismatch
 #   sidecar-correction-unbound
+#   control-mutants-missing control-mutant-survived
 #
 # Mission (PRD-dream-mission-edge-map): opt-in. A Mission: line names the mission's edge map
 # (notes/missions/<name>.edges.jsonl: a header {mission, outcome, invariants, prds, external,
@@ -165,6 +166,27 @@
 # ts) before LEGACY_MATRIX_SINCE, that lists exactly one *-adversarial.md keeps that matrix when an
 # entry of the mission not later than the linted one names it in adversarial= or its copy at the
 # listed digest passes the matrix grammar; otherwise the matrix rule above applies unchanged.
+#
+# Control mutants (five-whys page e784471d mechanism 2, A1723; owner 03415): for an entry dated at or after
+# CONTROL_MUTANTS_SINCE whose Mission: line lists scope= manifests, every control output of the newest listed manifest that is
+# new there or whose digest moved from the previous listed manifest (the round's control reads) needs, in that same manifest, a
+# mutant report naming the control's script at the same sha256 as `(the control under test)`, whose last summary line
+# `mutants: N; KILLED: K; SURVIVED: S` has S = 0, with no SURVIVED row (a line that starts `SURVIVED `; mechanism 1 indents the
+# meta-negative's survivors, which it requires) and no refusing certificate (a `certificate:` line other than `certificate: every
+# mutant KILLED...`). A control output is a member whose basename holds `control` (and not `mutant`)
+# and whose leading `#` lines name its script and that script's sha256 (`# script <name> sha256 <hex>`, or the earlier
+# `# <name>.py controls ...` followed by `#   <hex>  <path to name>`); a mutant report is a member with a `(the control under
+# test)` header line. Members are read at the manifest's directory (the freeze's own copies) and only when their bytes match the
+# manifest's digest. control-mutants-missing: no such report; control-mutant-survived: a report there with S > 0, no summary
+# line, a SURVIVED row or a refusing certificate. JSON:
+# mission.control_mutants {manifest, checked, missing, survived}.
+#
+# R4 floor across the home (five-whys page e784471d mechanism 3, lint part; owner 03415; the R4 text is the PRD author's):
+# besides the sessions launched after the Task's previous entry, the floor reads each State: slug's consecutive FIX or REJECT
+# verdicts since its last APPROVE over every verdict file under notes/reviews/, among the review sessions launched by the entry's
+# own time (a later review neither raises nor lowers it, so a re-read of an old entry gives the answer it had; a session with no
+# launch time adds its FIX or REJECT, never an APPROVE): two or more make recurring-failure, a REJECT among them
+# failed-acceptance. The higher floor stands, so an entry written before the lint landed cannot drop it.
 #
 # Env seams: SKILL_ROUTING_DECISIONS (default decisions path, as fable-launch.sh),
 #   ANALYSIS_WIKI_DIR (gated wiki root for reused pages; default ~/Notes/wiki, whose
@@ -1243,6 +1265,126 @@ MISSION_IDS = ("mission-grammar", "mission-edges-missing", "edge-grammar", "edge
                "mission-scope-mismatch", "mission-scope-incomplete", "mission-review-missing",
                "mission-verdict-missing", "mission-finding-incomplete", "mission-snapshot-stale", "sidecar-correction-unbound",
                "mission-approval-blocked")
+# five-whys page e784471d mechanism 2 (A1723, consumption row E784-M2; owner 03415): a round's control reads carry a mutant report.
+# The page's own write time, which its consumption rows give as their due.
+CONTROL_MUTANTS_SINCE = "2026-11-21T18:13:00-08:00"
+CM_SCRIPT_RE = re.compile(r"^# script (\S+) sha256 ([0-9a-f]{64})\s*$")
+CM_LEGACY_RE = re.compile(r"^# (\S+\.py) controls\b")
+CM_LEGACY_SHA_RE = re.compile(r"^#\s+([0-9a-f]{64})\s+(\S+)")
+CM_UNDER_TEST_RE = re.compile(r"^#\s+([0-9a-f]{64})\s+(\S+)\s+\(the control under test\)\s*$")
+CM_SUMMARY_RE = re.compile(r"^mutants: (\d+); KILLED: (\d+); SURVIVED: (\d+)$")
+CM_SURVIVED_ROW_RE = re.compile(r"^SURVIVED \S")
+CM_CERT_OK = "certificate: every mutant KILLED"
+CM_HEAD_LINES = 40
+
+
+def cm_header(path):
+    """Mechanism 2: a file's leading `#` lines (at most CM_HEAD_LINES of its first 64 KiB), or None when it cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(65536)
+    except OSError:
+        return None
+    out = []
+    for ln in data.decode("utf-8", "replace").split("\n")[:CM_HEAD_LINES]:
+        if not ln.startswith("#"):
+            break
+        out.append(ln.rstrip("\r"))
+    return out
+
+
+def cm_kind(head, base):
+    """Mechanism 2: ("report", control sha256) for a mutant report (a `(the control under test)` header line); ("control", script,
+    sha256) for a control output (a basename holding `control` and not `mutant`, whose header names its script: `# script <name>
+    sha256 <hex>`, or `# <name>.py controls ...` with the next line `#   <hex>  <path to that name>`); else None."""
+    for ln in head:
+        m = CM_UNDER_TEST_RE.match(ln)
+        if m:
+            return ("report", m.group(1))
+    low = base.lower()
+    if "control" not in low or "mutant" in low:
+        return None
+    for i, ln in enumerate(head):
+        m = CM_SCRIPT_RE.match(ln)
+        if m:
+            return ("control", m.group(1), m.group(2))
+        m = CM_LEGACY_RE.match(ln)
+        if m and i + 1 < len(head):
+            n = CM_LEGACY_SHA_RE.match(head[i + 1])
+            if n and n.group(2).rsplit("/", 1)[-1] == m.group(1):
+                return ("control", m.group(1), n.group(1))
+    return None
+
+
+def cm_read(path):
+    """Mechanism 2: a mutant report's reading (summary, rows, cert): its last `mutants: N; KILLED: K; SURVIVED: S` line as (N, K, S)
+    or None, the number of its SURVIVED rows (lines that start `SURVIVED `; the meta-negative's survivors are indented) and its last
+    `certificate:` line or None. An unreadable report reads (None, 0, None)."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().split("\n")
+    except OSError:
+        return None, 0, None
+    summary, rows, cert = None, 0, None
+    for ln in lines:
+        m = CM_SUMMARY_RE.match(ln.strip())
+        if m:
+            summary = tuple(int(x) for x in m.groups())
+        if CM_SURVIVED_ROW_RE.match(ln):
+            rows += 1
+        if ln.startswith("certificate:"):
+            cert = ln.strip()
+    return summary, rows, cert
+
+
+def cm_key(ps, base):
+    """Mechanism 2: a member's key across two listed manifests: its path as written when that holds `/`, else its basename."""
+    return ps if "/" in ps else base
+
+
+def control_mutant_check(L, mans, ts):
+    """Five-whys page e784471d mechanism 2 (owner 03415, consumption row E784-M2), for an entry dated at or after
+    CONTROL_MUTANTS_SINCE (an unreadable date counts as after): every control output of the newest listed manifest that is new there or
+    whose digest moved from the previous listed manifest (the round's control reads) needs, in that same manifest, a mutant report
+    naming the control's script at the same sha256 as `(the control under test)` whose last summary line has SURVIVED 0, with no
+    SURVIVED row and no refusing certificate (every such report there is read; any one that fails refuses). Members are
+    read at the manifest's directory (the freeze's own copies) and only when their bytes match the manifest's digest (a moved copy is
+    mission-snapshot-stale's). -> {"manifest", "checked", "missing", "survived"}, or None when nothing here applies."""
+    t, since = parse_iso(ts or ""), parse_iso(CONTROL_MUTANTS_SINCE)
+    if not mans or (t is not None and t < since) or mans[-1].get("id") is None:
+        return None
+    new = mans[-1]
+    prev = {cm_key(ps, b): h for ps, _, b, h in mans[-2]["entries"]} if len(mans) > 1 and mans[-2].get("id") is not None else {}
+    controls, reports = [], {}
+    for ps, key, base, h in new["entries"]:
+        if file_sha(key) != h:
+            continue
+        k = cm_kind(cm_header(key) or [], base)
+        if k is None:
+            continue
+        if k[0] == "report":
+            reports.setdefault(k[1], []).append((ps, key))
+        elif prev.get(cm_key(ps, base)) != h:
+            controls.append((ps, k[1], k[2]))
+    out = {"manifest": new["path"], "checked": [], "missing": [], "survived": []}
+    for ps, script, sh in controls:
+        out["checked"].append({"control": ps, "script": script, "sha256": sh})
+        reps = reports.get(sh, [])
+        if not reps:
+            out["missing"].append(ps)
+            L.fail("control-mutants-missing", f"{ps} (script {script} sha256 {sh[:12]}) in manifest {new['path']}: no mutant report there "
+                   f"names that script sha256 as the control under test (five-whys page e784471d mechanism 2)")
+            continue
+        for rps, rkey in reps:
+            s, rows, cert = cm_read(rkey)
+            why = ("has no `mutants: N; KILLED: K; SURVIVED: S` summary line" if s is None else
+                   f"reports SURVIVED: {s[2]} of {s[0]} mutants" if s[2] > 0 else
+                   f"holds {rows} SURVIVED row" + ("s" if rows > 1 else "") if rows else
+                   f"ends `{cert[:90]}`" if cert is not None and not cert.startswith(CM_CERT_OK) else None)
+            if why is not None:
+                out["survived"].append({"control": ps, "report": rps, "survived": None if s is None else s[2], "rows": rows})
+                L.fail("control-mutant-survived", f"{ps}: mutant report {rps} {why} (five-whys page e784471d mechanism 2)")
+    return out
 
 
 def launch_ts(row):
@@ -3101,7 +3243,12 @@ def failure_floor(entries, ei, task, states, rows, home):
     result.json and the verdict file it captures count once. Sessions of the Task launched after the Task's previous entry set the floor: a REJECT of a slug the
     State: names makes it failed-acceptance; a FIX or REJECT of such a slug after an earlier session's (by launch time) FIX or REJECT of that slug in this home
     makes it recurring-failure. A file whose first lines name several review sessions counts for one session only: the latest-launched session of this
-    Task it names, else of any task.
+    Task it names, else of any task. Five-whys page e784471d mechanism 3 (lint part; owner 03415): every session above also counts, by launch time and of
+    any Task, up to the entry's own time: a slug the State: names whose consecutive FIX or REJECT verdicts since its last APPROVE number two or more
+    sets recurring-failure, one REJECT among them failed-acceptance; the higher floor stands, so an entry written before a floor-setting review was
+    bound cannot drop the floor. A session launched after the entry's own time is not in the streak (a re-read of an old entry gives the answer it
+    had); one with no launch time adds its FIX or REJECT but never resets the streak with an APPROVE.
+    A session whose verdicts on a slug include FIX or REJECT counts as one failure of that slug (never as an APPROVE).
     -> (None | "failed-acceptance" | "recurring-failure", [why])."""
     if not rows or task is None:
         return None, []
@@ -3147,6 +3294,32 @@ def failure_floor(entries, ei, task, states, rows, home):
                 floor = "recurring-failure"
                 why.append(f"{x['files'][0]}: {slug} {verdict} after an earlier FIX or REJECT of {slug} in this home")
         earlier |= {s for s, v in x["v"] if v in ("FIX", "REJECT")}
+    # five-whys page e784471d mechanism 3: each State: slug's streak since its last APPROVE, across the home, by the entry's own time
+    ets = parse_iso(entries[ei].get("ts") or "") if 0 <= ei < len(entries) else None
+    streak = {}
+    for x in sorted(by_sess.values(), key=when):
+        t = parse_iso(x["row"].get("ts") or "")
+        if ets is not None and t is not None and t > ets:
+            continue
+        vs = {}
+        for slug, verdict in x["v"]:
+            vs.setdefault(slug, set()).add(verdict)
+        for slug in sorted(vs):
+            if slug not in states:
+                continue
+            if vs[slug] & {"FIX", "REJECT"}:
+                streak.setdefault(slug, []).append((x["files"][0], "REJECT" if "REJECT" in vs[slug] else "FIX"))
+            elif "APPROVE" in vs[slug] and t is not None:
+                streak[slug] = []
+    rank = {None: 0, "failed-acceptance": 1, "recurring-failure": 2}
+    for slug in sorted(streak):
+        s = streak[slug]
+        cls = "recurring-failure" if len(s) >= 2 else "failed-acceptance" if any(v == "REJECT" for _, v in s) else None
+        if cls is None:
+            continue
+        if rank[cls] > rank[floor]:
+            floor = cls
+        why.append(f"{slug}: {len(s)} consecutive FIX or REJECT since its last APPROVE across notes/reviews ({', '.join(f for f, _ in s[-4:])})")
     return floor, why
 
 
@@ -3991,6 +4164,9 @@ def lint_log(a):
             if not mans:            # the reviews loop did not run (Review: none or a grammar refusal)
                 mans = mission_scopes(L, mrec, resolve)
             mfields, deps, vr = chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, reviews, home, resolve)
+            cm = control_mutant_check(L, mans, entry["ts"])     # five-whys page e784471d mechanism 2
+            if cm is not None and mfields is not None:
+                mfields["control_mutants"] = cm
             # PRD-dream-failure-class-sweep R1-R8: repairs between chain reviews, their holds
             repairs = repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei, route, vr, deps,
                                    home, resolve)

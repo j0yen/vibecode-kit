@@ -661,6 +661,168 @@ def _(out):
     five_fx(out, "transient", "inline", refs="run:retry-1")
 
 
+# ---------------------------------------------------------------- five-whys page e784471d mechanism 3 (lint part): the R4 floor across the home
+FS_S = ["bbbbbbbb-0000-4000-8000-0000000000%02d" % i for i in (12, 13, 14, 15)]
+FS_BEFORE = "2026-11-14T2%d:00:00-08:00"                # launched before the Task's previous entry (earlier(): 2026-11-15T00:30)
+
+
+def fs_floor(out, verdicts, failure, f="skipped: not a failure seed", slug="foo", when=None, task=None):
+    """The A1723 home at its 2026-11-21T13:55:32 entry, in small: an uncovered entry of Task A1 whose previous entry came after every review
+    session; `verdicts` are those sessions' verdicts of `slug` in launch order (one file each under notes/reviews/, bound by a dream review
+    launch row). Before mechanism 3 only sessions launched after the previous entry set the floor, so these set none. `when` and `task`
+    give a session's own launch time and Task (by index), for the sessions launched after the entry (the entry is dated T_TS)."""
+    fx = earlier(tfx(out, w=FREE, f=f, failure=failure))
+    for k, v in enumerate(verdicts):
+        lines = "".join(f"{slug} {x} opus\n" for x in (v if isinstance(v, tuple) else (v,)))
+        fx.files[f"notes/reviews/fs-{k}.txt"] = f"reviewer session {FS_S[k]}\n{lines}"
+        fx.rows.append(review_row((when or {}).get(k, FS_BEFORE % k), FS_S[k], (task or {}).get(k, "A1")))
+    fx.build()
+    policy(out)
+
+
+case("fs-four-fix-failure-none", 1, ["failure-class-mismatch"], "d['analysis'].get('covered') == 'none'",
+     detail="4 consecutive FIX or REJECT since its last APPROVE")(lambda out: fs_floor(out, ["FIX"] * 4, "Failure: none"))
+case("fs-four-fix-needs-the-line", 1, ["line-missing"], detail="set the floor recurring-failure")(lambda out: fs_floor(out, ["FIX"] * 4, None))
+case("fs-four-fix-recurring-met", 0, [], "d['analysis']['failure']['class'] == 'recurring-failure'")(
+    lambda out: fs_floor(out, ["FIX"] * 4, "Failure: recurring-failure ledger:A1", f=PAGE5))
+case("fs-two-fix-failure-none", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none"))
+case("fs-one-fix-is-no-floor", 0, [])(lambda out: fs_floor(out, ["FIX"], "Failure: none"))
+case("fs-approve-ends-the-streak", 0, [])(lambda out: fs_floor(out, ["FIX", "FIX", "APPROVE"], "Failure: none"))
+case("fs-fix-after-approve-is-one", 0, [])(lambda out: fs_floor(out, ["FIX", "APPROVE", "FIX"], "Failure: none"))
+case("fs-reject-failure-none", 1, ["failure-class-mismatch"], detail="1 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["REJECT"], "Failure: none"))
+case("fs-reject-failed-acceptance-met", 0, [], "d['analysis']['failure']['class'] == 'failed-acceptance'")(
+    lambda out: fs_floor(out, ["REJECT"], "Failure: failed-acceptance ledger:A1", f=PAGE5))
+case("fs-fix-beside-approve-counts-as-fix", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, [("APPROVE", "FIX"), "FIX"], "Failure: none"))
+FS_AFTER = CUT + "T03:00:00-08:00"                     # an hour after the entry (T_TS)
+case("fs-later-approve-keeps-the-floor", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX", "APPROVE"], "Failure: none", when={2: FS_AFTER}))
+case("fs-later-fix-is-not-in-the-streak", 0, [])(
+    lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", when={1: FS_AFTER}, task={1: "A9"}))
+case("fs-other-slug-is-no-floor", 0, [])(lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", slug="bar"))
+
+
+# ---------------------------------------------------------------- five-whys page e784471d mechanism 2: a round's control reads carry mutant reports
+CM_TS, CM_EARLY = "2026-11-21T20:00:00-08:00", "2026-11-21T12:00:00-08:00"      # after and before the page's write time
+assert H.get("CONTROL_MUTANTS_SINCE") in (None, "2026-11-21T18:13:00-08:00"), H.get("CONTROL_MUTANTS_SINCE")  # None: a lint before it
+S_R1, S_R2 = H["S_R1"], H["S_R2"]
+CM_SCRIPT = sha("#!/usr/bin/env python3\n# stand-in for chain review 23's control script\n")
+CM_TOOL = sha("#!/usr/bin/env python3\n# stand-in for mechanism 1's mutant runner\n")
+CM_R23 = (f"# r23-controls.py controls <prd home> (stand-in for the A1723 chain review 23 repair controls)\n"
+          f"#   {CM_SCRIPT}  notes/controls-r13/r23-controls.py\n"
+          "OK   unit: the read names the unit it holds\nOK   qualifier: the read names its qualifier\nOK   pairing: five negatives refuse\n")
+CM_R27 = (f"# script r27-controls.py sha256 {CM_SCRIPT}\n# r27-controls.py controls <prd home> (stand-in)\n"
+          f"#   {CM_SCRIPT}  notes/controls-r13/r27-controls.py (script)\nOK   unit\n")
+
+
+CM_CERT = "every mutant KILLED; the REVIEW-REQUEST may go out"
+CM_META = ("\n## meta-negative: the same mutants against notes/controls-r13/r22-controls.py (stand-in), which must leave survivors\n"
+           "r22-controls.py: 2 mutants, 2 SURVIVED -> as required\n    SURVIVED against r22-controls.py: M5 | unit\n"
+           "    SURVIVED against r22-controls.py: M8 | qualifier\n")
+
+
+def cm_report(sha_under_test=CM_SCRIPT, survived=0, summary=True, extra="", cert=CM_CERT):
+    """A mechanism-1-shaped report of the stand-in r23 control: M5 and M8 (the page's R24-F1 swaps) KILLED, or M8 SURVIVED;
+    `extra` lines go before the summary, then the summary and certificate lines as control-mutants-r27.py writes them."""
+    rows = "KILLED   M5 | unit: two identities swapped\n" + ("SURVIVED M8 | qualifier: two identities swapped\n" if survived else
+                                                              "KILLED   M8 | qualifier: two identities swapped\n")
+    return (f"# script control-mutants.py sha256 {CM_TOOL}\n# control-mutants.py run <prd home> --control notes/controls-r13/r23-controls.py (stand-in)\n"
+            f"#   {sha_under_test}  notes/controls-r13/r23-controls.py (the control under test)\n{rows}\n"
+            + extra + (f"mutants: 2; KILLED: {2 - survived}; SURVIVED: {survived}\n" if summary else "")
+            + (f"certificate: {cert}\n" if cert else ""))
+
+
+def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None):
+    """A mission (the selftest's chain shape) whose Mission: line lists one manifest, notes/snapshots/m1/m.sha256 (reviewed by S_R1), or
+    with `prev` two (m0 reviewed by S_R1, then m1 by S_R2); each freezes foo, bar, the matrix and the edges file, and `members` (for m1)
+    or `prev` (for m0), {basename: text}, copied into its own directory as a round freeze holds them. `unlisted`: files written into m1's
+    directory but not listed; `declare`: names a repairs row declares changed from m0 to m1 (the row, its file listed in m1 and the
+    repairs= token, as the selftest's chain() writes them). The entry is a covered one dated `ts`."""
+    fx = Fx(out)
+    rep_text = None
+    if declare:
+        rep_text = json.dumps({"finding": None, "class": None, "author_session": H["S_D"], "before": "notes/snapshots/m0/m.sha256",
+                               "after": "notes/snapshots/m1/m.sha256", "changed": list(declare), "sweep": ["E1"],
+                               "disposition": "amended", "reason": "the control re-run on the repaired bytes"}) + "\n"
+        fx.files["notes/missions/selftest.repairs.jsonl"] = rep_text
+        members = dict(members, **{"selftest.repairs.jsonl": rep_text})
+    fx.ts, fx.failure = ts, "Failure: none"
+    fx.entry["Analysis"] = AN.format(w="ran visions/wwhtbt.md", f="skipped: not a failure seed")
+    edges = H["mission_edges"](["foo", "bar"], known_only=True)
+    fx.files.update({M_REL: H["mx_file"](["foo", "bar"]), "notes/missions/selftest.edges.jsonl": edges})
+    mxb = os.path.basename(M_REL)
+
+    def freeze(d, extra):
+        fx.files.update({f"{d}/selftest.edges.jsonl": edges, f"{d}/{mxb}": fx.files[M_REL]})
+        fx.files.update({f"{d}/{b}": t for b, t in extra.items()})
+        text = (f"{sha('# foo stub' + chr(10))}  PRD-foo.md\n{sha('# bar stub' + chr(10))}  PRD-bar.md\n{sha(fx.files[M_REL])}  {mxb}\n"
+                f"{sha(edges)}  selftest.edges.jsonl\n" + "".join(f"{sha(t)}  {b}\n" for b, t in extra.items()))
+        fx.files[f"{d}/m.sha256"] = text
+        return f"{d}/m.sha256", text
+    mans = ([freeze("notes/snapshots/m0", prev)] if prev is not None else []) + [freeze("notes/snapshots/m1", members)]
+    for b, t in (unlisted or {}).items():
+        fx.files[f"notes/snapshots/m1/{b}"] = t
+    fx.rows[3] = dict(fx.rows[3], role="author", scope="", scope_id="")
+    lines, states = [], []
+    for k, ((p, text), s) in enumerate(zip(mans, (S_R1, S_R2))):
+        fx.rows[4 + k] = dict(fx.rows[4 + k], role="review", scope=p, scope_id=scope_id(text))
+        v = f"foo APPROVE fable\nbar APPROVE fable\nmission=APPROVE {s}\n"
+        fx.files[f"notes/reviews/cm{k}.txt"] = v
+        fx.files[f"notes/reviews/cm{k}.json"] = json.dumps({"type": "result", "is_error": False, "session_id": s, "result": "Done.\n" + v})
+        lines.append(f"Review: notes/reviews/cm{k}.txt reviewer-session={s} result=notes/reviews/cm{k}.json")
+        states += ["foo=reviewed:APPROVE", "bar=reviewed:APPROVE"]
+    fx.entry["Review"] = lines
+    fx.entry["State"] = "State: " + " ".join(states)
+    fx.tail = ["Mission: selftest edges=notes/missions/selftest.edges.jsonl scope=" + ",".join(p for p, _ in mans)
+               + (" repairs=notes/missions/selftest.repairs.jsonl" if rep_text else "")]
+    fx.build()
+    policy(out)
+
+
+CM = "d['mission']['control_mutants']"
+case("cm-r23-alone-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']",
+     detail="no mutant report there names that script sha256")(lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}))
+case("cm-r23-with-killing-report", 0, [],
+     f"{CM}['checked'] == [{{'control': 'r23-controls.txt', 'script': 'r23-controls.py', 'sha256': {CM_SCRIPT!r}}}] and {CM}['missing'] == [] "
+     f"and {CM}['survived'] == []")(lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report()}))
+case("cm-report-survived", 1, ["control-mutant-survived"], f"{CM}['survived'][0]['survived'] == 1", detail="reports SURVIVED: 1 of 2 mutants")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(survived=1)}))
+case("cm-report-without-summary", 1, ["control-mutant-survived"], detail="has no `mutants: N; KILLED: K; SURVIVED: S` summary line")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(summary=False)}))
+case("cm-report-survived-row", 1, ["control-mutant-survived"], f"{CM}['survived'][0]['rows'] == 1", detail="holds 1 SURVIVED row")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23,
+                            "r23-control-mutants.txt": cm_report(extra="SURVIVED M12 | pairing: a negative dropped\n")}))
+case("cm-report-meta-survivors-are-required", 0, [], f"{CM}['survived'] == []")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(extra=CM_META)}))
+case("cm-report-refusing-certificate", 1, ["control-mutant-survived"], detail="NO REVIEW-REQUEST, NO FREEZE")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        cert="SURVIVED mutants or named mutants not applied; NO REVIEW-REQUEST, NO FREEZE")}))
+case("cm-report-of-other-bytes", 1, ["control-mutants-missing"])(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(sha_under_test=CM_TOOL)}))
+case("cm-report-not-listed", 1, ["control-mutants-missing"])(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, unlisted={"r23-control-mutants.txt": cm_report()}))
+case("cm-script-header-alone", 1, ["control-mutants-missing"], detail="(script r27-controls.py sha256")(
+    lambda out: cm_fx(out, {"r27-controls.txt": CM_R27}))
+case("cm-script-header-with-report", 0, [], f"{CM}['checked'][0]['script'] == 'r27-controls.py'")(
+    lambda out: cm_fx(out, {"r27-controls.txt": CM_R27, "r27-control-mutants.txt": cm_report()}))
+case("cm-unchanged-since-previous-manifest", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, prev={"r23-controls.txt": CM_R23}))
+case("cm-changed-undeclared", 1, ["control-mutants-missing", "repair-hash-mismatch"])(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n"}, prev={"r23-controls.txt": CM_R23}))
+case("cm-changed-declared-needs-report", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n"}, prev={"r23-controls.txt": CM_R23},
+                      declare=["r23-controls.txt"]))
+case("cm-changed-declared-with-report", 0, [], f"{CM}['checked'][0]['control'] == 'r23-controls.txt'")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n", "r23-control-mutants.txt": cm_report()},
+                      prev={"r23-controls.txt": CM_R23}, declare=["r23-controls.txt"]))
+case("cm-not-a-control-name", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"r23-notes.txt": CM_R23}))
+case("cm-before-control-mutants-since", 0, [], "'control_mutants' not in d['mission']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts=CM_EARLY))
+
+
 # ---------------------------------------------------------------- driver
 def build(name, out):
     os.makedirs(out, exist_ok=True)
