@@ -750,7 +750,7 @@ def cm_report(sha_under_test=CM_SCRIPT, survived=0, summary=True, extra="", cert
 
 
 def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before=None, mid=None, scope=None, when=None, route_ts=None,
-          moved=None, absent=None, again=None, rorder=None, xrows=None, rmore=None):
+          moved=None, absent=None, again=None, rorder=None, xrows=None, rmore=None, xat=None, leave=None):
     """A mission (the selftest's chain shape) whose Mission: line lists one manifest, notes/snapshots/m1/m.sha256 (reviewed by S_R1), or
     with `prev` two (m0 reviewed by S_R1, then m1 by S_R2); each freezes foo, bar, the matrix and the edges file, and `members` (for m1)
     or `prev` (for m0), {basename: text}, copied into its own directory as a round freeze holds them. `unlisted`: files written into m1's
@@ -764,7 +764,9 @@ def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before
     `before` one, in log order. Review lint-e784c: `rorder`, the Review: lines' order by manifest index (P2: R2 reads Review: line order
     against scope= order); `xrows`, decision rows added to the log (P5: a review session with two launch rows); `rmore`, {manifest
     index: [launch ts]} further chain reviews of that manifest, each with its own session and Review: line after its first. Every freeze holds
-    its PRD-foo.md and PRD-bar.md copies (P3)."""
+    its PRD-foo.md and PRD-bar.md copies (P3). Review lint-e784d: `leave`, manifest indexes whose Review: line and two State tokens the
+    entry leaves out (Q1); `again` manifests None, a Mission: line with no scope= of its own, which inherits it (Q4 w2); `xat`, {manifest
+    index: [rows]}, decision rows added with that manifest's scope and scope_id (Q1)."""
     fx = Fx(out)
     rep_text = None
     if declare:
@@ -808,7 +810,8 @@ def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before
                          + ",".join(f"notes/snapshots/{d}/m.sha256" for d in before)]
     for k, (ats, adirs, extra) in enumerate(again or ()):
         alines = ["Task: A1   Consumer: hermes", "Seeds: selftest", "State: foo=linted"] + list(extra) + [
-            "Mission: selftest edges=notes/missions/selftest.edges.jsonl scope=" + ",".join(f"notes/snapshots/{d}/m.sha256" for d in adirs)]
+            "Mission: selftest edges=notes/missions/selftest.edges.jsonl"
+            + ("" if adirs is None else " scope=" + ",".join(f"notes/snapshots/{d}/m.sha256" for d in adirs))]
         if fx.prev_entry is None:
             fx.prev_entry, fx.prev_lines = ats, alines
         else:
@@ -818,6 +821,7 @@ def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before
         if 4 + k >= len(fx.rows):
             fx.rows.append(dict(fx.rows[5], ts="2026-11-15T01:50:00-08:00", session=s))
         fx.rows[4 + k] = dict(fx.rows[4 + k], role="review", scope=p, scope_id=scope_id(text))
+        more += [dict(r, scope=p, scope_id=scope_id(text)) for r in (xat or {}).get(k, ())]
         if when and k in when:
             fx.rows[4 + k]["ts"] = when[k]
         v = f"foo APPROVE fable\nbar APPROVE fable\nmission=APPROVE {s}\n"
@@ -833,8 +837,8 @@ def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before
             fx.files[f"notes/reviews/{f2}.json"] = json.dumps({"type": "result", "is_error": False, "session_id": s2, "result": "Done.\n" + v2})
             lines.append(f"Review: notes/reviews/{f2}.txt reviewer-session={s2} result=notes/reviews/{f2}.json")
             states += ["foo=reviewed:APPROVE", "bar=reviewed:APPROVE"]
-    fx.entry["Review"] = [lines[k] for k in rorder] if rorder else lines
-    fx.entry["State"] = "State: " + " ".join(states)
+    fx.entry["Review"] = [lines[k] for k in (rorder or range(len(lines))) if k not in (leave or ())]
+    fx.entry["State"] = "State: " + " ".join(states[2 * len(leave or ()):])     # every line's two tokens are the same
     fx.rows += more + list(xrows or ())
     fx.tail = ["Mission: selftest edges=notes/missions/selftest.edges.jsonl scope="
                + (",".join(f"notes/snapshots/{d}/m.sha256" for d in scope) if scope else ",".join(p for p, _ in mans))
@@ -1196,6 +1200,55 @@ case("cm-moved-md-member-refused", 1, ["control-mutants-missing"], f"{CM}['unrea
     lambda out: cm_fx(out, {"notes-r28.md": "a note\n"}, moved={"notes-r28.md": "another note\n"}))
 case("cm-absent-out-member-refused", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-l3-pairs.out']", detail="absent or unreadable")(
     lambda out: cm_fx(out, {"r28-l3-pairs.out": "a read\n"}, absent=["r28-l3-pairs.out"]))
+
+# ---- review lint-e784d (FIX on b717303), from the public write-up only
+# Q1: the last listed manifest is dated by every review launch of the Task at its scope id, so leaving its Review: line out reads nothing less
+CM_M1_LATE = "2026-11-15T02:00:00-08:00"                # after m2's review launch (01:50)
+CM_S_X1 = "bbbbbbbb-0000-4000-8000-000000000019"       # a launch row at m1's scope id that no Review: line names
+case("cm-last-listed-review-left-off-the-entry-newest-unread-refused", 1, ["control-mutants-missing"],
+     f"{CM}['unread'] == ['notes/snapshots/m2/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m1/m.sha256'", detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m2", "m1"], rorder=[0, 2, 1], leave=[1]))
+case("cm-last-listed-unbound-review-after-the-newest-not-unread", 0, [], f"{CM}['unread'] == [] and {CM}['checked'] == []")(
+    lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m2", "m1"], rorder=[0, 2, 1],
+                      xat={1: [review_row(CM_M1_LATE, CM_S_X1)]}))
+for _n, _r in (("of-another-task", dict(review_row(CM_M1_LATE, CM_S_X1), task_id="A9")),
+               ("of-an-author", dict(review_row(CM_M1_LATE, CM_S_X1), role="author")),
+               ("that-is-no-launch", dict(review_row(CM_M1_LATE, CM_S_X1), decision="persist")),
+               ("of-another-skill", dict(review_row(CM_M1_LATE, CM_S_X1), skill="build"))):
+    case(f"cm-last-listed-row-{_n}-does-not-date-it", 1, ["control-mutants-missing"],
+         f"{CM}['unread'] == ['notes/snapshots/m2/m.sha256']", detail=CM_UNREAD)(
+        (lambda r: lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m2", "m1"], rorder=[0, 2, 1], leave=[1],
+                                                xat={1: [r]}))(_r))
+# Q4: a duplicate last listing is dated by its scope id (q01); an earlier entry that inherits scope= (q05) or is dated after the date by
+# its review launch alone (q07) is one this rule read (their Review: and scope= lines are not the entry's, so the fixture matrix gives CM_AG)
+case("cm-duplicate-last-listing-newest-unread-refused", 1, ["control-mutants-missing"],
+     f"{CM}['unread'] == ['notes/snapshots/m2/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m1/m.sha256'", detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m1", "m2", "m1"]))
+case("cm-backdated-entry-after-an-entry-dated-by-its-review-is-read", 1, [CM_AG, "control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, ts=CM_BACK, again=[("2026-11-21T17:30:00-08:00", ["m1"], [CM_AN, CM_R4_LINE])],
+                      xrows=[review_row(CM_AFTER, CM_S_R4)]))
+case("cm-backdated-entry-after-an-inherited-scope-entry-is-read", 1, [CM_AG, "control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] == 'notes/snapshots/m0/m.sha256'")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={}, ts=CM_BACK, before=["m0"], again=[(CM_AFTER, None, [CM_AN])]))
+# Q4 q03, q08: any whitespace inside `does not discriminate` and after a label's colon; Q3: a word only ending in a file extension is a
+# file name
+for _n, _v in (("two-spaces-in-does-not", "fixture verdict: does  not discriminate"),
+               ("label-then-two-spaces", "  entrypoint control:  controls verdict: discriminates"),
+               ("word-holding-an-extension-mid-word", "r10.md5 verdict: discriminates")):
+    case(f"cm-verdict-{_n}-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == [{CM_RB!r}]")(
+        (lambda v: lambda out: cm_fx(out, {CM_RB: f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\n{v}\n"}))(_v))
+# Q3: the real runner scripts write `printf '%-40s %s\n' <output> <verdict line>`; a name of 40 characters or more gets one space
+CM_RUNLOG = "".join("%-40s %s\n" % (n, v) for n, v in (
+    ("r29-matrix-verification-controlsxxxx.txt", "controls verdict: discriminates"),
+    ("r29-matrix-verification-controls-xxxx.log", "controls verdict: discriminates"),
+    ("r29-matrix-verification-controlsxxxx.out", "fixture verdict: discriminates"),
+    ("r29-matrix-verification-controls-xxxxx.md", "verdict: does not discriminate"),
+    ("r29-matrix-verification-controlsxxx.json", "readback fixture verdict: discriminates")))
+assert all(len(x.split(" ")[0]) >= 40 for x in CM_RUNLOG.splitlines()), CM_RUNLOG
+case("cm-runner-log-verdict-row-of-a-40-character-name-not-read", 0, [],
+     f"[c['control'] for c in {CM}['checked']] == ['r23-controls.txt'] and {CM}['missing'] == []")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(), "run-r29-controls.log": CM_RUNLOG}))
 
 # ---------------------------------------------------------------- driver
 def build(name, out):
