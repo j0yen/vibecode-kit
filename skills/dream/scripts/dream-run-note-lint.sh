@@ -180,9 +180,9 @@
 # `/`, else by its basename). The last listed manifest is taken as the newest freeze: a listed manifest of another scope id with a review
 # launch of the Task after every one at the last listed one's scope id, each bound to the entry or not, is refused (its round is not the
 # one read; a review launch is a session's last launch row of the Task when its role is review; when the last listed one has no review
-# launch, nothing is compared; an older listed freeze reviewed again after every review of the last listed one is refused the same
-# way, which the log cannot tell from a newer freeze listed before the last: a later review launch of the last listed one dates it
-# newest again). So a round is read at every later
+# launch, nothing is compared; an older listed freeze reviewed after every review of the last listed one is refused the same way,
+# which the log cannot tell from a newer freeze listed before the last: a later review launch of the last listed one dates it newest
+# again). So a round is read at every later
 # entry until a report answers it, except when the first entry after the date is itself backdated (it is then the base) or a newest freeze
 # is listed before the last when review launches do not show it newer (one of the two never reviewed, or the older reviewed after it);
 # neither is shown by the log. Members are read at the manifest's directory (the freeze's own
@@ -190,13 +190,15 @@
 # test)` header line. A control output is any other member that is not a script (a name ending .py or .sh) and whose leading `#` lines
 # name a script whose basename holds `control` and not `mutant`, or that carries a controls verdict line (`controls verdict:`, or
 # `verdict: discriminates` or `verdict: does not discriminate`, in any case and after any words each followed by one whitespace
-# character (a space or a tab, so `fixture.json<TAB>verdict: ...` is read) and none a file name of 40 characters or more (ending
+# character (a space, a tab, or another Unicode whitespace character such as a no-break space, so `fixture.json<TAB>verdict: ...` is
+# read) and none a file name of 40 characters or more (ending
 # .txt, .log, .out, .md or .json: the runner scripts' `%-40s ` column, which leaves one space only after such a name), as the L3
 # r10f1 readback fixture's `fixture verdict: discriminates` or `pairs.json verdict: ...`, at the start of a line after its indentation
 # and at most one `<label>: `, as r11-matrix-verification's `  entrypoint control: controls verdict: ...`; a page or record quoting
 # the words mid-line, or a runner log's `<output> controls verdict: ...` row, column-padded or with a name of 40 characters or more,
-# is no verdict line; a row of a shorter name followed by one space or one tab, which the `%-40s ` runners never write, is read as a
-# verdict line and so refused while unanswered), or whose basename holds `control` and not `mutant` and
+# is no verdict line; a row of a shorter name followed by one whitespace character (a space, a tab, or another Unicode whitespace
+# character such as a no-break space), which the `%-40s ` runners never write, is read as a verdict line and so refused while
+# unanswered), or whose basename holds `control` and not `mutant` and
 # that names a script, ends `.txt` or carries a `# script` line that does not read. A script is named
 # by `# script <name> sha256 <hex>`; by a `;` part `[script] [<name>] sha256 <hex>` of a `# read <when> on <host>; ...` line; or by the
 # earlier `# <name>.py controls ...` followed by `#   <hex>  <path to name>`; the header's other sha256 lines, the control's inputs, name
@@ -1598,7 +1600,7 @@ def control_mutant_check(L, mans, ts, later, previous, drows=None, task=None):
             out["unread"].append(m["path"])
             L.fail("control-mutants-missing", f"manifest {m['path']}: its review session {r.get('session')} launched {r.get('ts')}, after "
                    f"every review of the last listed manifest {new['path']}, whose round is the one read, so this newer freeze's round is "
-                   "not read; list the newest freeze last (when it is last, this older freeze was reviewed again after it: a later "
+                   "not read; list the newest freeze last (when it is last, this older freeze was reviewed after it: a later "
                    "review launch of the last listed manifest dates it newest) (five-whys page e784471d mechanism 2)")
     return out
 

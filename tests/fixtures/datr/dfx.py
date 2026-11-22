@@ -1329,6 +1329,11 @@ case("cm-last-listed-reviewers-last-launch-row-with-no-time-does-not-date-it", 1
 case("cm-last-listed-row-with-no-task-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
     lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [{k: v for k, v in review_row(CM_M1_LATE, CM_S_X1).items() if k != "task_id"}]},
                       **CM_O3))
+# review lint-hygiene-g H1: a launch row with no role is an author's, as the lint reads role elsewhere, so it is no review launch and
+# dates nothing (a mutant taking a role-less row as a review passes every other case)
+case("cm-last-listed-row-with-no-role-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [{k: v for k, v in review_row(CM_M1_LATE, CM_S_X1).items() if k != "role"}]},
+                      **CM_O3))
 # L2 (accepted, constructed): an older listed freeze reviewed again after the newest one's review launch is not told from a newer freeze
 # listed before the last, so an in-order entry whose newest round is answered is refused, the FAIL line naming that cause (g4); the
 # same entry without the re-review passes (g4b)
@@ -1338,7 +1343,7 @@ case("cm-older-freeze-reviewed-again-after-the-newest-refused", 1, ["control-mut
      f"{CM}['unread'] == ['notes/snapshots/m1/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m2/m.sha256' and {CM}['missing'] == []",
      detail=f"its review session {CM_S_X1} launched {CM_M1_AGAIN}, after every review of the last listed manifest notes/snapshots/m2/m.sha256"
             ", whose round is the one read, so this newer freeze's round is not read; list the newest freeze last (when it is last, this "
-            "older freeze was reviewed again after it")(
+            "older freeze was reviewed after it")(
     lambda out: cm_fx(out, CM_N28K, prev={}, mid=CM_N27, xat={1: [review_row(CM_M1_AGAIN, CM_S_X1)]}))
 case("cm-older-freeze-reviewed-once-in-order-not-unread", 0, [], f"{CM}['unread'] == [] and len({CM}['checked']) == 1")(
     lambda out: cm_fx(out, CM_N28K, prev={}, mid=CM_N27))
