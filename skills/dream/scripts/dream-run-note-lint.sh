@@ -167,21 +167,28 @@
 # entry of the mission not later than the linted one names it in adversarial= or its copy at the
 # listed digest passes the matrix grammar; otherwise the matrix rule above applies unchanged.
 #
-# Control mutants (five-whys page e784471d mechanism 2, A1723; owner 03415): for an entry dated at or after
-# CONTROL_MUTANTS_SINCE whose Mission: line lists scope= manifests, every control output of the newest listed manifest that is
-# new there or whose digest moved from the previous listed manifest (the round's control reads) needs, in that same manifest, a
-# mutant report naming the control's script at the same sha256 as `(the control under test)`, whose last summary line
-# `mutants: N; KILLED: K; SURVIVED: S` has S = 0, with no SURVIVED row (a line that starts `SURVIVED `; mechanism 1 indents the
-# meta-negative's survivors, which it requires) and no refusing certificate (a `certificate:` line other than `certificate: every
-# mutant KILLED...`). A control output is a member whose basename holds `control` (and not `mutant`) and whose leading `#`
-# lines name a script and its sha256 (`# script <name> sha256 <hex>`; a `;` part of the read line, `# read <when> on <host>;
-# [script] [<name>] sha256 <hex>[; ...]`; or the earlier `# <name>.py controls ...` followed by `#   <hex>  <path to name>`; the
-# header's other sha256 lines, the control's inputs, name no script), or whose name ends `.txt` (a control read that names no
-# script); a report at any script it names answers for it. A mutant report is a member with a `(the control under test)` header line. Members are read at the
-# manifest's directory (the freeze's own copies) and only when their bytes match the manifest's digest.
-# control-mutants-missing: no such report, or a `.txt` control output that names no script (no report can name its control);
-# control-mutant-survived: a report there with S > 0, no summary line, a SURVIVED row or a refusing certificate. JSON:
-# mission.control_mutants {manifest, checked [{control, scripts [[name, sha256]...]}], missing, survived}.
+# Control mutants (five-whys page e784471d mechanism 2, A1723; owner 03415): for an entry whose Mission: line lists scope= manifests
+# and whose date, the latest of its header ts (an unreadable one counts as after), its Route decision= instant and its bound review
+# launches, is at or after CONTROL_MUTANTS_SINCE. The round's members are those of the newest listed manifest that are new there or whose
+# digest moved from the manifest the Task's previous Mission: entry lists last (every member when no earlier entry lists one; a member is
+# keyed by its path as written when that holds `/`, else by its basename). Members are read at the manifest's directory (the freeze's own
+# copies), a leading UTF-8 byte order mark dropped. A mutant report is a member whose basename holds `mutant` with a `(the control under
+# test)` header line. A control output is any other member that is not a script (a name ending .py or .sh) and whose leading `#` lines
+# name a script whose basename holds `control` and not `mutant`, or that carries a controls verdict line (`controls verdict:` at the
+# start of a line after its indentation and at most one `<label>: `, as r11-matrix-verification's `  entrypoint control: controls
+# verdict: ...`; a page or record quoting the words mid-line is no verdict line), or whose basename holds `control` and not `mutant` and
+# that names a script, ends `.txt` or carries a `# script` line that does not read. A script is named
+# by `# script <name> sha256 <hex>`; by a `;` part `[script] [<name>] sha256 <hex>` of a `# read <when> on <host>; ...` line; or by the
+# earlier `# <name>.py controls ...` followed by `#   <hex>  <path to name>`; the header's other sha256 lines, the control's inputs, name
+# no script. A round control output needs, in that manifest, a mutant report at the sha256 of a script it names. Every report there at
+# those scripts, and every round report, is read: exactly one summary line `mutants: N; KILLED: K; SURVIVED: S` at a line start, with
+# N > 0, K = N and S = 0; no SURVIVED row (a line that starts `SURVIVED `, or an indented SURVIVED line outside a `## meta-negative`
+# section, whose survivors mechanism 1 requires); and at least one certificate line, each (indented or not) `certificate: every mutant
+# KILLED; the REVIEW-REQUEST may go out` or its first clause alone.
+# control-mutants-missing: a round control output with no such report or naming no script (no report can name its control), or a round
+# member whose freeze copy is absent or differs from the manifest's digest when its path holds `control` and not `mutant` or its copy
+# reads as a control output (no other rule reads these members); control-mutant-survived: a report read above that fails a check. JSON:
+# mission.control_mutants {manifest, previous, checked [{control, scripts [[name, sha256]...]}], missing, unreadable, survived}.
 #
 # R4 floor across the home (five-whys page e784471d mechanism 3, lint part; owner 03415; the R4 text is the PRD author's):
 # besides the sessions launched after the Task's previous entry, the floor reads each State: slug's consecutive FIX or REJECT
@@ -1270,37 +1277,54 @@ MISSION_IDS = ("mission-grammar", "mission-edges-missing", "edge-grammar", "edge
 # five-whys page e784471d mechanism 2 (A1723, consumption row E784-M2; owner 03415): a round's control reads carry a mutant report.
 # The page's own write time, which its consumption rows give as their due.
 CONTROL_MUTANTS_SINCE = "2026-11-21T18:13:00-08:00"
-CM_SCRIPT_RE = re.compile(r"^# script (\S+) sha256 ([0-9a-f]{64})\s*$")
+CM_SCRIPT_RE = re.compile(r"^#\s*script\s+(\S+)\s+sha256\s+([0-9a-f]{64})\s*$")
+CM_SCRIPT_TRY_RE = re.compile(r"^#\s*script\b")
 CM_LEGACY_RE = re.compile(r"^# (\S+\.py) controls\b")
 CM_LEGACY_SHA_RE = re.compile(r"^#\s+([0-9a-f]{64})\s+(\S+)")
 CM_UNDER_TEST_RE = re.compile(r"^#\s+([0-9a-f]{64})\s+(\S+)\s+\(the control under test\)\s*$")
 CM_SUMMARY_RE = re.compile(r"^mutants: (\d+); KILLED: (\d+); SURVIVED: (\d+)$")
 CM_SURVIVED_ROW_RE = re.compile(r"^SURVIVED \S")
+CM_SURVIVED_INDENTED_RE = re.compile(r"^\s+SURVIVED\b")
+CM_META_RE = re.compile(r"^## meta-negative\b")
+CM_VERDICT_RE = re.compile(r"^\s*(?:[A-Za-z][\w -]*:\s+)?controls verdict:")
 CM_READ_SEG_RE = re.compile(r"^(?:script\s+)?(?:(\S+)\s+)?sha256\s+([0-9a-f]{64})$")
-CM_CERT_OK = "certificate: every mutant KILLED"
+CM_CERT_OK = ("certificate: every mutant KILLED; the REVIEW-REQUEST may go out", "certificate: every mutant KILLED")
+CM_SOURCE_EXT = (".py", ".sh")
 CM_HEAD_LINES = 40
+CM_BOM = b"\xef\xbb\xbf"
 
 
-def cm_header(path):
-    """Mechanism 2: a file's leading `#` lines (at most CM_HEAD_LINES of its first 64 KiB), or None when it cannot be read."""
+def cm_bytes(path):
+    """Mechanism 2: a member's bytes, or None when it cannot be read (absent, a directory, unreadable)."""
     try:
         with open(path, "rb") as fh:
-            data = fh.read(65536)
+            return fh.read()
     except OSError:
         return None
+
+
+def cm_lines(data):
+    """Mechanism 2: a member's lines (a leading UTF-8 byte order mark dropped, review lint-e784 F6; carriage returns kept off line ends)."""
+    if data[:3] == CM_BOM:
+        data = data[3:]
+    return [ln.rstrip("\r") for ln in data.decode("utf-8", "replace").split("\n")]
+
+
+def cm_header(lines):
+    """Mechanism 2: a member's leading `#` lines, at most CM_HEAD_LINES."""
     out = []
-    for ln in data.decode("utf-8", "replace").split("\n")[:CM_HEAD_LINES]:
+    for ln in lines[:CM_HEAD_LINES]:
         if not ln.startswith("#"):
             break
-        out.append(ln.rstrip("\r"))
+        out.append(ln)
     return out
 
 
 def cm_scripts(head):
     """Mechanism 2: the scripts a control output's leading `#` lines name, [(name, sha256)] in order without repeats: `# script <name>
-    sha256 <hex>`; each `;` part `[script] [<name>] sha256 <hex>` of a `# read <when> on <host>; ...` line (a part without a name reads
-    as "(unnamed script)"); and the earlier `# <name>.py controls ...` with the next line `#   <hex>  <path to that name>`. Other lines
-    that carry a sha256 (the control's inputs: a PRD, a repository head and its file) name no script."""
+    sha256 <hex>` (any run of spaces between the words); each `;` part `[script] [<name>] sha256 <hex>` of a `# read <when> on <host>; ...`
+    line (a part without a name reads as "(unnamed script)"); and the earlier `# <name>.py controls ...` with the next line `#   <hex>
+    <path to that name>`. Other lines that carry a sha256 (the control's inputs: a PRD, a repository head and its file) name no script."""
     out = []
 
     def add(n, h):
@@ -1323,75 +1347,146 @@ def cm_scripts(head):
     return out
 
 
-def cm_kind(head, base):
-    """Mechanism 2: ("report", control sha256) for a mutant report (a `(the control under test)` header line); ("control", scripts) for a
-    control output (a basename holding `control` and not `mutant` whose header names at least one script (cm_scripts), or whose name
-    ends `.txt`, then with scripts possibly empty); else None (a control's script, runner, log or page)."""
-    for ln in head:
-        m = CM_UNDER_TEST_RE.match(ln)
-        if m:
-            return ("report", m.group(1))
+def cm_kind(lines, base):
+    """Mechanism 2: what a member is. ("report", control sha256) for a mutant report: a basename holding `mutant` and a `(the control
+    under test)` header line (review lint-e784 F6: a control output carrying that line is still a control). ("control", scripts) for a
+    control output: any other member that is not a script (a name ending .py or .sh) and (a) whose header names a script whose basename
+    holds `control` and not `mutant`, or (b) that carries a controls verdict line, CM_VERDICT_RE (review lint-e784 F1: the round's reads
+    are found by their script and their verdict, not by their own name; a mutant-named one is read too), or (c) whose basename holds `control`
+    and not `mutant` and whose header names a script, or whose name ends `.txt`, or whose header carries a `# script` line that does not
+    read (then scripts is empty). Else None: a script, a runner log or stub, a page, or another read."""
+    head = cm_header(lines)
     low = base.lower()
-    if "control" not in low or "mutant" in low:
+    if "mutant" in low:
+        for ln in head:
+            m = CM_UNDER_TEST_RE.match(ln)
+            if m:
+                return ("report", m.group(1))
+    if low.endswith(CM_SOURCE_EXT):
         return None
     scripts = cm_scripts(head)
-    if scripts or low.endswith(".txt"):
+    named = "control" in low and "mutant" not in low
+    if (any("control" in n.rsplit("/", 1)[-1].lower() and "mutant" not in n.rsplit("/", 1)[-1].lower() for n, _ in scripts)
+            or any(CM_VERDICT_RE.match(ln) for ln in lines)
+            or (named and (scripts or low.endswith(".txt") or any(CM_SCRIPT_TRY_RE.match(ln) for ln in head)))):
         return ("control", scripts)
     return None
 
 
-def cm_read(path):
-    """Mechanism 2: a mutant report's reading (summary, rows, cert): its last `mutants: N; KILLED: K; SURVIVED: S` line as (N, K, S)
-    or None, the number of its SURVIVED rows (lines that start `SURVIVED `; the meta-negative's survivors are indented) and its last
-    `certificate:` line or None. An unreadable report reads (None, 0, None)."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            lines = fh.read().split("\n")
-    except OSError:
-        return None, 0, None
-    summary, rows, cert = None, 0, None
+def cm_read(lines):
+    """Mechanism 2: a mutant report's reading: (summaries, rows, certs). summaries: every `mutants: N; KILLED: K; SURVIVED: S` line that
+    starts its line, as (N, K, S); rows: its SURVIVED rows, a line that starts `SURVIVED ` anywhere or an indented line whose first word is
+    SURVIVED outside a `## meta-negative` section (from that header to the next `## ` header or summary line), whose survivors mechanism 1
+    requires; certs: every line that starts `certificate:` after its indentation (review lint-e784 F6)."""
+    summaries, rows, certs, meta = [], 0, [], False
     for ln in lines:
-        m = CM_SUMMARY_RE.match(ln.strip())
+        t = ln.rstrip()
+        if t.startswith("## "):
+            meta = bool(CM_META_RE.match(t))
+        m = CM_SUMMARY_RE.match(t)
         if m:
-            summary = tuple(int(x) for x in m.groups())
-        if CM_SURVIVED_ROW_RE.match(ln):
+            summaries.append(tuple(int(x) for x in m.groups()))
+            meta = False
+        if CM_SURVIVED_ROW_RE.match(t) or (not meta and CM_SURVIVED_INDENTED_RE.match(t)):
             rows += 1
-        if ln.startswith("certificate:"):
-            cert = ln.strip()
-    return summary, rows, cert
+        if t.lstrip().startswith("certificate:"):
+            certs.append(t.strip())
+    return summaries, rows, certs
+
+
+def cm_report_why(lines):
+    """Mechanism 2: (why the report fails or None, its largest S or None, its SURVIVED rows): exactly one summary line, N > 0, K = N
+    and S = 0 (review lint-e784 F4: a report that ran no mutant, or killed fewer than it ran, is no pass); no SURVIVED row; at least one
+    certificate line, each CM_CERT_OK's text (review lint-e784 F6)."""
+    summaries, rows, certs = cm_read(lines)
+    big = max(x[2] for x in summaries) if summaries else None
+    bad = [c for c in certs if c not in CM_CERT_OK]
+    if not summaries:
+        why = "has no `mutants: N; KILLED: K; SURVIVED: S` summary line"
+    elif len(summaries) > 1:
+        why = f"holds {len(summaries)} `mutants: N; KILLED: K; SURVIVED: S` summary lines"
+    elif summaries[0][2] > 0:
+        why = f"reports SURVIVED: {summaries[0][2]} of {summaries[0][0]} mutants"
+    elif summaries[0][0] == 0:
+        why = "reports no mutant (mutants: 0)"
+    elif summaries[0][1] != summaries[0][0]:
+        why = f"reports KILLED: {summaries[0][1]} of {summaries[0][0]} mutants"
+    elif rows:
+        why = f"holds {rows} SURVIVED row" + ("s" if rows > 1 else "")
+    elif not certs:
+        why = "has no `certificate:` line"
+    elif bad:
+        why = f"carries `{bad[0][:90]}`"
+    else:
+        why = None
+    return why, big, rows
 
 
 def cm_key(ps, base):
-    """Mechanism 2: a member's key across two listed manifests: its path as written when that holds `/`, else its basename."""
+    """Mechanism 2: a member's key across two manifests: its path as written when that holds `/`, else its basename."""
     return ps if "/" in ps else base
 
 
-def control_mutant_check(L, mans, ts):
-    """Five-whys page e784471d mechanism 2 (owner 03415, consumption row E784-M2), for an entry dated at or after
-    CONTROL_MUTANTS_SINCE (an unreadable date counts as after): every control output of the newest listed manifest that is new there or
-    whose digest moved from the previous listed manifest (the round's control reads) needs, in that same manifest, a mutant report
-    naming one of the scripts the output names at the same sha256 as `(the control under test)` whose last summary line has SURVIVED 0,
-    with no SURVIVED row and no refusing certificate (every such report there is read; any one that fails refuses); a `.txt` control
-    output that names no script is refused, since no report can name its control. Members are
-    read at the manifest's directory (the freeze's own copies) and only when their bytes match the manifest's digest (a moved copy is
-    mission-snapshot-stale's). -> {"manifest", "checked", "missing", "survived"}, or None when nothing here applies."""
+def cm_previous(mrec, mans, resolve):
+    """Mechanism 2 (review lint-e784 F2): (path, entries) of the manifest the Task's previous Mission: entry lists last, carried or
+    inherited, or (None, []) when no earlier entry lists one. Entries as manifest_paths gives them; [] when that manifest cannot be read,
+    so every member is a round member."""
+    earlier = (mrec or {}).get("earlier") or []
+    ps = (earlier[-1]["eff"].get("scope") or ([], None))[0] if earlier else []
+    if not ps:
+        return None, []
+    full = os.path.normpath(resolve(ps[-1]))
+    for m in mans:
+        if os.path.normpath(m["full"]) == full and m.get("id") is not None:
+            return ps[-1], m["entries"]
+    return ps[-1], manifest_paths(full) or []
+
+
+def control_mutant_check(L, mans, ts, later, previous):
+    """Five-whys page e784471d mechanism 2 (owner 03415, consumption row E784-M2), for an entry whose date is at or after
+    CONTROL_MUTANTS_SINCE: the latest of its header ts (an unreadable one counts as after) and `later`, its Route decision= instant and its
+    bound review launches (review lint-e784 F5: a backdated header alone does not take an entry out). The round's members are those of the
+    newest listed manifest that are new there or whose digest moved from `previous`, (path, entries) of the manifest the Task's previous
+    Mission: entry lists last (cm_previous). A round control output (cm_kind) needs, in that manifest, a mutant report at the sha256 of a
+    script it names; one naming no script is refused, since no report can name its control. Every report there at those scripts, and every
+    round report, is read (cm_report_why); any one that fails refuses. A round member whose freeze copy is absent or differs from the
+    manifest's digest is refused when its path holds `control` and not `mutant` or its copy reads as a control output (review lint-e784 F3:
+    no other rule reads these members). -> {"manifest", "previous", "checked", "missing", "unreadable", "survived"}, or None when nothing
+    here applies."""
     t, since = parse_iso(ts or ""), parse_iso(CONTROL_MUTANTS_SINCE)
-    if not mans or (t is not None and t < since) or mans[-1].get("id") is None:
+    if not mans or mans[-1].get("id") is None:
+        return None
+    if t is not None and max([t] + [x for x in (parse_iso(v) if isinstance(v, str) else None for v in later) if x is not None]) < since:
         return None
     new = mans[-1]
-    prev = {cm_key(ps, b): h for ps, _, b, h in mans[-2]["entries"]} if len(mans) > 1 and mans[-2].get("id") is not None else {}
-    controls, reports = [], {}
+    ppath, pents = previous
+    prev = {cm_key(ps, b): h for ps, _, b, h in pents}
+    out = {"manifest": new["path"], "previous": ppath, "checked": [], "missing": [], "unreadable": [], "survived": []}
+    controls, reports, round_reports = [], {}, []
     for ps, key, base, h in new["entries"]:
-        if file_sha(key) != h:
+        rnd = prev.get(cm_key(ps, base)) != h
+        data = cm_bytes(key)
+        got = hashlib.sha256(data).hexdigest() if data is not None else None
+        if got != h:
+            low = ps.lower()
+            if rnd and (("control" in low and "mutant" not in low) or (data is not None and (cm_kind(cm_lines(data), base) or ("",))[0] == "control")):
+                out["missing"].append(ps)
+                out["unreadable"].append(ps)
+                L.fail("control-mutants-missing", f"{ps} in manifest {new['path']}: its freeze copy is "
+                       + ("absent or unreadable" if got is None else f"{got[:12]}, not the manifest's {h[:12]}")
+                       + ", so the control output it holds cannot be read (five-whys page e784471d mechanism 2)")
             continue
-        k = cm_kind(cm_header(key) or [], base)
+        lines = cm_lines(data)
+        k = cm_kind(lines, base)
         if k is None:
             continue
         if k[0] == "report":
-            reports.setdefault(k[1], []).append((ps, key))
-        elif prev.get(cm_key(ps, base)) != h:
+            reports.setdefault(k[1], []).append((ps, lines))
+            if rnd:
+                round_reports.append((ps, k[1], lines))
+        elif rnd:
             controls.append((ps, k[1]))
-    out = {"manifest": new["path"], "checked": [], "missing": [], "survived": []}
+    read = set()
     for ps, scripts in controls:
         out["checked"].append({"control": ps, "scripts": [[n, sh] for n, sh in scripts]})
         if not scripts:
@@ -1401,22 +1496,27 @@ def control_mutant_check(L, mans, ts):
             continue
         reps = []
         for _, sh in scripts:
-            reps += [r for r in reports.get(sh, []) if r not in reps]
+            reps += [r for r in reports.get(sh, []) if r[0] not in [x[0] for x in reps]]
         if not reps:
             out["missing"].append(ps)
             named = "; ".join(f"{n} sha256 {sh[:12]}" for n, sh in scripts)
             L.fail("control-mutants-missing", f"{ps} (script {named}) in manifest {new['path']}: no mutant report there names that "
                    f"script sha256 as the control under test (five-whys page e784471d mechanism 2)")
             continue
-        for rps, rkey in reps:
-            s, rows, cert = cm_read(rkey)
-            why = ("has no `mutants: N; KILLED: K; SURVIVED: S` summary line" if s is None else
-                   f"reports SURVIVED: {s[2]} of {s[0]} mutants" if s[2] > 0 else
-                   f"holds {rows} SURVIVED row" + ("s" if rows > 1 else "") if rows else
-                   f"ends `{cert[:90]}`" if cert is not None and not cert.startswith(CM_CERT_OK) else None)
+        for rps, rlines in reps:
+            read.add(rps)
+            why, big, rows = cm_report_why(rlines)
             if why is not None:
-                out["survived"].append({"control": ps, "report": rps, "survived": None if s is None else s[2], "rows": rows})
+                out["survived"].append({"control": ps, "report": rps, "survived": big, "rows": rows})
                 L.fail("control-mutant-survived", f"{ps}: mutant report {rps} {why} (five-whys page e784471d mechanism 2)")
+    for rps, sh, rlines in round_reports:
+        if rps in read:
+            continue
+        why, big, rows = cm_report_why(rlines)
+        if why is not None:
+            out["survived"].append({"control": None, "report": rps, "survived": big, "rows": rows})
+            L.fail("control-mutant-survived", f"mutant report {rps} (the control under test sha256 {sh[:12]}) in manifest {new['path']} "
+                   f"{why} (five-whys page e784471d mechanism 2)")
     return out
 
 
@@ -4197,7 +4297,8 @@ def lint_log(a):
             if not mans:            # the reviews loop did not run (Review: none or a grammar refusal)
                 mans = mission_scopes(L, mrec, resolve)
             mfields, deps, vr = chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, reviews, home, resolve)
-            cm = control_mutant_check(L, mans, entry["ts"])     # five-whys page e784471d mechanism 2
+            cm = control_mutant_check(L, mans, entry["ts"], [route["decision"] if route else None] + [b["row"].get("ts") for b in bound],
+                                      cm_previous(mrec, mans, resolve))     # five-whys page e784471d mechanism 2
             if cm is not None and mfields is not None:
                 mfields["control_mutants"] = cm
             # PRD-dream-failure-class-sweep R1-R8: repairs between chain reviews, their holds

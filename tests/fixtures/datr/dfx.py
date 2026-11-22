@@ -702,12 +702,26 @@ case("fs-later-approve-keeps-the-floor", 1, ["failure-class-mismatch"], detail="
 case("fs-later-fix-is-not-in-the-streak", 0, [])(
     lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", when={1: FS_AFTER}, task={1: "A9"}))
 case("fs-other-slug-is-no-floor", 0, [])(lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", slug="bar"))
+# review lint-e784 F7: a session with no launch time adds its FIX (m36) and never resets with an APPROVE (m31); a session launched at the
+# entry's own time is in the streak (m30; Task A9, so only the streak reads it); the higher floor stands (m35: the old rule's
+# recurring-failure, FIX then a later REJECT of the Task, over the streak's one REJECT since the APPROVE)
+FS_NO_TIME = "no launch time"
+case("fs-no-launch-time-fix-counts", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", when={1: FS_NO_TIME}))
+case("fs-no-launch-time-approve-keeps-the-streak", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX", "APPROVE"], "Failure: none", when={2: FS_NO_TIME}))
+case("fs-launch-at-the-entry-time-counts", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", when={1: T_TS}, task={1: "A9"}))
+case("fs-higher-floor-stands", 1, ["failure-class-mismatch"], detail="after an earlier FIX or REJECT of foo in this home")(
+    lambda out: fs_floor(out, ["FIX", "APPROVE", "REJECT"], "Failure: failed-acceptance ledger:A1", f=PAGE5,
+                         when={2: "2026-11-19T12:00:00-08:00"}))
 
 
 # ---------------------------------------------------------------- five-whys page e784471d mechanism 2: a round's control reads carry mutant reports
 CM_TS, CM_EARLY = "2026-11-21T20:00:00-08:00", "2026-11-21T12:00:00-08:00"      # after and before the page's write time
 assert H.get("CONTROL_MUTANTS_SINCE") in (None, "2026-11-21T18:13:00-08:00"), H.get("CONTROL_MUTANTS_SINCE")  # None: a lint before it
 S_R1, S_R2 = H["S_R1"], H["S_R2"]
+CM_S_R3 = "bbbbbbbb-0000-4000-8000-000000000016"       # a third manifest's reviewer
 CM_SCRIPT = sha("#!/usr/bin/env python3\n# stand-in for chain review 23's control script\n")
 CM_TOOL = sha("#!/usr/bin/env python3\n# stand-in for mechanism 1's mutant runner\n")
 CM_R23 = (f"# r23-controls.py controls <prd home> (stand-in for the A1723 chain review 23 repair controls)\n"
@@ -723,23 +737,30 @@ CM_META = ("\n## meta-negative: the same mutants against notes/controls-r13/r22-
            "    SURVIVED against r22-controls.py: M8 | qualifier\n")
 
 
-def cm_report(sha_under_test=CM_SCRIPT, survived=0, summary=True, extra="", cert=CM_CERT):
+def cm_report(sha_under_test=CM_SCRIPT, survived=0, summary=True, extra="", cert=CM_CERT, summary_line=None, post=""):
     """A mechanism-1-shaped report of the stand-in r23 control: M5 and M8 (the page's R24-F1 swaps) KILLED, or M8 SURVIVED;
-    `extra` lines go before the summary, then the summary and certificate lines as control-mutants-r27.py writes them."""
+    `extra` lines go before the summary, then the summary (`summary_line` when given) and certificate lines as control-mutants-r27.py
+    writes them, `post` lines between the two."""
     rows = "KILLED   M5 | unit: two identities swapped\n" + ("SURVIVED M8 | qualifier: two identities swapped\n" if survived else
                                                               "KILLED   M8 | qualifier: two identities swapped\n")
     return (f"# script control-mutants.py sha256 {CM_TOOL}\n# control-mutants.py run <prd home> --control notes/controls-r13/r23-controls.py (stand-in)\n"
             f"#   {sha_under_test}  notes/controls-r13/r23-controls.py (the control under test)\n{rows}\n"
-            + extra + (f"mutants: 2; KILLED: {2 - survived}; SURVIVED: {survived}\n" if summary else "")
-            + (f"certificate: {cert}\n" if cert else ""))
+            + extra + ((summary_line or f"mutants: 2; KILLED: {2 - survived}; SURVIVED: {survived}") + "\n" if summary else "")
+            + post + (f"certificate: {cert}\n" if cert else ""))
 
 
-def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None):
+def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before=None, mid=None, scope=None, when=None, route_ts=None,
+          moved=None, absent=None):
     """A mission (the selftest's chain shape) whose Mission: line lists one manifest, notes/snapshots/m1/m.sha256 (reviewed by S_R1), or
     with `prev` two (m0 reviewed by S_R1, then m1 by S_R2); each freezes foo, bar, the matrix and the edges file, and `members` (for m1)
     or `prev` (for m0), {basename: text}, copied into its own directory as a round freeze holds them. `unlisted`: files written into m1's
     directory but not listed; `declare`: names a repairs row declares changed from m0 to m1 (the row, its file listed in m1 and the
-    repairs= token, as the selftest's chain() writes them). The entry is a covered one dated `ts`."""
+    repairs= token, as the selftest's chain() writes them). The entry is a covered one dated `ts`. Review r2 (lint-e784): `before`, the
+    manifests (by directory name) an earlier entry of Task A1 lists in its Mission: scope= (no earlier entry when None); `mid`, members of
+    a third manifest between m0 and the newest, which is then m2; `scope`, the entry's scope= list by directory name in place of every
+    manifest once; `when`, {manifest index: launch ts} of its review's row; `route_ts`, the Route decision= instant and its row's ts;
+    `moved`, {basename: text} written into the newest manifest's directory over the listed bytes; `absent`, basenames listed there but not
+    written."""
     fx = Fx(out)
     rep_text = None
     if declare:
@@ -761,13 +782,32 @@ def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None):
                 f"{sha(edges)}  selftest.edges.jsonl\n" + "".join(f"{sha(t)}  {b}\n" for b, t in extra.items()))
         fx.files[f"{d}/m.sha256"] = text
         return f"{d}/m.sha256", text
-    mans = ([freeze("notes/snapshots/m0", prev)] if prev is not None else []) + [freeze("notes/snapshots/m1", members)]
+    rounds = ([prev] if prev is not None else []) + ([mid] if mid is not None else []) + [members]
+    dirs = ["m0", "m1", "m2"][:len(rounds)] if prev is not None else ["m1"]
+    mans = [freeze(f"notes/snapshots/{d}", r) for d, r in zip(dirs, rounds)]
+    nd = f"notes/snapshots/{dirs[-1]}"
     for b, t in (unlisted or {}).items():
-        fx.files[f"notes/snapshots/m1/{b}"] = t
+        fx.files[f"{nd}/{b}"] = t
+    for b, t in (moved or {}).items():
+        fx.files[f"{nd}/{b}"] = t
+    for b in absent or ():
+        fx.files[f"{nd}/{b}"] = None
     fx.rows[3] = dict(fx.rows[3], role="author", scope="", scope_id="")
+    if route_ts is not None:
+        fx.rows[3]["ts"] = route_ts
+        fx.entry["Route"] = f"Route: fable-xhigh claude-fable-5-1 xhigh session={H['S_D']} decision={route_ts}"
+    if before is not None:
+        fx.prev_entry = "2026-11-15T00:30:00-08:00"            # before the review launches (01:30, 01:40) and the matrix (01:00)
+        fx.prev_lines = ["Task: A1   Consumer: hermes", "Seeds: selftest", "State: foo=linted",
+                         "Mission: selftest edges=notes/missions/selftest.edges.jsonl scope="
+                         + ",".join(f"notes/snapshots/{d}/m.sha256" for d in before)]
     lines, states = [], []
-    for k, ((p, text), s) in enumerate(zip(mans, (S_R1, S_R2))):
+    for k, ((p, text), s) in enumerate(zip(mans, (S_R1, S_R2, CM_S_R3))):
+        if 4 + k >= len(fx.rows):
+            fx.rows.append(dict(fx.rows[5], ts="2026-11-15T01:50:00-08:00", session=s))
         fx.rows[4 + k] = dict(fx.rows[4 + k], role="review", scope=p, scope_id=scope_id(text))
+        if when and k in when:
+            fx.rows[4 + k]["ts"] = when[k]
         v = f"foo APPROVE fable\nbar APPROVE fable\nmission=APPROVE {s}\n"
         fx.files[f"notes/reviews/cm{k}.txt"] = v
         fx.files[f"notes/reviews/cm{k}.json"] = json.dumps({"type": "result", "is_error": False, "session_id": s, "result": "Done.\n" + v})
@@ -775,7 +815,8 @@ def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None):
         states += ["foo=reviewed:APPROVE", "bar=reviewed:APPROVE"]
     fx.entry["Review"] = lines
     fx.entry["State"] = "State: " + " ".join(states)
-    fx.tail = ["Mission: selftest edges=notes/missions/selftest.edges.jsonl scope=" + ",".join(p for p, _ in mans)
+    fx.tail = ["Mission: selftest edges=notes/missions/selftest.edges.jsonl scope="
+               + (",".join(f"notes/snapshots/{d}/m.sha256" for d in scope) if scope else ",".join(p for p, _ in mans))
                + (" repairs=notes/missions/selftest.repairs.jsonl" if rep_text else "")]
     fx.build()
     policy(out)
@@ -807,16 +848,16 @@ case("cm-script-header-alone", 1, ["control-mutants-missing"], detail="(script r
     lambda out: cm_fx(out, {"r27-controls.txt": CM_R27}))
 case("cm-script-header-with-report", 0, [], f"{CM}['checked'][0]['scripts'] == [['r27-controls.py', {CM_SCRIPT!r}]]")(
     lambda out: cm_fx(out, {"r27-controls.txt": CM_R27, "r27-control-mutants.txt": cm_report()}))
-case("cm-unchanged-since-previous-manifest", 0, [], f"{CM}['checked'] == []")(
-    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, prev={"r23-controls.txt": CM_R23}))
+case("cm-unchanged-since-previous-manifest", 0, [], f"{CM}['checked'] == [] and {CM}['previous'] == 'notes/snapshots/m0/m.sha256'")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, prev={"r23-controls.txt": CM_R23}, before=["m0"]))
 case("cm-changed-undeclared", 1, ["control-mutants-missing", "repair-hash-mismatch"])(
-    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n"}, prev={"r23-controls.txt": CM_R23}))
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n"}, prev={"r23-controls.txt": CM_R23}, before=["m0"]))
 case("cm-changed-declared-needs-report", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']")(
     lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n"}, prev={"r23-controls.txt": CM_R23},
-                      declare=["r23-controls.txt"]))
+                      declare=["r23-controls.txt"], before=["m0"]))
 case("cm-changed-declared-with-report", 0, [], f"{CM}['checked'][0]['control'] == 'r23-controls.txt'")(
     lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n", "r23-control-mutants.txt": cm_report()},
-                      prev={"r23-controls.txt": CM_R23}, declare=["r23-controls.txt"]))
+                      prev={"r23-controls.txt": CM_R23}, declare=["r23-controls.txt"], before=["m0"]))
 CM_OTHER = sha("#!/bin/bash\n# stand-in for a control's runner\n")
 CM_READ = (f"# read 2026-11-20 9:01:15 AM PST on redbaron; r11-matrix-verify.py sha256 {CM_SCRIPT}\n"
            "negative (pre-fix acceptance-subject): exit=1\n")
@@ -847,10 +888,133 @@ case("cm-scripts-runners-logs-not-read", 0, [], f"{CM}['checked'] == []")(
     lambda out: cm_fx(out, {"r23-controls.py": "#!/usr/bin/env python3\n# chain review 23 repair controls\n",
                             "run-r22r-controls.sh": "#!/bin/bash\n# runs the r22r controls\n",
                             "run-r22r-controls.log": "r22r-l3-r10f4-working-clone.txt          exit=0\n"}))
-case("cm-not-a-control-name", 0, [], f"{CM}['checked'] == []")(
-    lambda out: cm_fx(out, {"r23-notes.txt": CM_R23}))
+case("cm-not-a-control-name", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-notes.txt']",
+     detail="(script r23-controls.py sha256")(lambda out: cm_fx(out, {"r23-notes.txt": CM_R23}))
 case("cm-before-control-mutants-since", 0, [], "'control_mutants' not in d['mission']")(
     lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts=CM_EARLY))
+# ---- review r2 (lint-e784 FIX), from the public write-up only
+# F1: a control output is found by its script header and its controls verdict line, not by its own name alone
+CM_L3 = (f"# script mac-r11-text-controls.py sha256 {CM_SCRIPT}\npositive (the repaired packet): HOLDS\n"
+         "negative: round-10 snapshot 20261119T130407Z REFUSED\ncontrols verdict: discriminates\n")
+CM_R28 = f"# script r28-controls.py sha256 {CM_SCRIPT}\nOK   unit\ncontrols verdict: discriminates\n"
+case("cm-l3-output-of-a-control-script-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-l3-r10f6-instant-pairs.txt']",
+     detail="(script mac-r11-text-controls.py sha256")(lambda out: cm_fx(out, {"r28-l3-r10f6-instant-pairs.txt": CM_L3}))
+case("cm-l3-output-with-report", 0, [], f"{CM}['checked'][0]['control'] == 'r28-l3-r10f6-instant-pairs.txt' and {CM}['missing'] == []")(
+    lambda out: cm_fx(out, {"r28-l3-r10f6-instant-pairs.txt": CM_L3, "r28-control-mutants.txt": cm_report()}))
+case("cm-verdict-line-with-other-script-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r11-matrix-verification-r28.txt']",
+     detail="(script r11-matrix-verify.py sha256")(lambda out: cm_fx(out, {"r11-matrix-verification-r28.txt": (
+         f"# script r11-matrix-verify.py sha256 {CM_SCRIPT}\nnegative (pre-fix acceptance-subject): exit=1\ncontrols verdict: discriminates\n")}))
+case("cm-verdict-line-naming-no-script-refused", 1, ["control-mutants-missing"], f"{CM}['checked'] == [{{'control': "
+     "'neg-verdict-selftest-r28.txt', 'scripts': []}]", detail="name no script sha256")(
+    lambda out: cm_fx(out, {"neg-verdict-selftest-r28.txt": "negative: REFUSED\ncontrols verdict: discriminates\n"}))
+case("cm-script-output-without-verdict-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"inventory-r28.txt": f"# script derive-entrypoints.py sha256 {CM_SCRIPT}\nentrypoints: 3\n"}))
+case("cm-mutant-runner-output-not-a-control", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"r28-run-notes.txt": f"# script control-mutants.py sha256 {CM_TOOL}\nran\n"}))
+case("cm-labelled-verdict-line-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r11-matrix-verification-r28.txt']",
+     detail="name no script sha256")(lambda out: cm_fx(out, {"r11-matrix-verification-r28.txt": (
+         "# R11 matrix verification over the round-28 bytes (stand-in)\n  entrypoint control: controls verdict: discriminates\n")}))
+case("cm-quoted-verdict-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"page-r28.txt": 'the run prints "controls verdict: discriminates"\n'}))
+# F2: the round is read against the manifest the Task's previous Mission: entry lists last
+case("cm-control-new-in-unlinted-previous-manifest", 1, ["control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={"r28-controls.txt": CM_R28}))
+case("cm-newest-listed-twice", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.txt']")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, scope=["m1", "m1"]))
+case("cm-third-manifest-read-against-the-previous-entry", 1, ["control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] == 'notes/snapshots/m0/m.sha256'")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={}, mid={"r28-controls.txt": CM_R28}, before=["m0"]))
+case("cm-third-manifest-unchanged-since-the-previous-entry", 0, [],
+     f"{CM}['checked'] == [] and {CM}['previous'] == 'notes/snapshots/m1/m.sha256'")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={}, mid={"r28-controls.txt": CM_R28}, before=["m0", "m1"]))
+case("cm-previous-keyed-by-path", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.txt']")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={"sub/r28-controls.txt": CM_R28}, before=["m0"]))
+# F3: a round member whose freeze copy is absent or moved is refused when it is a control output by path or by its copy
+case("cm-control-copy-moved", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-controls.txt']", detail="its freeze copy is")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28, "r28-control-mutants.txt": cm_report()},
+                      moved={"r28-controls.txt": CM_R28 + "OK   edited after the freeze\n"}))
+case("cm-control-copy-absent", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-controls.txt']",
+     detail="its freeze copy is absent")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28, "r28-control-mutants.txt": cm_report()}, absent=["r28-controls.txt"]))
+case("cm-moved-copy-reads-as-a-control", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-l3-pairs.txt']")(
+    lambda out: cm_fx(out, {"r28-l3-pairs.txt": "positive: HOLDS\n"}, moved={"r28-l3-pairs.txt": CM_L3}))
+case("cm-moved-other-member-not-read", 0, [], f"{CM}['unreadable'] == [] and {CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"notes-r28.txt": "a note\n"}, moved={"notes-r28.txt": "another note\n"}))
+# F4: a vacuous report fails
+case("cm-report-zero-mutants", 1, ["control-mutant-survived"], detail="reports no mutant (mutants: 0)")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(summary_line="mutants: 0; KILLED: 0; SURVIVED: 0")}))
+case("cm-report-killed-short-of-total", 1, ["control-mutant-survived"], detail="reports KILLED: 0 of 2 mutants")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(summary_line="mutants: 2; KILLED: 0; SURVIVED: 0")}))
+# F5: the entry's date is the latest of its header ts, its Route decision= and its bound review launches; F7 m01, m02
+CM_SHIFT = "2026-11-21T19:05:00-08:00"
+# (a review launched after 2026-11-16T20:00 needs a findings= line in its result: mission-finding-incomplete, the shift's own finding)
+case("cm-backdated-entry-with-later-review-launch", 1, ["control-mutants-missing", "mission-finding-incomplete"],
+     f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T18:12:00-08:00", when={0: CM_SHIFT}))
+case("cm-entry-with-earlier-review-launch-exempt", 1, ["mission-finding-incomplete"], "'control_mutants' not in d['mission']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T18:12:00-08:00", when={0: "2026-11-21T17:00:00-08:00"}))
+case("cm-backdated-entry-with-later-route-decision", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T18:12:00-08:00", route_ts=CM_SHIFT))
+case("cm-at-control-mutants-since", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T18:13:00-08:00"))
+case("cm-unreadable-entry-date-counts-as-after", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T12:00:00"))
+# F6, the report reading
+case("cm-report-indented-survived-row", 1, ["control-mutant-survived"], detail="holds 1 SURVIVED row")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23,
+                            "r23-control-mutants.txt": cm_report(extra="    SURVIVED M12 | pairing: a negative dropped\n")}))
+case("cm-report-earlier-refusing-certificate", 1, ["control-mutant-survived"], detail="NO REVIEW-REQUEST, NO FREEZE")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        extra="certificate: SURVIVED mutants; NO REVIEW-REQUEST, NO FREEZE\n")}))
+case("cm-report-indented-refusing-certificate", 1, ["control-mutant-survived"], detail="NO REVIEW-REQUEST, NO FREEZE")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        extra="  certificate: SURVIVED mutants; NO REVIEW-REQUEST, NO FREEZE\n")}))
+case("cm-report-certificate-other-text", 1, ["control-mutant-survived"], detail="every mutant KILLED? no")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(cert="every mutant KILLED? no: M8 survived")}))
+case("cm-report-without-certificate", 1, ["control-mutant-survived"], detail="has no `certificate:` line")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(cert="")}))
+case("cm-report-indented-summary-not-read", 1, ["control-mutant-survived"], detail="reports SURVIVED: 1 of 2 mutants")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        summary_line="mutants: 2; KILLED: 1; SURVIVED: 1", post="    mutants: 2; KILLED: 2; SURVIVED: 0\n")}))
+case("cm-report-two-summaries", 1, ["control-mutant-survived"], detail="holds 2 `mutants: N; KILLED: K; SURVIVED: S` summary lines")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(post="mutants: 2; KILLED: 1; SURVIVED: 1\n")}))
+case("cm-report-survived-row-after-the-meta-negative", 1, ["control-mutant-survived"], detail="holds 1 SURVIVED row")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        extra=CM_META, post="    SURVIVED M12 | pairing: a negative dropped\n")}))
+case("cm-report-survived-row-in-a-later-section", 1, ["control-mutant-survived"], detail="holds 1 SURVIVED row")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        extra=CM_META + "\n## generic operators over the frozen packet\n    SURVIVED M13 | pairing: a negative dropped\n")}))
+case("cm-every-report-read-out-of-round-too", 1, ["control-mutant-survived"], f"{CM}['survived'][0]['report'] == 'r23b-control-mutants.txt'")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(),
+                            "r23b-control-mutants.txt": cm_report(survived=1)},
+                      prev={"r23b-control-mutants.txt": cm_report(survived=1)}, before=["m0"]))
+case("cm-script-source-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"r28-controls.py": '"""r28 controls.\ncontrols verdict: discriminates when every negative refuses\n"""\n'}))
+case("cm-every-report-at-the-script-is-read", 1, ["control-mutant-survived"], f"{CM}['survived'][0]['report'] == 'r23b-control-mutants.txt'")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(),
+                            "r23b-control-mutants.txt": cm_report(survived=1)}))
+case("cm-round-report-beside-unchanged-control", 1, ["control-mutant-survived"],
+     f"{CM}['checked'] == [] and {CM}['survived'][0]['report'] == 'r23-control-mutants.txt'", detail="(the control under test sha256")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(survived=1)}, prev={"r23-controls.txt": CM_R23},
+                      before=["m0"]))
+# F6, the classifier
+case("cm-under-test-line-in-a-control", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.txt']")(
+    lambda out: cm_fx(out, {"r28-controls.txt": (f"# script r28-controls.py sha256 {CM_SCRIPT}\n"
+                                                 f"#   {CM_TOOL}  notes/controls-r13/r22-controls.py (the control under test)\nOK   unit\n")}))
+case("cm-mutant-named-control", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-mutant-pairs.txt']")(
+    lambda out: cm_fx(out, {"r28-mutant-pairs.txt": CM_R28}))
+case("cm-byte-order-mark-before-header", 0, [], f"{CM}['checked'][0]['scripts'] == [['r27-controls.py', {CM_SCRIPT!r}]]")(
+    lambda out: cm_fx(out, {"r27-controls.txt": chr(0xFEFF) + CM_R27, "r27-control-mutants.txt": cm_report()}))
+case("cm-control-named-out-with-verdict", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.out']",
+     detail="name no script sha256")(
+    lambda out: cm_fx(out, {"r28-controls.out": "positive: HOLDS\ncontrols verdict: discriminates\n"}))
+case("cm-control-named-json-spaced-script-line", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.json']",
+     detail="(script r28-controls.py sha256")(
+    lambda out: cm_fx(out, {"r28-controls.json": f"# script  r28-controls.py  sha256 {CM_SCRIPT}\n{{}}\n"}))
+case("cm-control-named-unread-script-line", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.out']",
+     detail="name no script sha256")(
+    lambda out: cm_fx(out, {"r28-controls.out": f"# script r28-controls.py sha256 {CM_SCRIPT.upper()}\nOK   unit\n"}))
 
 
 # ---------------------------------------------------------------- driver
