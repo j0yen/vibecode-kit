@@ -173,13 +173,15 @@
 # mutant report naming the control's script at the same sha256 as `(the control under test)`, whose last summary line
 # `mutants: N; KILLED: K; SURVIVED: S` has S = 0, with no SURVIVED row (a line that starts `SURVIVED `; mechanism 1 indents the
 # meta-negative's survivors, which it requires) and no refusing certificate (a `certificate:` line other than `certificate: every
-# mutant KILLED...`). A control output is a member whose basename holds `control` (and not `mutant`)
-# and whose leading `#` lines name its script and that script's sha256 (`# script <name> sha256 <hex>`, or the earlier
-# `# <name>.py controls ...` followed by `#   <hex>  <path to name>`); a mutant report is a member with a `(the control under
-# test)` header line. Members are read at the manifest's directory (the freeze's own copies) and only when their bytes match the
-# manifest's digest. control-mutants-missing: no such report; control-mutant-survived: a report there with S > 0, no summary
-# line, a SURVIVED row or a refusing certificate. JSON:
-# mission.control_mutants {manifest, checked, missing, survived}.
+# mutant KILLED...`). A control output is a member whose basename holds `control` (and not `mutant`) and whose leading `#`
+# lines name a script and its sha256 (`# script <name> sha256 <hex>`; a `;` part of the read line, `# read <when> on <host>;
+# [script] [<name>] sha256 <hex>[; ...]`; or the earlier `# <name>.py controls ...` followed by `#   <hex>  <path to name>`; the
+# header's other sha256 lines, the control's inputs, name no script), or whose name ends `.txt` (a control read that names no
+# script); a report at any script it names answers for it. A mutant report is a member with a `(the control under test)` header line. Members are read at the
+# manifest's directory (the freeze's own copies) and only when their bytes match the manifest's digest.
+# control-mutants-missing: no such report, or a `.txt` control output that names no script (no report can name its control);
+# control-mutant-survived: a report there with S > 0, no summary line, a SURVIVED row or a refusing certificate. JSON:
+# mission.control_mutants {manifest, checked [{control, scripts [[name, sha256]...]}], missing, survived}.
 #
 # R4 floor across the home (five-whys page e784471d mechanism 3, lint part; owner 03415; the R4 text is the PRD author's):
 # besides the sessions launched after the Task's previous entry, the floor reads each State: slug's consecutive FIX or REJECT
@@ -1274,6 +1276,7 @@ CM_LEGACY_SHA_RE = re.compile(r"^#\s+([0-9a-f]{64})\s+(\S+)")
 CM_UNDER_TEST_RE = re.compile(r"^#\s+([0-9a-f]{64})\s+(\S+)\s+\(the control under test\)\s*$")
 CM_SUMMARY_RE = re.compile(r"^mutants: (\d+); KILLED: (\d+); SURVIVED: (\d+)$")
 CM_SURVIVED_ROW_RE = re.compile(r"^SURVIVED \S")
+CM_READ_SEG_RE = re.compile(r"^(?:script\s+)?(?:(\S+)\s+)?sha256\s+([0-9a-f]{64})$")
 CM_CERT_OK = "certificate: every mutant KILLED"
 CM_HEAD_LINES = 40
 
@@ -1293,10 +1296,37 @@ def cm_header(path):
     return out
 
 
+def cm_scripts(head):
+    """Mechanism 2: the scripts a control output's leading `#` lines name, [(name, sha256)] in order without repeats: `# script <name>
+    sha256 <hex>`; each `;` part `[script] [<name>] sha256 <hex>` of a `# read <when> on <host>; ...` line (a part without a name reads
+    as "(unnamed script)"); and the earlier `# <name>.py controls ...` with the next line `#   <hex>  <path to that name>`. Other lines
+    that carry a sha256 (the control's inputs: a PRD, a repository head and its file) name no script."""
+    out = []
+
+    def add(n, h):
+        if (n, h) not in out:
+            out.append((n, h))
+    for i, ln in enumerate(head):
+        m = CM_SCRIPT_RE.match(ln)
+        if m:
+            add(m.group(1), m.group(2))
+        if ln.startswith("# read "):
+            for part in ln.split(";")[1:]:
+                m = CM_READ_SEG_RE.match(part.strip())
+                if m:
+                    add(m.group(1) or "(unnamed script)", m.group(2))
+        m = CM_LEGACY_RE.match(ln)
+        if m and i + 1 < len(head):
+            n = CM_LEGACY_SHA_RE.match(head[i + 1])
+            if n and n.group(2).rsplit("/", 1)[-1] == m.group(1):
+                add(m.group(1), n.group(1))
+    return out
+
+
 def cm_kind(head, base):
-    """Mechanism 2: ("report", control sha256) for a mutant report (a `(the control under test)` header line); ("control", script,
-    sha256) for a control output (a basename holding `control` and not `mutant`, whose header names its script: `# script <name>
-    sha256 <hex>`, or `# <name>.py controls ...` with the next line `#   <hex>  <path to that name>`); else None."""
+    """Mechanism 2: ("report", control sha256) for a mutant report (a `(the control under test)` header line); ("control", scripts) for a
+    control output (a basename holding `control` and not `mutant` whose header names at least one script (cm_scripts), or whose name
+    ends `.txt`, then with scripts possibly empty); else None (a control's script, runner, log or page)."""
     for ln in head:
         m = CM_UNDER_TEST_RE.match(ln)
         if m:
@@ -1304,15 +1334,9 @@ def cm_kind(head, base):
     low = base.lower()
     if "control" not in low or "mutant" in low:
         return None
-    for i, ln in enumerate(head):
-        m = CM_SCRIPT_RE.match(ln)
-        if m:
-            return ("control", m.group(1), m.group(2))
-        m = CM_LEGACY_RE.match(ln)
-        if m and i + 1 < len(head):
-            n = CM_LEGACY_SHA_RE.match(head[i + 1])
-            if n and n.group(2).rsplit("/", 1)[-1] == m.group(1):
-                return ("control", m.group(1), n.group(1))
+    scripts = cm_scripts(head)
+    if scripts or low.endswith(".txt"):
+        return ("control", scripts)
     return None
 
 
@@ -1346,8 +1370,9 @@ def control_mutant_check(L, mans, ts):
     """Five-whys page e784471d mechanism 2 (owner 03415, consumption row E784-M2), for an entry dated at or after
     CONTROL_MUTANTS_SINCE (an unreadable date counts as after): every control output of the newest listed manifest that is new there or
     whose digest moved from the previous listed manifest (the round's control reads) needs, in that same manifest, a mutant report
-    naming the control's script at the same sha256 as `(the control under test)` whose last summary line has SURVIVED 0, with no
-    SURVIVED row and no refusing certificate (every such report there is read; any one that fails refuses). Members are
+    naming one of the scripts the output names at the same sha256 as `(the control under test)` whose last summary line has SURVIVED 0,
+    with no SURVIVED row and no refusing certificate (every such report there is read; any one that fails refuses); a `.txt` control
+    output that names no script is refused, since no report can name its control. Members are
     read at the manifest's directory (the freeze's own copies) and only when their bytes match the manifest's digest (a moved copy is
     mission-snapshot-stale's). -> {"manifest", "checked", "missing", "survived"}, or None when nothing here applies."""
     t, since = parse_iso(ts or ""), parse_iso(CONTROL_MUTANTS_SINCE)
@@ -1365,15 +1390,23 @@ def control_mutant_check(L, mans, ts):
         if k[0] == "report":
             reports.setdefault(k[1], []).append((ps, key))
         elif prev.get(cm_key(ps, base)) != h:
-            controls.append((ps, k[1], k[2]))
+            controls.append((ps, k[1]))
     out = {"manifest": new["path"], "checked": [], "missing": [], "survived": []}
-    for ps, script, sh in controls:
-        out["checked"].append({"control": ps, "script": script, "sha256": sh})
-        reps = reports.get(sh, [])
+    for ps, scripts in controls:
+        out["checked"].append({"control": ps, "scripts": [[n, sh] for n, sh in scripts]})
+        if not scripts:
+            out["missing"].append(ps)
+            L.fail("control-mutants-missing", f"{ps} in manifest {new['path']}: its leading # lines name no script sha256, so no mutant "
+                   f"report can name its control (five-whys page e784471d mechanism 2)")
+            continue
+        reps = []
+        for _, sh in scripts:
+            reps += [r for r in reports.get(sh, []) if r not in reps]
         if not reps:
             out["missing"].append(ps)
-            L.fail("control-mutants-missing", f"{ps} (script {script} sha256 {sh[:12]}) in manifest {new['path']}: no mutant report there "
-                   f"names that script sha256 as the control under test (five-whys page e784471d mechanism 2)")
+            named = "; ".join(f"{n} sha256 {sh[:12]}" for n, sh in scripts)
+            L.fail("control-mutants-missing", f"{ps} (script {named}) in manifest {new['path']}: no mutant report there names that "
+                   f"script sha256 as the control under test (five-whys page e784471d mechanism 2)")
             continue
         for rps, rkey in reps:
             s, rows, cert = cm_read(rkey)

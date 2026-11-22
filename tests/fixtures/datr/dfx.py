@@ -785,7 +785,7 @@ CM = "d['mission']['control_mutants']"
 case("cm-r23-alone-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']",
      detail="no mutant report there names that script sha256")(lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}))
 case("cm-r23-with-killing-report", 0, [],
-     f"{CM}['checked'] == [{{'control': 'r23-controls.txt', 'script': 'r23-controls.py', 'sha256': {CM_SCRIPT!r}}}] and {CM}['missing'] == [] "
+     f"{CM}['checked'] == [{{'control': 'r23-controls.txt', 'scripts': [['r23-controls.py', {CM_SCRIPT!r}]]}}] and {CM}['missing'] == [] "
      f"and {CM}['survived'] == []")(lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report()}))
 case("cm-report-survived", 1, ["control-mutant-survived"], f"{CM}['survived'][0]['survived'] == 1", detail="reports SURVIVED: 1 of 2 mutants")(
     lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(survived=1)}))
@@ -805,7 +805,7 @@ case("cm-report-not-listed", 1, ["control-mutants-missing"])(
     lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, unlisted={"r23-control-mutants.txt": cm_report()}))
 case("cm-script-header-alone", 1, ["control-mutants-missing"], detail="(script r27-controls.py sha256")(
     lambda out: cm_fx(out, {"r27-controls.txt": CM_R27}))
-case("cm-script-header-with-report", 0, [], f"{CM}['checked'][0]['script'] == 'r27-controls.py'")(
+case("cm-script-header-with-report", 0, [], f"{CM}['checked'][0]['scripts'] == [['r27-controls.py', {CM_SCRIPT!r}]]")(
     lambda out: cm_fx(out, {"r27-controls.txt": CM_R27, "r27-control-mutants.txt": cm_report()}))
 case("cm-unchanged-since-previous-manifest", 0, [], f"{CM}['checked'] == []")(
     lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, prev={"r23-controls.txt": CM_R23}))
@@ -817,6 +817,36 @@ case("cm-changed-declared-needs-report", 1, ["control-mutants-missing"], f"{CM}[
 case("cm-changed-declared-with-report", 0, [], f"{CM}['checked'][0]['control'] == 'r23-controls.txt'")(
     lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n", "r23-control-mutants.txt": cm_report()},
                       prev={"r23-controls.txt": CM_R23}, declare=["r23-controls.txt"]))
+CM_OTHER = sha("#!/bin/bash\n# stand-in for a control's runner\n")
+CM_READ = (f"# read 2026-11-20 9:01:15 AM PST on redbaron; r11-matrix-verify.py sha256 {CM_SCRIPT}\n"
+           "negative (pre-fix acceptance-subject): exit=1\n")
+CM_TWO = (f"# read 2026-11-21 12:02:09 AM PST on redbaron\n# script m3-sweep-controls.sh sha256 {CM_OTHER}\n"
+          f"# script sweep-check-r12.py sha256 {CM_SCRIPT}\nOK   sweep\n")
+case("cm-read-form-alone", 1, ["control-mutants-missing"], f"{CM}['checked'] == [{{'control': 'r11-matrix-verify-controls-r22r.txt', "
+     f"'scripts': [['r11-matrix-verify.py', {CM_SCRIPT!r}]]}}]", detail="(script r11-matrix-verify.py sha256")(
+    lambda out: cm_fx(out, {"r11-matrix-verify-controls-r22r.txt": CM_READ}))
+case("cm-read-form-with-report", 0, [], f"{CM}['missing'] == []")(
+    lambda out: cm_fx(out, {"r11-matrix-verify-controls-r22r.txt": CM_READ, "r22r-control-mutants.txt": cm_report()}))
+case("cm-two-scripts-report-at-either", 0, [], f"len({CM}['checked'][0]['scripts']) == 2 and {CM}['missing'] == []")(
+    lambda out: cm_fx(out, {"m3-sweep-controls-r24oc.txt": CM_TWO, "r24oc-control-mutants.txt": cm_report()}))
+case("cm-two-scripts-report-elsewhere", 1, ["control-mutants-missing"],
+     detail="(script m3-sweep-controls.sh sha256 " + CM_OTHER[:12] + "; sweep-check-r12.py sha256")(
+    lambda out: cm_fx(out, {"m3-sweep-controls-r24oc.txt": CM_TWO, "r24oc-control-mutants.txt": cm_report(sha_under_test=CM_TOOL)}))
+CM_NAMELESS = f"# read 2026-11-20 12:30:32 AM PST on redbaron; script sha256 {CM_SCRIPT}; mode text\nOK   text\n"
+CM_INPUTS = (f"# r23-controls.py controls <prd home> (stand-in)\n#   {CM_SCRIPT}  notes/controls-r13/r23-controls.py\n"
+             f"# head followon6/source/work/u2e-repin 4704687eb0687702f03459e6faf126a39ecc000a consumer-run-record-gate.py sha256 {CM_TOOL}\n"
+             "OK   unit\n")
+case("cm-read-form-nameless-script", 0, [], f"{CM}['checked'][0]['scripts'] == [['(unnamed script)', {CM_SCRIPT!r}]]")(
+    lambda out: cm_fx(out, {"r13-text-controls.txt": CM_NAMELESS, "r13-control-mutants.txt": cm_report()}))
+case("cm-input-sha-is-not-the-script", 1, ["control-mutants-missing"], f"{CM}['checked'][0]['scripts'] == [['r23-controls.py', {CM_SCRIPT!r}]]")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_INPUTS, "r23-control-mutants.txt": cm_report(sha_under_test=CM_TOOL)}))
+case("cm-txt-naming-no-script-refused", 1, ["control-mutants-missing"], f"{CM}['checked'] == [{{'control': 'm1-pairs-controls-r22r.txt', "
+     "'scripts': []}]", detail="name no script sha256, so no mutant report can name its control")(
+    lambda out: cm_fx(out, {"m1-pairs-controls-r22r.txt": 'read-target {"part": "P2 text"}\n'}))
+case("cm-scripts-runners-logs-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"r23-controls.py": "#!/usr/bin/env python3\n# chain review 23 repair controls\n",
+                            "run-r22r-controls.sh": "#!/bin/bash\n# runs the r22r controls\n",
+                            "run-r22r-controls.log": "r22r-l3-r10f4-working-clone.txt          exit=0\n"}))
 case("cm-not-a-control-name", 0, [], f"{CM}['checked'] == []")(
     lambda out: cm_fx(out, {"r23-notes.txt": CM_R23}))
 case("cm-before-control-mutants-since", 0, [], "'control_mutants' not in d['mission']")(
