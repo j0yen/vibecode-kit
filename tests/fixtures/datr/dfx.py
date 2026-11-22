@@ -1310,6 +1310,49 @@ for _n, _v in (("json-file-word", "fixture.json verdict: discriminates"),
     case(f"cm-verdict-{_n}-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == [{CM_RB!r}]")(
         (lambda v: lambda out: cm_fx(out, {CM_RB: f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\n{v}\n"}))(_v))
 
+# ---- review lint-e784f (APPROVE on f2f36e6, its LOW L1-L3), from the public write-up only
+# L1: each condition of the dating loop has a case: the newest freeze listed first of three, every line kept and its line left off (g8,
+# g8b; a mutant comparing only the manifest just before the last passes them); launch times compared as instants, m1's review row in Z
+# form (g9; a mutant comparing the ts strings); the session's last launch row with no readable time dates nothing, not an earlier
+# readable row of it (g10; a mutant filtering by time before taking the last row); a row with no task_id is no review launch of the
+# Task (g11; a mutant taking it as the Task's)
+CM_G8 = dict(prev={}, mid=CM_N27, scope=["m2", "m0", "m1"], rorder=[2, 0, 1])
+case("cm-newest-listed-first-of-three-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, **CM_G8))
+case("cm-newest-listed-first-of-three-review-left-off-unread-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], **CM_G8))
+case("cm-last-listed-review-in-z-form-compared-as-an-instant-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], when={1: "2026-11-15T09:40:00Z"}, **CM_O3))
+case("cm-last-listed-reviewers-last-launch-row-with-no-time-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD,
+     detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [review_row(CM_M1_LATE, CM_S_X1), review_row(FS_NO_TIME, CM_S_X1)]}, **CM_O3))
+case("cm-last-listed-row-with-no-task-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [{k: v for k, v in review_row(CM_M1_LATE, CM_S_X1).items() if k != "task_id"}]},
+                      **CM_O3))
+# L2 (accepted, constructed): an older listed freeze reviewed again after the newest one's review launch is not told from a newer freeze
+# listed before the last, so an in-order entry whose newest round is answered is refused, the FAIL line naming that cause (g4); the
+# same entry without the re-review passes (g4b)
+CM_M1_AGAIN = "2026-11-15T02:30:00-08:00"               # after m2's review launch (01:50)
+CM_N28K = dict(CM_N28, **{"r28-control-mutants.txt": cm_report()})
+case("cm-older-freeze-reviewed-again-after-the-newest-refused", 1, ["control-mutants-missing"],
+     f"{CM}['unread'] == ['notes/snapshots/m1/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m2/m.sha256' and {CM}['missing'] == []",
+     detail=f"its review session {CM_S_X1} launched {CM_M1_AGAIN}, after every review of the last listed manifest notes/snapshots/m2/m.sha256"
+            ", whose round is the one read, so this newer freeze's round is not read; list the newest freeze last (when it is last, this "
+            "older freeze was reviewed again after it")(
+    lambda out: cm_fx(out, CM_N28K, prev={}, mid=CM_N27, xat={1: [review_row(CM_M1_AGAIN, CM_S_X1)]}))
+case("cm-older-freeze-reviewed-once-in-order-not-unread", 0, [], f"{CM}['unread'] == [] and len({CM}['checked']) == 1")(
+    lambda out: cm_fx(out, CM_N28K, prev={}, mid=CM_N27))
+# L3 (accounted, constructed, over-refusal only): a verdict-line word is followed by one whitespace character, so a runner row of a name
+# shorter than the 40-character column written with one tab or one space (no `%-40s ` runner writes it) is read, and refused while
+# unanswered (r3, r4); a file word then a tab in a control output is read (h8)
+for _n, _sep in (("a-tab", "\t"), ("one-space", " ")):
+    case(f"cm-runner-log-short-name-and-{_n}-verdict-row-read-refused", 1, ["control-mutants-missing"],
+         f"{CM}['missing'] == ['run-r29-controls.log']")(
+        (lambda sep: lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(),
+                                              "run-r29-controls.log": f"r29-l3.txt{sep}controls verdict: discriminates\n"}))(_sep))
+case("cm-verdict-json-file-word-and-a-tab-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == [{CM_RB!r}]")(
+    lambda out: cm_fx(out, {CM_RB: f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\nfixture.json\tverdict: discriminates\n"}))
+
 # ---------------------------------------------------------------- driver
 def build(name, out):
     os.makedirs(out, exist_ok=True)

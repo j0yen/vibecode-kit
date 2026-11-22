@@ -33,10 +33,16 @@ rad_later_pair() { use declined-repaired; run_fc
 # a plain repaired row (no decline) on (after, third) for r1's F1: before is not r1's manifest
 rad_plain_later() { use three; redit "R[0]['before'] = '$AFT'; R[0]['after'] = '$THR'"; run_fc
   has_fail repair-scope-mismatch "row 1 (finding F1): before $AFT canonicalizes to" "the issuing review $R1D/verdict.txt is bound to"; }
+# review lint-boundary-r29f4 L1: the decline itself is held to the issuing review's manifest; F1 declined on (after, after), the
+# following review's manifest in the same_ok shape, then repaired on (before, after), refuses row 1 (a declined row given the later
+# chain reviews' manifests passes)
+rad_decl_following_same() { use base; redit "R.insert(0, dict(${DECL/\{i\}/0}, before='$AFT', after='$AFT', changed=[]))"; run_fc
+  has_fail repair-scope-mismatch "row 1 (finding F1): before $AFT canonicalizes to" "the issuing review $R1D/verdict.txt is bound to"
+  [ "$(scm)" = 1 ] || fail "decline on the following review's manifest: $(scm) repair-scope-mismatch lines, want 1: $ERR"; }
 n=0 bad=""
-for c in rad_own_pair rad_own_pair_mid rad_earlier_before rad_far_after rad_later_pair rad_plain_later; do
+for c in rad_own_pair rad_own_pair_mid rad_earlier_before rad_far_after rad_later_pair rad_plain_later rad_decl_following_same; do
   n=$((n + 1)); out=$( "$c" ) || bad="$bad $c"
   [ -z "$out" ] || printf '%s: %s\n' "$c" "$out"
 done
 [ -z "$bad" ] || fail "cases failed:$bad"
-pass "$n cases: own pair x2, earlier before, far after, later pair, plain later"
+pass "$n cases: own pair x2, earlier before, far after, later pair, plain later, decline on the following manifest"

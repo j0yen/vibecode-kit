@@ -9,8 +9,8 @@
 # kills M5 and M8 it passes. A control output is found by a control script's header or a `controls verdict:` line (or `<words> verdict:
 # discriminates` / `does not discriminate` in any case, the r10f1 readback fixture's) as well as by its name; a round member that is not
 # a script whose freeze copy is absent or moved is refused whatever its name. Review lint-e784's counterexamples (F1-F7), review
-# lint-e784b's (N1-N3), review lint-e784c's (P1-P5), review lint-e784d's (Q1, Q3, Q4) and review lint-e784e's (R1, R3, R4, R5) each
-# have a case.
+# lint-e784b's (N1-N3), review lint-e784c's (P1-P5), review lint-e784d's (Q1, Q3, Q4), review lint-e784e's (R1, R3, R4, R5) and review
+# lint-e784f's (L1-L3) each have a case.
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/datr_lib.sh"
 cases cm
