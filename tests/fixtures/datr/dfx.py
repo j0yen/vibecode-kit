@@ -751,7 +751,7 @@ def cm_report(sha_under_test=CM_SCRIPT, survived=0, summary=True, extra="", cert
 
 def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before=None, mid=None, scope=None, when=None, route_ts=None,
           moved=None, absent=None, again=None, rorder=None, xrows=None, rmore=None, xat=None, leave=None, ascope=None,
-          unlaunched=None):
+          unlaunched=None, xedit=None):
     """A mission (the selftest's chain shape) whose Mission: line lists one manifest, notes/snapshots/m1/m.sha256 (reviewed by S_R1), or
     with `prev` two (m0 reviewed by S_R1, then m1 by S_R2); each freezes foo, bar, the matrix and the edges file, and `members` (for m1)
     or `prev` (for m0), {basename: text}, copied into its own directory as a round freeze holds them. `unlisted`: files written into m1's
@@ -770,7 +770,8 @@ def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before
     index: [rows]}, decision rows added with that manifest's scope and scope_id (Q1). Review lint-e784e: `ascope`, every decision row's
     scope written as the absolute path in the home, as the real routing rows write an absolute RedBaron path (R5 k03); `unlaunched`,
     manifest indexes whose review launch row is not in the log, so the freeze was never reviewed (with `leave`: R1's e7, and the real
-    shape, the last listed freeze not yet reviewed)."""
+    shape, the last listed freeze not yet reviewed). Review lint-hygiene-h N1, N2: `xedit`, a function applied to every `xat` row after
+    its scope and scope_id are set (a row with one field removed or emptied, or its scope id cut)."""
     fx = Fx(out)
     rep_text = None
     if declare:
@@ -825,7 +826,7 @@ def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before
         if 4 + k >= len(fx.rows):
             fx.rows.append(dict(fx.rows[5], ts="2026-11-15T01:50:00-08:00", session=s))
         fx.rows[4 + k] = dict(fx.rows[4 + k], role="review", scope=p, scope_id=scope_id(text))
-        more += [dict(r, scope=p, scope_id=scope_id(text)) for r in (xat or {}).get(k, ())]
+        more += [(xedit or dict)(dict(r, scope=p, scope_id=scope_id(text))) for r in (xat or {}).get(k, ())]
         if when and k in when:
             fx.rows[4 + k]["ts"] = when[k]
         v = f"foo APPROVE fable\nbar APPROVE fable\nmission=APPROVE {s}\n"
@@ -1334,6 +1335,18 @@ case("cm-last-listed-row-with-no-task-does-not-date-it", 1, ["control-mutants-mi
 case("cm-last-listed-row-with-no-role-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
     lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [{k: v for k, v in review_row(CM_M1_LATE, CM_S_X1).items() if k != "role"}]},
                       **CM_O3))
+# review lint-hygiene-h N1: a launch row with no session, or an empty one, is no session's last launch row, so it dates nothing, as every
+# other review reader of the lint requires a session; N2: the rest of H1's class, each field the dating loop and its scope match read
+# with its value missing (decision, skill, scope_id, ts) or the scope id cut to a 12-hex prefix, dates nothing (each mutant defaulting
+# the field, or matching the scope id by prefix, passes every other case)
+for _n, _e in (("no-session", lambda r: {k: v for k, v in r.items() if k != "session"}), ("an-empty-session", lambda r: dict(r, session="")),
+               ("no-decision", lambda r: {k: v for k, v in r.items() if k != "decision"}),
+               ("no-skill", lambda r: {k: v for k, v in r.items() if k != "skill"}),
+               ("no-scope-id", lambda r: {k: v for k, v in r.items() if k != "scope_id"}),
+               ("a-12-hex-scope-id-prefix", lambda r: dict(r, scope_id=r["scope_id"][:12])),
+               ("no-ts", lambda r: {k: v for k, v in r.items() if k != "ts"})):
+    case(f"cm-last-listed-row-with-{_n}-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+        (lambda e: lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [review_row(CM_M1_LATE, CM_S_X1)]}, xedit=e, **CM_O3))(_e))
 # L2 (accepted, constructed): an older listed freeze reviewed again after the newest one's review launch is not told from a newer freeze
 # listed before the last, so an in-order entry whose newest round is answered is refused, the FAIL line naming that cause (g4); the
 # same entry without the re-review passes (g4b)
@@ -1357,6 +1370,13 @@ for _n, _sep in (("a-tab", "\t"), ("one-space", " ")):
                                               "run-r29-controls.log": f"r29-l3.txt{sep}controls verdict: discriminates\n"}))(_sep))
 case("cm-verdict-json-file-word-and-a-tab-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == [{CM_RB!r}]")(
     lambda out: cm_fx(out, {CM_RB: f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\nfixture.json\tverdict: discriminates\n"}))
+# review lint-hygiene-h N3: the verdict line's indentation and its label's separator are any whitespace, as between words, so a runner
+# log line indented by two ideographic spaces (U+3000), or with a tab after its label's colon, is read, and refused while unanswered
+for _n, _v in (("indented-by-ideographic-spaces", "\u3000\u3000controls verdict: discriminates"),
+               ("label-and-a-tab", "entrypoint control:\tcontrols verdict: discriminates")):
+    case(f"cm-runner-log-verdict-line-{_n}-read-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['run-r29-controls.log']")(
+        (lambda v: lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(),
+                                            "run-r29-controls.log": v + "\n"}))(_v))
 
 # ---------------------------------------------------------------- driver
 def build(name, out):

@@ -194,7 +194,8 @@
 # read) and none a file name of 40 characters or more (ending
 # .txt, .log, .out, .md or .json: the runner scripts' `%-40s ` column, which leaves one space only after such a name), as the L3
 # r10f1 readback fixture's `fixture verdict: discriminates` or `pairs.json verdict: ...`, at the start of a line after its indentation
-# and at most one `<label>: `, as r11-matrix-verification's `  entrypoint control: controls verdict: ...`; a page or record quoting
+# and at most one `<label>: ` (the indentation and the label's separator are any whitespace, as between words), as
+# r11-matrix-verification's `  entrypoint control: controls verdict: ...`; a page or record quoting
 # the words mid-line, or a runner log's `<output> controls verdict: ...` row, column-padded or with a name of 40 characters or more,
 # is no verdict line; a row of a shorter name followed by one whitespace character (a space, a tab, or another Unicode whitespace
 # character such as a no-break space), which the `%-40s ` runners never write, is read as a verdict line and so refused while
@@ -1586,7 +1587,7 @@ def control_mutant_check(L, mans, ts, later, previous, drows=None, task=None):
                    f"{why} (five-whys page e784471d mechanism 2)")
     last = {}
     for r in drows or []:
-        if r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("task_id") == task:
+        if r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("task_id") == task and r.get("session"):
             last[r.get("session")] = r
     rl = [r for r in last.values() if r.get("role") == "review" and launch_ts(r) is not None]   # lint-e784e R3: bind_reviews' reviews
 
