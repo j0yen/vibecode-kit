@@ -146,6 +146,9 @@
 # review's manifest (R6); changed members and their consumers are held until the mission's final
 # APPROVE, an unaccepted decline's until acceptance (R7). JSON: mission.repairs (R8), whose
 # `file` keeps the repairs= path the edge-map JSON carried; null when nothing here applies.
+# A repaired row that follows its finding's decline holds the decline's own pair (before = the issuing
+# review's manifest, after = the next listed one) or a pair whose before is a later chain review's
+# manifest (chain review 29 R29-F4).
 #
 # Path keys and the legacy matrix (PRD-dream-generation-aware-mission-records R4, R1): each
 # manifest's entries are also keyed by path, the line's path resolved against the manifest's
@@ -2648,8 +2651,11 @@ def repair_sweep(L, mrec, mans, chain, bound, rows, governed, task, entries, ei,
             L.fail("repair-scope-mismatch", f"row {n}: before {r['before']} is not a listed scope= manifest")
         elif anchor is not None and cb is not None:
             iss = chain[anchor]
-            okids = ([ids[c["idx"]] for c in chain[anchor + 1:]] if x["disp"] == "repaired" and fid in sup
-                     else [ids[iss["idx"]]])
+            # chain review 29 R29-F4: a repaired row after its finding's decline may hold the decline's own pair, before = the
+            # issuing review's manifest (its after the next listed one, as for any repaired row, below), or a later chain
+            # review's manifest; no other earlier manifest
+            okids = [ids[iss["idx"]]] + ([ids[c["idx"]] for c in chain[anchor + 1:]] if x["disp"] == "repaired" and fid in sup
+                                         else [])
             # producer-contract Repair 1 (A1723 decision 3): a repaired row's before may be a later listed manifest B when no
             # chain review is bound to a manifest in (issuer, B] and each of those is the after of some repairs row
             late = x["disp"] == "repaired" and cb[0] not in okids and bi > iss["idx"]
