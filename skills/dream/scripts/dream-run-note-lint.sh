@@ -170,13 +170,16 @@
 # Control mutants (five-whys page e784471d mechanism 2, A1723; owner 03415): for an entry whose Mission: line lists scope= manifests
 # and whose date, the latest of its header ts (an unreadable one counts as after), its Route decision= instant and its bound review
 # launches, is at or after CONTROL_MUTANTS_SINCE. The round's members are those of the newest listed manifest that are new there or whose
-# digest moved from the manifest the Task's previous Mission: entry lists last (every member when no earlier entry lists one; a member is
-# keyed by its path as written when that holds `/`, else by its basename). Members are read at the manifest's directory (the freeze's own
+# digest moved from the manifest the base entry lists last: the latest of the Task's earlier Mission: entries before its first one dated,
+# by the same three instants, at or after CONTROL_MUTANTS_SINCE, so an entry this rule read, passed or refused, is never the base and a
+# round stays owed until a report answers it (every member when there is no base entry or it lists none; a member is keyed by its path as
+# written when that holds `/`, else by its basename). Members are read at the manifest's directory (the freeze's own
 # copies), a leading UTF-8 byte order mark dropped. A mutant report is a member whose basename holds `mutant` with a `(the control under
 # test)` header line. A control output is any other member that is not a script (a name ending .py or .sh) and whose leading `#` lines
-# name a script whose basename holds `control` and not `mutant`, or that carries a controls verdict line (`controls verdict:` at the
-# start of a line after its indentation and at most one `<label>: `, as r11-matrix-verification's `  entrypoint control: controls
-# verdict: ...`; a page or record quoting the words mid-line is no verdict line), or whose basename holds `control` and not `mutant` and
+# name a script whose basename holds `control` and not `mutant`, or that carries a controls verdict line (`controls verdict:`, or
+# `<word> verdict: discriminates` or `<word> verdict: DOES NOT DISCRIMINATE` as the L3 r10f1 readback fixture's `fixture verdict:
+# discriminates`, at the start of a line after its indentation and at most one `<label>: `, as r11-matrix-verification's `  entrypoint
+# control: controls verdict: ...`; a page or record quoting the words mid-line is no verdict line), or whose basename holds `control` and not `mutant` and
 # that names a script, ends `.txt` or carries a `# script` line that does not read. A script is named
 # by `# script <name> sha256 <hex>`; by a `;` part `[script] [<name>] sha256 <hex>` of a `# read <when> on <host>; ...` line; or by the
 # earlier `# <name>.py controls ...` followed by `#   <hex>  <path to name>`; the header's other sha256 lines, the control's inputs, name
@@ -186,8 +189,9 @@
 # section, whose survivors mechanism 1 requires); and at least one certificate line, each (indented or not) `certificate: every mutant
 # KILLED; the REVIEW-REQUEST may go out` or its first clause alone.
 # control-mutants-missing: a round control output with no such report or naming no script (no report can name its control), or a round
-# member whose freeze copy is absent or differs from the manifest's digest when its path holds `control` and not `mutant` or its copy
-# reads as a control output (no other rule reads these members); control-mutant-survived: a report read above that fails a check. JSON:
+# member that is not a script nor a PRD file (PRD-*.md) whose freeze copy is absent or differs from the manifest's digest, whatever its
+# name or current bytes, since what was frozen cannot be read (no other rule reads these members); control-mutant-survived: a report
+# read above that fails a check. JSON:
 # mission.control_mutants {manifest, previous, checked [{control, scripts [[name, sha256]...]}], missing, unreadable, survived}.
 #
 # R4 floor across the home (five-whys page e784471d mechanism 3, lint part; owner 03415; the R4 text is the PRD author's):
@@ -1093,7 +1097,9 @@ def mission_record(L, entries, ei, task, states, resolve, dec=None):
                     eff[k] = (v, e["ts"])
             prev = eff
             earlier.append({"ts": e["ts"], "name": nm, "eff": eff, "slugs": entry_state_slugs(e), "adv": entry_matrix(e),
-                            "date": entry_date(e), "own_scope": toks.get("scope"), "withdrawn": toks.get("withdrawn") or []})
+                            "date": entry_date(e), "own_scope": toks.get("scope"), "withdrawn": toks.get("withdrawn") or [],
+                            "route": next((m.group(1) for m in (re.match(r"^Route:.*\bdecision=(\S+)", ln) for ln in e["lines"]) if m), None),
+                            "rsess": [m.group(1) for m in (re.match(r"^Review:\s+\S+\s+reviewer-session=(\S+)", ln) for ln in e["lines"]) if m]})
     if not mls and not earlier:
         return None
     reported = set()
@@ -1286,7 +1292,7 @@ CM_SUMMARY_RE = re.compile(r"^mutants: (\d+); KILLED: (\d+); SURVIVED: (\d+)$")
 CM_SURVIVED_ROW_RE = re.compile(r"^SURVIVED \S")
 CM_SURVIVED_INDENTED_RE = re.compile(r"^\s+SURVIVED\b")
 CM_META_RE = re.compile(r"^## meta-negative\b")
-CM_VERDICT_RE = re.compile(r"^\s*(?:[A-Za-z][\w -]*:\s+)?controls verdict:")
+CM_VERDICT_RE = re.compile(r"^\s*(?:[A-Za-z][\w -]*:\s+)?(?:controls verdict:|[\w-]+ verdict: (?:discriminates|DOES NOT DISCRIMINATE)\b)")
 CM_READ_SEG_RE = re.compile(r"^(?:script\s+)?(?:(\S+)\s+)?sha256\s+([0-9a-f]{64})$")
 CM_CERT_OK = ("certificate: every mutant KILLED; the REVIEW-REQUEST may go out", "certificate: every mutant KILLED")
 CM_SOURCE_EXT = (".py", ".sh")
@@ -1427,12 +1433,35 @@ def cm_key(ps, base):
     return ps if "/" in ps else base
 
 
-def cm_previous(mrec, mans, resolve):
-    """Mechanism 2 (review lint-e784 F2): (path, entries) of the manifest the Task's previous Mission: entry lists last, carried or
-    inherited, or (None, []) when no earlier entry lists one. Entries as manifest_paths gives them; [] when that manifest cannot be read,
-    so every member is a round member."""
-    earlier = (mrec or {}).get("earlier") or []
-    ps = (earlier[-1]["eff"].get("scope") or ([], None))[0] if earlier else []
+def cm_date(x, rows, task):
+    """Mechanism 2 (review lint-e784b N1): an earlier entry's date as control_mutant_check dates the entry under lint: the latest of its
+    header ts (None when unreadable: it counts as after), its Route decision= instant and the launch rows of the review sessions its
+    Review: lines name."""
+    t = parse_iso(x.get("ts") or "")
+    if t is None:
+        return None
+    got = [t, parse_iso(x.get("route") or "")]
+    for sess in x.get("rsess") or []:
+        lr = [r for r in rows or [] if r.get("session") == sess and r.get("decision") == "launch" and r.get("skill") == "dream"
+              and r.get("task_id") == task]
+        if lr and lr[-1].get("role") == "review":
+            got.append(launch_ts(lr[-1]))
+    return max(g for g in got if g is not None)
+
+
+def cm_previous(mrec, mans, resolve, rows=None, task=None):
+    """Mechanism 2 (review lint-e784 F2, lint-e784b N1): (path, entries) of the manifest that the base entry lists last, carried or
+    inherited, or (None, []) when there is no base entry or it lists none. The base entry is the latest of the Task's earlier Mission:
+    entries that come before its first one dated (cm_date) at or after CONTROL_MUTANTS_SINCE: an entry mechanism 2 read, whether its
+    reading passed or refused, is never the base, so a round stays owed at every later entry until a report answers it. Entries as
+    manifest_paths gives them; [] when that manifest cannot be read, so every member is a round member."""
+    since, base = parse_iso(CONTROL_MUTANTS_SINCE), None
+    for x in (mrec or {}).get("earlier") or []:
+        d = cm_date(x, rows, task)
+        if d is None or d >= since:
+            break
+        base = x
+    ps = (base["eff"].get("scope") or ([], None))[0] if base else []
     if not ps:
         return None, []
     full = os.path.normpath(resolve(ps[-1]))
@@ -1446,12 +1475,12 @@ def control_mutant_check(L, mans, ts, later, previous):
     """Five-whys page e784471d mechanism 2 (owner 03415, consumption row E784-M2), for an entry whose date is at or after
     CONTROL_MUTANTS_SINCE: the latest of its header ts (an unreadable one counts as after) and `later`, its Route decision= instant and its
     bound review launches (review lint-e784 F5: a backdated header alone does not take an entry out). The round's members are those of the
-    newest listed manifest that are new there or whose digest moved from `previous`, (path, entries) of the manifest the Task's previous
-    Mission: entry lists last (cm_previous). A round control output (cm_kind) needs, in that manifest, a mutant report at the sha256 of a
+    newest listed manifest that are new there or whose digest moved from `previous`, (path, entries) of the manifest the base entry, the
+    Task's last earlier Mission: entry dated before CONTROL_MUTANTS_SINCE, lists last (cm_previous). A round control output (cm_kind) needs, in that manifest, a mutant report at the sha256 of a
     script it names; one naming no script is refused, since no report can name its control. Every report there at those scripts, and every
-    round report, is read (cm_report_why); any one that fails refuses. A round member whose freeze copy is absent or differs from the
-    manifest's digest is refused when its path holds `control` and not `mutant` or its copy reads as a control output (review lint-e784 F3:
-    no other rule reads these members). -> {"manifest", "previous", "checked", "missing", "unreadable", "survived"}, or None when nothing
+    round report, is read (cm_report_why); any one that fails refuses. A round member that is not a script nor a PRD file whose freeze copy
+    is absent or differs from the manifest's digest is refused, whatever its name or current bytes (review lint-e784 F3, lint-e784b N3: no
+    other rule reads these members, and the copy cannot show what was frozen). -> {"manifest", "previous", "checked", "missing", "unreadable", "survived"}, or None when nothing
     here applies."""
     t, since = parse_iso(ts or ""), parse_iso(CONTROL_MUTANTS_SINCE)
     if not mans or mans[-1].get("id") is None:
@@ -1469,12 +1498,15 @@ def control_mutant_check(L, mans, ts, later, previous):
         got = hashlib.sha256(data).hexdigest() if data is not None else None
         if got != h:
             low = ps.lower()
-            if rnd and (("control" in low and "mutant" not in low) or (data is not None and (cm_kind(cm_lines(data), base) or ("",))[0] == "control")):
+            if rnd and not base.lower().endswith(CM_SOURCE_EXT) and not (base.startswith("PRD-") and base.endswith(".md")):
                 out["missing"].append(ps)
                 out["unreadable"].append(ps)
+                known = ("control" in low and "mutant" not in low) or (data is not None and (cm_kind(cm_lines(data), base) or ("",))[0] == "control")
                 L.fail("control-mutants-missing", f"{ps} in manifest {new['path']}: its freeze copy is "
                        + ("absent or unreadable" if got is None else f"{got[:12]}, not the manifest's {h[:12]}")
-                       + ", so the control output it holds cannot be read (five-whys page e784471d mechanism 2)")
+                       + (", so the control output it holds cannot be read" if known else
+                          ", so whether it holds a control output cannot be read (its name and its current bytes cannot show what was frozen)")
+                       + " (five-whys page e784471d mechanism 2)")
             continue
         lines = cm_lines(data)
         k = cm_kind(lines, base)
@@ -4298,7 +4330,7 @@ def lint_log(a):
                 mans = mission_scopes(L, mrec, resolve)
             mfields, deps, vr = chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, reviews, home, resolve)
             cm = control_mutant_check(L, mans, entry["ts"], [route["decision"] if route else None] + [b["row"].get("ts") for b in bound],
-                                      cm_previous(mrec, mans, resolve))     # five-whys page e784471d mechanism 2
+                                      cm_previous(mrec, mans, resolve, rows, task))     # five-whys page e784471d mechanism 2
             if cm is not None and mfields is not None:
                 mfields["control_mutants"] = cm
             # PRD-dream-failure-class-sweep R1-R8: repairs between chain reviews, their holds
