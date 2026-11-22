@@ -661,6 +661,723 @@ def _(out):
     five_fx(out, "transient", "inline", refs="run:retry-1")
 
 
+# ---------------------------------------------------------------- five-whys page e784471d mechanism 3 (lint part): the R4 floor across the home
+FS_S = ["bbbbbbbb-0000-4000-8000-0000000000%02d" % i for i in (12, 13, 14, 15)]
+FS_BEFORE = "2026-11-14T2%d:00:00-08:00"                # launched before the Task's previous entry (earlier(): 2026-11-15T00:30)
+
+
+def fs_floor(out, verdicts, failure, f="skipped: not a failure seed", slug="foo", when=None, task=None):
+    """The A1723 home at its 2026-11-21T13:55:32 entry, in small: an uncovered entry of Task A1 whose previous entry came after every review
+    session; `verdicts` are those sessions' verdicts of `slug` in launch order (one file each under notes/reviews/, bound by a dream review
+    launch row). Before mechanism 3 only sessions launched after the previous entry set the floor, so these set none. `when` and `task`
+    give a session's own launch time and Task (by index), for the sessions launched after the entry (the entry is dated T_TS)."""
+    fx = earlier(tfx(out, w=FREE, f=f, failure=failure))
+    for k, v in enumerate(verdicts):
+        lines = "".join(f"{slug} {x} opus\n" for x in (v if isinstance(v, tuple) else (v,)))
+        fx.files[f"notes/reviews/fs-{k}.txt"] = f"reviewer session {FS_S[k]}\n{lines}"
+        fx.rows.append(review_row((when or {}).get(k, FS_BEFORE % k), FS_S[k], (task or {}).get(k, "A1")))
+    fx.build()
+    policy(out)
+
+
+case("fs-four-fix-failure-none", 1, ["failure-class-mismatch"], "d['analysis'].get('covered') == 'none'",
+     detail="4 consecutive FIX or REJECT since its last APPROVE")(lambda out: fs_floor(out, ["FIX"] * 4, "Failure: none"))
+case("fs-four-fix-needs-the-line", 1, ["line-missing"], detail="set the floor recurring-failure")(lambda out: fs_floor(out, ["FIX"] * 4, None))
+case("fs-four-fix-recurring-met", 0, [], "d['analysis']['failure']['class'] == 'recurring-failure'")(
+    lambda out: fs_floor(out, ["FIX"] * 4, "Failure: recurring-failure ledger:A1", f=PAGE5))
+case("fs-two-fix-failure-none", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none"))
+case("fs-one-fix-is-no-floor", 0, [])(lambda out: fs_floor(out, ["FIX"], "Failure: none"))
+case("fs-approve-ends-the-streak", 0, [])(lambda out: fs_floor(out, ["FIX", "FIX", "APPROVE"], "Failure: none"))
+case("fs-fix-after-approve-is-one", 0, [])(lambda out: fs_floor(out, ["FIX", "APPROVE", "FIX"], "Failure: none"))
+case("fs-reject-failure-none", 1, ["failure-class-mismatch"], detail="1 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["REJECT"], "Failure: none"))
+case("fs-reject-failed-acceptance-met", 0, [], "d['analysis']['failure']['class'] == 'failed-acceptance'")(
+    lambda out: fs_floor(out, ["REJECT"], "Failure: failed-acceptance ledger:A1", f=PAGE5))
+case("fs-fix-beside-approve-counts-as-fix", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, [("APPROVE", "FIX"), "FIX"], "Failure: none"))
+FS_AFTER = CUT + "T03:00:00-08:00"                     # an hour after the entry (T_TS)
+case("fs-later-approve-keeps-the-floor", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX", "APPROVE"], "Failure: none", when={2: FS_AFTER}))
+case("fs-later-fix-is-not-in-the-streak", 0, [])(
+    lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", when={1: FS_AFTER}, task={1: "A9"}))
+case("fs-other-slug-is-no-floor", 0, [])(lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", slug="bar"))
+# review lint-e784 F7: a session with no launch time adds its FIX (m36) and never resets with an APPROVE (m31); a session launched at the
+# entry's own time is in the streak (m30; Task A9, so only the streak reads it); the higher floor stands (m35: the old rule's
+# recurring-failure, FIX then a later REJECT of the Task, over the streak's one REJECT since the APPROVE)
+FS_NO_TIME = "no launch time"
+case("fs-no-launch-time-fix-counts", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", when={1: FS_NO_TIME}))
+case("fs-no-launch-time-approve-keeps-the-streak", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX", "APPROVE"], "Failure: none", when={2: FS_NO_TIME}))
+case("fs-launch-at-the-entry-time-counts", 1, ["failure-class-mismatch"], detail="2 consecutive FIX or REJECT")(
+    lambda out: fs_floor(out, ["FIX", "FIX"], "Failure: none", when={1: T_TS}, task={1: "A9"}))
+case("fs-higher-floor-stands", 1, ["failure-class-mismatch"], detail="after an earlier FIX or REJECT of foo in this home")(
+    lambda out: fs_floor(out, ["FIX", "APPROVE", "REJECT"], "Failure: failed-acceptance ledger:A1", f=PAGE5,
+                         when={2: "2026-11-19T12:00:00-08:00"}))
+
+
+# ---------------------------------------------------------------- five-whys page e784471d mechanism 2: a round's control reads carry mutant reports
+CM_TS, CM_EARLY = "2026-11-21T20:00:00-08:00", "2026-11-21T12:00:00-08:00"      # after and before the page's write time
+assert H.get("CONTROL_MUTANTS_SINCE") in (None, "2026-11-21T18:13:00-08:00"), H.get("CONTROL_MUTANTS_SINCE")  # None: a lint before it
+S_R1, S_R2 = H["S_R1"], H["S_R2"]
+CM_S_R3 = "bbbbbbbb-0000-4000-8000-000000000016"       # a third manifest's reviewer
+CM_SCRIPT = sha("#!/usr/bin/env python3\n# stand-in for chain review 23's control script\n")
+CM_TOOL = sha("#!/usr/bin/env python3\n# stand-in for mechanism 1's mutant runner\n")
+CM_R23 = (f"# r23-controls.py controls <prd home> (stand-in for the A1723 chain review 23 repair controls)\n"
+          f"#   {CM_SCRIPT}  notes/controls-r13/r23-controls.py\n"
+          "OK   unit: the read names the unit it holds\nOK   qualifier: the read names its qualifier\nOK   pairing: five negatives refuse\n")
+CM_R27 = (f"# script r27-controls.py sha256 {CM_SCRIPT}\n# r27-controls.py controls <prd home> (stand-in)\n"
+          f"#   {CM_SCRIPT}  notes/controls-r13/r27-controls.py (script)\nOK   unit\n")
+
+
+CM_CERT = "every mutant KILLED; the REVIEW-REQUEST may go out"
+CM_META = ("\n## meta-negative: the same mutants against notes/controls-r13/r22-controls.py (stand-in), which must leave survivors\n"
+           "r22-controls.py: 2 mutants, 2 SURVIVED -> as required\n    SURVIVED against r22-controls.py: M5 | unit\n"
+           "    SURVIVED against r22-controls.py: M8 | qualifier\n")
+
+
+def cm_report(sha_under_test=CM_SCRIPT, survived=0, summary=True, extra="", cert=CM_CERT, summary_line=None, post=""):
+    """A mechanism-1-shaped report of the stand-in r23 control: M5 and M8 (the page's R24-F1 swaps) KILLED, or M8 SURVIVED;
+    `extra` lines go before the summary, then the summary (`summary_line` when given) and certificate lines as control-mutants-r27.py
+    writes them, `post` lines between the two."""
+    rows = "KILLED   M5 | unit: two identities swapped\n" + ("SURVIVED M8 | qualifier: two identities swapped\n" if survived else
+                                                              "KILLED   M8 | qualifier: two identities swapped\n")
+    return (f"# script control-mutants.py sha256 {CM_TOOL}\n# control-mutants.py run <prd home> --control notes/controls-r13/r23-controls.py (stand-in)\n"
+            f"#   {sha_under_test}  notes/controls-r13/r23-controls.py (the control under test)\n{rows}\n"
+            + extra + ((summary_line or f"mutants: 2; KILLED: {2 - survived}; SURVIVED: {survived}") + "\n" if summary else "")
+            + post + (f"certificate: {cert}\n" if cert else ""))
+
+
+def cm_fx(out, members, prev=None, ts=CM_TS, unlisted=None, declare=None, before=None, mid=None, scope=None, when=None, route_ts=None,
+          moved=None, absent=None, again=None, rorder=None, xrows=None, rmore=None, xat=None, leave=None, ascope=None,
+          unlaunched=None, xedit=None):
+    """A mission (the selftest's chain shape) whose Mission: line lists one manifest, notes/snapshots/m1/m.sha256 (reviewed by S_R1), or
+    with `prev` two (m0 reviewed by S_R1, then m1 by S_R2); each freezes foo, bar, the matrix and the edges file, and `members` (for m1)
+    or `prev` (for m0), {basename: text}, copied into its own directory as a round freeze holds them. `unlisted`: files written into m1's
+    directory but not listed; `declare`: names a repairs row declares changed from m0 to m1 (the row, its file listed in m1 and the
+    repairs= token, as the selftest's chain() writes them). The entry is a covered one dated `ts`. Review r2 (lint-e784): `before`, the
+    manifests (by directory name) an earlier entry of Task A1 lists in its Mission: scope= (no earlier entry when None); `mid`, members of
+    a third manifest between m0 and the newest, which is then m2; `scope`, the entry's scope= list by directory name in place of every
+    manifest once; `when`, {manifest index: launch ts} of its review's row; `route_ts`, the Route decision= instant and its row's ts;
+    `moved`, {basename: text} written into the newest manifest's directory over the listed bytes; `absent`, basenames listed there but not
+    written. Review lint-e784b N1: `again`, [(ts, manifests by directory name, extra lines)], later earlier entries of Task A1 after the
+    `before` one, in log order. Review lint-e784c: `rorder`, the Review: lines' order by manifest index (P2: R2 reads Review: line order
+    against scope= order); `xrows`, decision rows added to the log (P5: a review session with two launch rows); `rmore`, {manifest
+    index: [launch ts]} further chain reviews of that manifest, each with its own session and Review: line after its first. Every freeze holds
+    its PRD-foo.md and PRD-bar.md copies (P3). Review lint-e784d: `leave`, manifest indexes whose Review: line and two State tokens the
+    entry leaves out (Q1); `again` manifests None, a Mission: line with no scope= of its own, which inherits it (Q4 w2); `xat`, {manifest
+    index: [rows]}, decision rows added with that manifest's scope and scope_id (Q1). Review lint-e784e: `ascope`, every decision row's
+    scope written as the absolute path in the home, as the real routing rows write an absolute RedBaron path (R5 k03); `unlaunched`,
+    manifest indexes whose review launch row is not in the log, so the freeze was never reviewed (with `leave`: R1's e7, and the real
+    shape, the last listed freeze not yet reviewed). Review lint-hygiene-h N1, N2: `xedit`, a function applied to every `xat` row after
+    its scope and scope_id are set (a row with one field removed or emptied, or its scope id cut)."""
+    fx = Fx(out)
+    rep_text = None
+    if declare:
+        rep_text = json.dumps({"finding": None, "class": None, "author_session": H["S_D"], "before": "notes/snapshots/m0/m.sha256",
+                               "after": "notes/snapshots/m1/m.sha256", "changed": list(declare), "sweep": ["E1"],
+                               "disposition": "amended", "reason": "the control re-run on the repaired bytes"}) + "\n"
+        fx.files["notes/missions/selftest.repairs.jsonl"] = rep_text
+        members = dict(members, **{"selftest.repairs.jsonl": rep_text})
+    fx.ts, fx.failure = ts, "Failure: none"
+    fx.entry["Analysis"] = AN.format(w="ran visions/wwhtbt.md", f="skipped: not a failure seed")
+    edges = H["mission_edges"](["foo", "bar"], known_only=True)
+    fx.files.update({M_REL: H["mx_file"](["foo", "bar"]), "notes/missions/selftest.edges.jsonl": edges})
+    mxb = os.path.basename(M_REL)
+
+    def freeze(d, extra):
+        fx.files.update({f"{d}/selftest.edges.jsonl": edges, f"{d}/{mxb}": fx.files[M_REL], f"{d}/PRD-foo.md": "# foo stub\n",
+                         f"{d}/PRD-bar.md": "# bar stub\n"})
+        fx.files.update({f"{d}/{b}": t for b, t in extra.items()})
+        text = (f"{sha('# foo stub' + chr(10))}  PRD-foo.md\n{sha('# bar stub' + chr(10))}  PRD-bar.md\n{sha(fx.files[M_REL])}  {mxb}\n"
+                f"{sha(edges)}  selftest.edges.jsonl\n" + "".join(f"{sha(t)}  {b}\n" for b, t in extra.items()))
+        fx.files[f"{d}/m.sha256"] = text
+        return f"{d}/m.sha256", text
+    rounds = ([prev] if prev is not None else []) + ([mid] if mid is not None else []) + [members]
+    dirs = ["m0", "m1", "m2"][:len(rounds)] if prev is not None else ["m1"]
+    mans = [freeze(f"notes/snapshots/{d}", r) for d, r in zip(dirs, rounds)]
+    nd = f"notes/snapshots/{dirs[-1]}"
+    for b, t in (unlisted or {}).items():
+        fx.files[f"{nd}/{b}"] = t
+    for b, t in (moved or {}).items():
+        fx.files[f"{nd}/{b}"] = t
+    for b in absent or ():
+        fx.files[f"{nd}/{b}"] = None
+    fx.rows[3] = dict(fx.rows[3], role="author", scope="", scope_id="")
+    if route_ts is not None:
+        fx.rows[3]["ts"] = route_ts
+        fx.entry["Route"] = f"Route: fable-xhigh claude-fable-5-1 xhigh session={H['S_D']} decision={route_ts}"
+    if before is not None:
+        fx.prev_entry = "2026-11-15T00:30:00-08:00"            # before the review launches (01:30, 01:40) and the matrix (01:00)
+        fx.prev_lines = ["Task: A1   Consumer: hermes", "Seeds: selftest", "State: foo=linted",
+                         "Mission: selftest edges=notes/missions/selftest.edges.jsonl scope="
+                         + ",".join(f"notes/snapshots/{d}/m.sha256" for d in before)]
+    for k, (ats, adirs, extra) in enumerate(again or ()):
+        alines = ["Task: A1   Consumer: hermes", "Seeds: selftest", "State: foo=linted"] + list(extra) + [
+            "Mission: selftest edges=notes/missions/selftest.edges.jsonl"
+            + ("" if adirs is None else " scope=" + ",".join(f"notes/snapshots/{d}/m.sha256" for d in adirs))]
+        if fx.prev_entry is None:
+            fx.prev_entry, fx.prev_lines = ats, alines
+        else:
+            fx.prev_lines = list(fx.prev_lines) + ["", f"## {ats}  /dream  vision-earlier-{k}"] + alines
+    lines, states, more = [], [], []
+    for k, ((p, text), s) in enumerate(zip(mans, (S_R1, S_R2, CM_S_R3))):
+        if 4 + k >= len(fx.rows):
+            fx.rows.append(dict(fx.rows[5], ts="2026-11-15T01:50:00-08:00", session=s))
+        fx.rows[4 + k] = dict(fx.rows[4 + k], role="review", scope=p, scope_id=scope_id(text))
+        more += [(xedit or dict)(dict(r, scope=p, scope_id=scope_id(text))) for r in (xat or {}).get(k, ())]
+        if when and k in when:
+            fx.rows[4 + k]["ts"] = when[k]
+        v = f"foo APPROVE fable\nbar APPROVE fable\nmission=APPROVE {s}\n"
+        fx.files[f"notes/reviews/cm{k}.txt"] = v
+        fx.files[f"notes/reviews/cm{k}.json"] = json.dumps({"type": "result", "is_error": False, "session_id": s, "result": "Done.\n" + v})
+        lines.append(f"Review: notes/reviews/cm{k}.txt reviewer-session={s} result=notes/reviews/cm{k}.json")
+        states += ["foo=reviewed:APPROVE", "bar=reviewed:APPROVE"]
+        for j, rts in enumerate((rmore or {}).get(k, ())):
+            s2, f2 = "bbbbbbbb-0000-4000-8000-0000000000%02d" % (20 + 3 * k + j), f"cm{k}x{j}"
+            more.append(dict(fx.rows[4 + k], ts=rts, session=s2))
+            v2 = f"foo APPROVE fable\nbar APPROVE fable\nmission=APPROVE {s2}\n"
+            fx.files[f"notes/reviews/{f2}.txt"] = v2
+            fx.files[f"notes/reviews/{f2}.json"] = json.dumps({"type": "result", "is_error": False, "session_id": s2, "result": "Done.\n" + v2})
+            lines.append(f"Review: notes/reviews/{f2}.txt reviewer-session={s2} result=notes/reviews/{f2}.json")
+            states += ["foo=reviewed:APPROVE", "bar=reviewed:APPROVE"]
+    fx.entry["Review"] = [lines[k] for k in (rorder or range(len(lines))) if k not in (leave or ())]
+    fx.entry["State"] = "State: " + " ".join(states[2 * len(leave or ()):])     # every line's two tokens are the same
+    gone = [fx.rows[4 + k] for k in unlaunched or ()]
+    fx.rows = [r for r in fx.rows if not any(r is g for g in gone)] + more + list(xrows or ())
+    if ascope:
+        fx.rows = [dict(r, scope=os.path.join(os.path.abspath(out), "home", r["scope"])) if r.get("scope") else r for r in fx.rows]
+    fx.tail = ["Mission: selftest edges=notes/missions/selftest.edges.jsonl scope="
+               + (",".join(f"notes/snapshots/{d}/m.sha256" for d in scope) if scope else ",".join(p for p, _ in mans))
+               + (" repairs=notes/missions/selftest.repairs.jsonl" if rep_text else "")]
+    fx.build()
+    policy(out)
+
+
+CM = "d['mission']['control_mutants']"
+case("cm-r23-alone-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']",
+     detail="no mutant report there names that script sha256")(lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}))
+case("cm-r23-with-killing-report", 0, [],
+     f"{CM}['checked'] == [{{'control': 'r23-controls.txt', 'scripts': [['r23-controls.py', {CM_SCRIPT!r}]]}}] and {CM}['missing'] == [] "
+     f"and {CM}['survived'] == []")(lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report()}))
+case("cm-report-survived", 1, ["control-mutant-survived"], f"{CM}['survived'][0]['survived'] == 1", detail="reports SURVIVED: 1 of 2 mutants")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(survived=1)}))
+case("cm-report-without-summary", 1, ["control-mutant-survived"], detail="has no `mutants: N; KILLED: K; SURVIVED: S` summary line")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(summary=False)}))
+case("cm-report-survived-row", 1, ["control-mutant-survived"], f"{CM}['survived'][0]['rows'] == 1", detail="holds 1 SURVIVED row")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23,
+                            "r23-control-mutants.txt": cm_report(extra="SURVIVED M12 | pairing: a negative dropped\n")}))
+case("cm-report-meta-survivors-are-required", 0, [], f"{CM}['survived'] == []")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(extra=CM_META)}))
+case("cm-report-refusing-certificate", 1, ["control-mutant-survived"], detail="NO REVIEW-REQUEST, NO FREEZE")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        cert="SURVIVED mutants or named mutants not applied; NO REVIEW-REQUEST, NO FREEZE")}))
+case("cm-report-of-other-bytes", 1, ["control-mutants-missing"])(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(sha_under_test=CM_TOOL)}))
+case("cm-report-not-listed", 1, ["control-mutants-missing"])(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, unlisted={"r23-control-mutants.txt": cm_report()}))
+case("cm-script-header-alone", 1, ["control-mutants-missing"], detail="(script r27-controls.py sha256")(
+    lambda out: cm_fx(out, {"r27-controls.txt": CM_R27}))
+case("cm-script-header-with-report", 0, [], f"{CM}['checked'][0]['scripts'] == [['r27-controls.py', {CM_SCRIPT!r}]]")(
+    lambda out: cm_fx(out, {"r27-controls.txt": CM_R27, "r27-control-mutants.txt": cm_report()}))
+case("cm-unchanged-since-previous-manifest", 0, [], f"{CM}['checked'] == [] and {CM}['previous'] == 'notes/snapshots/m0/m.sha256'")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, prev={"r23-controls.txt": CM_R23}, before=["m0"]))
+case("cm-changed-undeclared", 1, ["control-mutants-missing", "repair-hash-mismatch"])(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n"}, prev={"r23-controls.txt": CM_R23}, before=["m0"]))
+case("cm-changed-declared-needs-report", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n"}, prev={"r23-controls.txt": CM_R23},
+                      declare=["r23-controls.txt"], before=["m0"]))
+case("cm-changed-declared-with-report", 0, [], f"{CM}['checked'][0]['control'] == 'r23-controls.txt'")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23 + "OK   one more read\n", "r23-control-mutants.txt": cm_report()},
+                      prev={"r23-controls.txt": CM_R23}, declare=["r23-controls.txt"], before=["m0"]))
+CM_OTHER = sha("#!/bin/bash\n# stand-in for a control's runner\n")
+CM_READ = (f"# read 2026-11-20 9:01:15 AM PST on redbaron; r11-matrix-verify.py sha256 {CM_SCRIPT}\n"
+           "negative (pre-fix acceptance-subject): exit=1\n")
+CM_TWO = (f"# read 2026-11-21 12:02:09 AM PST on redbaron\n# script m3-sweep-controls.sh sha256 {CM_OTHER}\n"
+          f"# script sweep-check-r12.py sha256 {CM_SCRIPT}\nOK   sweep\n")
+case("cm-read-form-alone", 1, ["control-mutants-missing"], f"{CM}['checked'] == [{{'control': 'r11-matrix-verify-controls-r22r.txt', "
+     f"'scripts': [['r11-matrix-verify.py', {CM_SCRIPT!r}]]}}]", detail="(script r11-matrix-verify.py sha256")(
+    lambda out: cm_fx(out, {"r11-matrix-verify-controls-r22r.txt": CM_READ}))
+case("cm-read-form-with-report", 0, [], f"{CM}['missing'] == []")(
+    lambda out: cm_fx(out, {"r11-matrix-verify-controls-r22r.txt": CM_READ, "r22r-control-mutants.txt": cm_report()}))
+case("cm-two-scripts-report-at-either", 0, [], f"len({CM}['checked'][0]['scripts']) == 2 and {CM}['missing'] == []")(
+    lambda out: cm_fx(out, {"m3-sweep-controls-r24oc.txt": CM_TWO, "r24oc-control-mutants.txt": cm_report()}))
+case("cm-two-scripts-report-elsewhere", 1, ["control-mutants-missing"],
+     detail="(script m3-sweep-controls.sh sha256 " + CM_OTHER[:12] + "; sweep-check-r12.py sha256")(
+    lambda out: cm_fx(out, {"m3-sweep-controls-r24oc.txt": CM_TWO, "r24oc-control-mutants.txt": cm_report(sha_under_test=CM_TOOL)}))
+CM_NAMELESS = f"# read 2026-11-20 12:30:32 AM PST on redbaron; script sha256 {CM_SCRIPT}; mode text\nOK   text\n"
+CM_INPUTS = (f"# r23-controls.py controls <prd home> (stand-in)\n#   {CM_SCRIPT}  notes/controls-r13/r23-controls.py\n"
+             f"# head followon6/source/work/u2e-repin 4704687eb0687702f03459e6faf126a39ecc000a consumer-run-record-gate.py sha256 {CM_TOOL}\n"
+             "OK   unit\n")
+case("cm-read-form-nameless-script", 0, [], f"{CM}['checked'][0]['scripts'] == [['(unnamed script)', {CM_SCRIPT!r}]]")(
+    lambda out: cm_fx(out, {"r13-text-controls.txt": CM_NAMELESS, "r13-control-mutants.txt": cm_report()}))
+case("cm-input-sha-is-not-the-script", 1, ["control-mutants-missing"], f"{CM}['checked'][0]['scripts'] == [['r23-controls.py', {CM_SCRIPT!r}]]")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_INPUTS, "r23-control-mutants.txt": cm_report(sha_under_test=CM_TOOL)}))
+case("cm-txt-naming-no-script-refused", 1, ["control-mutants-missing"], f"{CM}['checked'] == [{{'control': 'm1-pairs-controls-r22r.txt', "
+     "'scripts': []}]", detail="name no script sha256, so no mutant report can name its control")(
+    lambda out: cm_fx(out, {"m1-pairs-controls-r22r.txt": 'read-target {"part": "P2 text"}\n'}))
+case("cm-scripts-runners-logs-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"r23-controls.py": "#!/usr/bin/env python3\n# chain review 23 repair controls\n",
+                            "run-r22r-controls.sh": "#!/bin/bash\n# runs the r22r controls\n",
+                            "run-r22r-controls.log": "r22r-l3-r10f4-working-clone.txt          exit=0\n"}))
+case("cm-not-a-control-name", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-notes.txt']",
+     detail="(script r23-controls.py sha256")(lambda out: cm_fx(out, {"r23-notes.txt": CM_R23}))
+case("cm-before-control-mutants-since", 0, [], "'control_mutants' not in d['mission']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts=CM_EARLY))
+# ---- review r2 (lint-e784 FIX), from the public write-up only
+# F1: a control output is found by its script header and its controls verdict line, not by its own name alone
+CM_L3 = (f"# script mac-r11-text-controls.py sha256 {CM_SCRIPT}\npositive (the repaired packet): HOLDS\n"
+         "negative: round-10 snapshot 20261119T130407Z REFUSED\ncontrols verdict: discriminates\n")
+CM_R28 = f"# script r28-controls.py sha256 {CM_SCRIPT}\nOK   unit\ncontrols verdict: discriminates\n"
+case("cm-l3-output-of-a-control-script-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-l3-r10f6-instant-pairs.txt']",
+     detail="(script mac-r11-text-controls.py sha256")(lambda out: cm_fx(out, {"r28-l3-r10f6-instant-pairs.txt": CM_L3}))
+case("cm-l3-output-with-report", 0, [], f"{CM}['checked'][0]['control'] == 'r28-l3-r10f6-instant-pairs.txt' and {CM}['missing'] == []")(
+    lambda out: cm_fx(out, {"r28-l3-r10f6-instant-pairs.txt": CM_L3, "r28-control-mutants.txt": cm_report()}))
+case("cm-verdict-line-with-other-script-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r11-matrix-verification-r28.txt']",
+     detail="(script r11-matrix-verify.py sha256")(lambda out: cm_fx(out, {"r11-matrix-verification-r28.txt": (
+         f"# script r11-matrix-verify.py sha256 {CM_SCRIPT}\nnegative (pre-fix acceptance-subject): exit=1\ncontrols verdict: discriminates\n")}))
+case("cm-verdict-line-naming-no-script-refused", 1, ["control-mutants-missing"], f"{CM}['checked'] == [{{'control': "
+     "'neg-verdict-selftest-r28.txt', 'scripts': []}]", detail="name no script sha256")(
+    lambda out: cm_fx(out, {"neg-verdict-selftest-r28.txt": "negative: REFUSED\ncontrols verdict: discriminates\n"}))
+case("cm-script-output-without-verdict-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"inventory-r28.txt": f"# script derive-entrypoints.py sha256 {CM_SCRIPT}\nentrypoints: 3\n"}))
+case("cm-mutant-runner-output-not-a-control", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"r28-run-notes.txt": f"# script control-mutants.py sha256 {CM_TOOL}\nran\n"}))
+case("cm-labelled-verdict-line-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r11-matrix-verification-r28.txt']",
+     detail="name no script sha256")(lambda out: cm_fx(out, {"r11-matrix-verification-r28.txt": (
+         "# R11 matrix verification over the round-28 bytes (stand-in)\n  entrypoint control: controls verdict: discriminates\n")}))
+case("cm-quoted-verdict-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"page-r28.txt": 'the run prints "controls verdict: discriminates"\n'}))
+# F2: the round is read against the manifest the Task's previous Mission: entry lists last
+case("cm-control-new-in-unlinted-previous-manifest", 1, ["control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={"r28-controls.txt": CM_R28}))
+case("cm-newest-listed-twice", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.txt']")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, scope=["m1", "m1"]))
+case("cm-third-manifest-read-against-the-previous-entry", 1, ["control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] == 'notes/snapshots/m0/m.sha256'")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={}, mid={"r28-controls.txt": CM_R28}, before=["m0"]))
+case("cm-third-manifest-unchanged-since-the-previous-entry", 0, [],
+     f"{CM}['checked'] == [] and {CM}['previous'] == 'notes/snapshots/m1/m.sha256'")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={}, mid={"r28-controls.txt": CM_R28}, before=["m0", "m1"]))
+case("cm-previous-keyed-by-path", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.txt']")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={"sub/r28-controls.txt": CM_R28}, before=["m0"]))
+# F3: a round member whose freeze copy is absent or moved is refused when it is a control output by path or by its copy
+case("cm-control-copy-moved", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-controls.txt']", detail="its freeze copy is")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28, "r28-control-mutants.txt": cm_report()},
+                      moved={"r28-controls.txt": CM_R28 + "OK   edited after the freeze\n"}))
+case("cm-control-copy-absent", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-controls.txt']",
+     detail="its freeze copy is absent")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28, "r28-control-mutants.txt": cm_report()}, absent=["r28-controls.txt"]))
+case("cm-moved-copy-reads-as-a-control", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-l3-pairs.txt']")(
+    lambda out: cm_fx(out, {"r28-l3-pairs.txt": "positive: HOLDS\n"}, moved={"r28-l3-pairs.txt": CM_L3}))
+# lint-e784b N3: a round member's broken freeze copy is refused whatever its name or current bytes (this case expected rc 0 at befd2fb)
+case("cm-moved-other-member-refused", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['notes-r28.txt'] and {CM}['checked'] == []",
+     detail="so whether it holds a control output cannot be read")(
+    lambda out: cm_fx(out, {"notes-r28.txt": "a note\n"}, moved={"notes-r28.txt": "another note\n"}))
+# F4: a vacuous report fails
+case("cm-report-zero-mutants", 1, ["control-mutant-survived"], detail="reports no mutant (mutants: 0)")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(summary_line="mutants: 0; KILLED: 0; SURVIVED: 0")}))
+case("cm-report-killed-short-of-total", 1, ["control-mutant-survived"], detail="reports KILLED: 0 of 2 mutants")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(summary_line="mutants: 2; KILLED: 0; SURVIVED: 0")}))
+# F5: the entry's date is the latest of its header ts, its Route decision= and its bound review launches; F7 m01, m02
+CM_SHIFT = "2026-11-21T19:05:00-08:00"
+# (a review launched after 2026-11-16T20:00 needs a findings= line in its result: mission-finding-incomplete, the shift's own finding)
+case("cm-backdated-entry-with-later-review-launch", 1, ["control-mutants-missing", "mission-finding-incomplete"],
+     f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T18:12:00-08:00", when={0: CM_SHIFT}))
+case("cm-entry-with-earlier-review-launch-exempt", 1, ["mission-finding-incomplete"], "'control_mutants' not in d['mission']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T18:12:00-08:00", when={0: "2026-11-21T17:00:00-08:00"}))
+case("cm-backdated-entry-with-later-route-decision", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T18:12:00-08:00", route_ts=CM_SHIFT))
+case("cm-at-control-mutants-since", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T18:13:00-08:00"))
+case("cm-unreadable-entry-date-counts-as-after", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r23-controls.txt']")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23}, ts="2026-11-21T12:00:00"))
+# F6, the report reading
+case("cm-report-indented-survived-row", 1, ["control-mutant-survived"], detail="holds 1 SURVIVED row")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23,
+                            "r23-control-mutants.txt": cm_report(extra="    SURVIVED M12 | pairing: a negative dropped\n")}))
+case("cm-report-earlier-refusing-certificate", 1, ["control-mutant-survived"], detail="NO REVIEW-REQUEST, NO FREEZE")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        extra="certificate: SURVIVED mutants; NO REVIEW-REQUEST, NO FREEZE\n")}))
+case("cm-report-indented-refusing-certificate", 1, ["control-mutant-survived"], detail="NO REVIEW-REQUEST, NO FREEZE")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        extra="  certificate: SURVIVED mutants; NO REVIEW-REQUEST, NO FREEZE\n")}))
+case("cm-report-certificate-other-text", 1, ["control-mutant-survived"], detail="every mutant KILLED? no")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(cert="every mutant KILLED? no: M8 survived")}))
+case("cm-report-without-certificate", 1, ["control-mutant-survived"], detail="has no `certificate:` line")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(cert="")}))
+case("cm-report-indented-summary-not-read", 1, ["control-mutant-survived"], detail="reports SURVIVED: 1 of 2 mutants")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        summary_line="mutants: 2; KILLED: 1; SURVIVED: 1", post="    mutants: 2; KILLED: 2; SURVIVED: 0\n")}))
+case("cm-report-two-summaries", 1, ["control-mutant-survived"], detail="holds 2 `mutants: N; KILLED: K; SURVIVED: S` summary lines")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(post="mutants: 2; KILLED: 1; SURVIVED: 1\n")}))
+case("cm-report-survived-row-after-the-meta-negative", 1, ["control-mutant-survived"], detail="holds 1 SURVIVED row")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        extra=CM_META, post="    SURVIVED M12 | pairing: a negative dropped\n")}))
+case("cm-report-survived-row-in-a-later-section", 1, ["control-mutant-survived"], detail="holds 1 SURVIVED row")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(
+        extra=CM_META + "\n## generic operators over the frozen packet\n    SURVIVED M13 | pairing: a negative dropped\n")}))
+case("cm-every-report-read-out-of-round-too", 1, ["control-mutant-survived"], f"{CM}['survived'][0]['report'] == 'r23b-control-mutants.txt'")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(),
+                            "r23b-control-mutants.txt": cm_report(survived=1)},
+                      prev={"r23b-control-mutants.txt": cm_report(survived=1)}, before=["m0"]))
+case("cm-script-source-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"r28-controls.py": '"""r28 controls.\ncontrols verdict: discriminates when every negative refuses\n"""\n'}))
+case("cm-every-report-at-the-script-is-read", 1, ["control-mutant-survived"], f"{CM}['survived'][0]['report'] == 'r23b-control-mutants.txt'")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(),
+                            "r23b-control-mutants.txt": cm_report(survived=1)}))
+case("cm-round-report-beside-unchanged-control", 1, ["control-mutant-survived"],
+     f"{CM}['checked'] == [] and {CM}['survived'][0]['report'] == 'r23-control-mutants.txt'", detail="(the control under test sha256")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(survived=1)}, prev={"r23-controls.txt": CM_R23},
+                      before=["m0"]))
+# F6, the classifier
+case("cm-under-test-line-in-a-control", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.txt']")(
+    lambda out: cm_fx(out, {"r28-controls.txt": (f"# script r28-controls.py sha256 {CM_SCRIPT}\n"
+                                                 f"#   {CM_TOOL}  notes/controls-r13/r22-controls.py (the control under test)\nOK   unit\n")}))
+case("cm-mutant-named-control", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-mutant-pairs.txt']")(
+    lambda out: cm_fx(out, {"r28-mutant-pairs.txt": CM_R28}))
+case("cm-byte-order-mark-before-header", 0, [], f"{CM}['checked'][0]['scripts'] == [['r27-controls.py', {CM_SCRIPT!r}]]")(
+    lambda out: cm_fx(out, {"r27-controls.txt": chr(0xFEFF) + CM_R27, "r27-control-mutants.txt": cm_report()}))
+case("cm-control-named-out-with-verdict", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.out']",
+     detail="name no script sha256")(
+    lambda out: cm_fx(out, {"r28-controls.out": "positive: HOLDS\ncontrols verdict: discriminates\n"}))
+case("cm-control-named-json-spaced-script-line", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.json']",
+     detail="(script r28-controls.py sha256")(
+    lambda out: cm_fx(out, {"r28-controls.json": f"# script  r28-controls.py  sha256 {CM_SCRIPT}\n{{}}\n"}))
+case("cm-control-named-unread-script-line", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.out']",
+     detail="name no script sha256")(
+    lambda out: cm_fx(out, {"r28-controls.out": f"# script r28-controls.py sha256 {CM_SCRIPT.upper()}\nOK   unit\n"}))
+
+# ---- review lint-e784b (FIX on befd2fb), from the public write-up only
+# N1: the base is the last earlier entry dated before CONTROL_MUTANTS_SINCE, so a refused or never-read round stays owed at the next entry
+CM_AFTER = "2026-11-21T19:00:00-08:00"                  # an earlier entry after the page's write time, before the entry under test (20:00)
+CM_R29 = f"# script r29-controls.py sha256 {CM_OTHER}\nOK   unit\ncontrols verdict: discriminates\n"
+# (an earlier entry dated after the fixture matrix (M_REL, 11-15 01:00) gives analysis-grammar, the fixture's own finding, as the review noted)
+CM_AG = "analysis-grammar"
+case("cm-reentry-after-refused-entry", 1, [CM_AG, "control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, again=[(CM_AFTER, ["m1"], [])]))
+case("cm-round-owed-past-a-later-entry", 1, [CM_AG, "control-mutants-missing"],
+     f"[c['control'] for c in {CM}['checked']] == ['r28-controls.txt', 'r29-controls.txt'] and {CM}['missing'] == ['r28-controls.txt'] "
+     f"and {CM}['previous'] == 'notes/snapshots/m0/m.sha256'", detail="(script r28-controls.py sha256")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28, "r29-controls.txt": CM_R29, "r29-control-mutants.txt": cm_report(sha_under_test=CM_OTHER)},
+                      prev={}, mid={"r28-controls.txt": CM_R28}, before=["m0"], again=[(CM_AFTER, ["m0", "m1"], [])]))
+case("cm-round-owed-past-a-later-entry-answered", 1, [CM_AG], f"{CM}['missing'] == [] and {CM}['survived'] == [] and len({CM}['checked']) == 2")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28, "r28-control-mutants.txt": cm_report(), "r29-controls.txt": CM_R29,
+                            "r29-control-mutants.txt": cm_report(sha_under_test=CM_OTHER)},
+                      prev={}, mid={"r28-controls.txt": CM_R28}, before=["m0"], again=[(CM_AFTER, ["m0", "m1"], [])]))
+case("cm-backdated-entry-after-a-read-entry-is-no-base", 1, [CM_AG, "control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, again=[(CM_AFTER, ["m1"], []), ("2026-11-21T18:00:00-08:00", ["m1"], [])]))
+case("cm-earlier-entry-with-later-route-decision-is-no-base", 1, [CM_AG, "control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, again=[(
+        "2026-11-21T18:00:00-08:00", ["m1"], [f"Route: fable-xhigh claude-fable-5-1 xhigh session={H['S_D']} decision={CM_AFTER}"])]))
+case("cm-earlier-entry-with-later-review-launch-is-no-base", 1, [CM_AG, "control-mutants-missing", "mission-finding-incomplete"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, when={0: CM_AFTER}, again=[(
+        "2026-11-21T18:00:00-08:00", ["m1"], [f"Review: notes/reviews/cm0.txt reviewer-session={S_R1}"])]))
+case("cm-earlier-entry-at-control-mutants-since-is-no-base", 1, [CM_AG, "control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, again=[("2026-11-21T18:13:00-08:00", ["m1"], [])]))
+case("cm-earlier-entry-with-unreadable-date-is-no-base", 1, ["control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, again=[("2026-11-15T00:30:00", ["m1"], [])]))
+# N2: the L3 r10f1 readback fixture's `fixture verdict: discriminates` is a verdict line (its script's name holds no `control`)
+CM_R10F1 = (f"# read 2026-11-21 12:01:56 AM PST on redbaron\n# script mac-r10f1-readback.py sha256 {CM_SCRIPT}\n# packet inputs (sha256):\n"
+            f"#   {CM_TOOL}  build-queue/PRD-foo.md\n\nfixture repo <scratch>/repo: reviewed head 257f82720fd3, main bef18ee1d8d2\n"
+            "positive    (installed from reviewed head, readback at reviewed head): RESOLVED  blob abfa487d2718 = 257f82720fd3:tool\n"
+            "over-strict (same install, check demands main):                       UNRESOLVED  installed blob abfa487d2718\n"
+            "negative    (blob present only on an unreviewed side ref):             UNRESOLVED  installed blob e731b9d6631e\n"
+            "fixture verdict: discriminates (positive passes, over-strict refuses it, side-ref presence stays unresolved)\n"
+            "binding token only in prose (negative)                   -> unbound (none)\nbinding verdict: discriminates (tokens count only in the named locus)\nexit=0\n")
+case("cm-r10f1-readback-fixture-shape-refused", 1, ["control-mutants-missing"],
+     f"{CM}['checked'] == [{{'control': 'r28-l3-r10f1-readback-fixture.txt', 'scripts': [['mac-r10f1-readback.py', {CM_SCRIPT!r}]]}}]",
+     detail="(script mac-r10f1-readback.py sha256")(lambda out: cm_fx(out, {"r28-l3-r10f1-readback-fixture.txt": CM_R10F1}))
+case("cm-r10f1-readback-fixture-with-report", 0, [], f"{CM}['missing'] == [] and len({CM}['checked']) == 1")(
+    lambda out: cm_fx(out, {"r28-l3-r10f1-readback-fixture.txt": CM_R10F1, "r28-control-mutants.txt": cm_report()}))
+case("cm-does-not-discriminate-verdict-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-l3-readback.txt']")(
+    lambda out: cm_fx(out, {"r28-l3-readback.txt": f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\nnegative: RESOLVED\n"
+                                                    "fixture verdict: DOES NOT DISCRIMINATE (the negative resolves)\n"}))
+case("cm-other-verdict-word-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"n28-source-rule-probe.txt": f"# script n28-probe.py sha256 {CM_SCRIPT}\n"
+                                                         "source-rule verdict: agrees with n22-chain-control.py\n"}))
+# N3: a round member's absent or moved copy is refused whatever its name; scripts, PRD files and members outside the round are not
+case("cm-unnamed-control-copy-absent", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-l3-r10f6-instant-pairs.txt']",
+     detail="absent or unreadable")(
+    lambda out: cm_fx(out, {"r28-l3-r10f6-instant-pairs.txt": CM_L3}, absent=["r28-l3-r10f6-instant-pairs.txt"]))
+case("cm-unnamed-control-copy-truncated", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-l3-r10f6-instant-pairs.txt']")(
+    lambda out: cm_fx(out, {"r28-l3-r10f6-instant-pairs.txt": CM_L3}, moved={"r28-l3-r10f6-instant-pairs.txt": ""}))
+case("cm-unnamed-control-copy-overwritten-beside-report", 1, ["control-mutants-missing"],
+     f"{CM}['unreadable'] == ['r28-l3-r10f6-instant-pairs.txt']")(
+    lambda out: cm_fx(out, {"r28-l3-r10f6-instant-pairs.txt": CM_L3, "r28-control-mutants.txt": cm_report()},
+                      moved={"r28-l3-r10f6-instant-pairs.txt": "x"}))
+case("cm-moved-script-not-read", 0, [], f"{CM}['unreadable'] == []")(
+    lambda out: cm_fx(out, {"r28-pairs.py": "#!/usr/bin/env python3\n"}, moved={"r28-pairs.py": "#!/usr/bin/env python3\n# edited\n"}))
+case("cm-moved-member-outside-the-round-not-read", 0, [], f"{CM}['unreadable'] == [] and {CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"r28-l3-r10f6-instant-pairs.txt": CM_L3}, prev={"r28-l3-r10f6-instant-pairs.txt": CM_L3}, before=["m0"],
+                      moved={"r28-l3-r10f6-instant-pairs.txt": "x"}))
+
+
+# ---- review lint-e784c (FIX on 43b6884), from the public write-up only
+# P1: an entry that comes in the log after an entry this rule read is read itself, whatever its header ts, Route decision= and launches
+CM_BACK = "2026-11-21T18:00:00-08:00"                   # a header before CONTROL_MUTANTS_SINCE (the fixture's Route decision= and launches are 11-15)
+CM_AN = AN.format(w="ran visions/wwhtbt.md", f="skipped: not a failure seed")   # the earlier entry's Analysis: line, the entry's own (the Repair 5 reuse)
+CM_NONE = "'control_mutants' not in d['mission']"
+case("cm-backdated-entry-after-a-read-entry-is-read", 1, ["control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None", detail="(script r28-controls.py sha256")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, ts=CM_BACK, again=[(CM_AFTER, ["m1"], [CM_AN])]))
+case("cm-backdated-entry-after-an-entry-at-control-mutants-since-is-read", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.txt']")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, ts=CM_BACK, again=[("2026-11-21T18:13:00-08:00", ["m1"], [CM_AN])]))
+case("cm-backdated-entry-after-an-undated-entry-is-read", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.txt']")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, ts=CM_BACK, again=[("2026-11-15T00:30:00", ["m1"], [CM_AN])]))
+case("cm-backdated-entry-after-a-read-then-a-backdated-entry-is-read", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['r28-controls.txt']")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, ts=CM_BACK,
+                      again=[(CM_AFTER, ["m1"], [CM_AN]), ("2026-11-21T17:30:00-08:00", ["m1"], [CM_AN])]))
+case("cm-backdated-entry-after-a-pre-date-entry-is-exempt", 0, [], CM_NONE)(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, ts=CM_BACK, again=[("2026-11-21T17:00:00-08:00", ["m1"], [CM_AN])]))
+case("cm-backdated-entry-alone-is-exempt", 0, [], CM_NONE)(lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, ts=CM_BACK))
+# P2: the last listed manifest is taken as the newest freeze; a freeze whose chain review launched after every review of it is refused
+CM_N27 = {"notes-r27.txt": "a note\n"}
+CM_N28 = dict(CM_N27, **{"r28-controls.txt": CM_R28})
+CM_UNREAD = "after every review of the last listed manifest"
+case("cm-newest-freeze-listed-before-the-last-refused", 1, ["control-mutants-missing"],
+     f"{CM}['unread'] == ['notes/snapshots/m2/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m1/m.sha256'", detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m2", "m1"], rorder=[0, 2, 1]))
+case("cm-newest-freeze-listed-before-the-last-with-pre-date-base-refused", 1, ["control-mutants-missing"],
+     f"{CM}['unread'] == ['notes/snapshots/m2/m.sha256'] and {CM}['previous'] == 'notes/snapshots/m0/m.sha256'", detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m2", "m1"], rorder=[0, 2, 1], before=["m0"]))
+case("cm-newer-of-two-freezes-listed-first-refused", 1, ["control-mutants-missing"],
+     f"{CM}['unread'] == ['notes/snapshots/m1/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m0/m.sha256'", detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, prev=CM_N27, scope=["m1", "m0"], rorder=[1, 0]))
+case("cm-freezes-in-launch-order-none-unread", 0, [],
+     f"{CM}['unread'] == [] and {CM}['manifest'] == 'notes/snapshots/m2/m.sha256' and len({CM}['checked']) == 1")(
+    lambda out: cm_fx(out, dict(CM_N28, **{"r28-control-mutants.txt": cm_report()}), prev={}, mid=CM_N27))
+case("cm-freeze-reviewed-at-the-last-ones-instant-not-unread", 0, [], f"{CM}['unread'] == []")(
+    lambda out: cm_fx(out, dict(CM_N28, **{"r28-control-mutants.txt": cm_report()}), prev={}, mid=CM_N27,
+                      when={1: "2026-11-15T01:50:00-08:00"}))
+case("cm-freeze-reviewed-between-the-last-ones-reviews-not-unread", 0, [], f"{CM}['unread'] == [] and len({CM}['checked']) == 1")(
+    lambda out: cm_fx(out, dict(CM_N28, **{"r28-control-mutants.txt": cm_report()}), prev={}, mid=CM_N27,
+                      when={1: "2026-11-15T02:00:00-08:00"}, rmore={2: ["2026-11-15T02:10:00-08:00"]}))
+case("cm-last-listed-unreviewed-compares-nothing", 1, ["review-verdict-mismatch"], f"{CM}['unread'] == [] and len({CM}['checked']) == 1")(
+    lambda out: cm_fx(out, dict(CM_N28, **{"r28-control-mutants.txt": cm_report()}), prev={}, mid=CM_N27, rorder=[0, 1]))
+# P3: a PRD file's freeze copy is read as any other member's (the fixture freezes hold their PRD copies)
+CM_PRD = "PRD-r28-l3-pairs.md"
+case("cm-prd-named-control-copy-absent", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == [{CM_PRD!r}]", detail="absent or unreadable")(
+    lambda out: cm_fx(out, {CM_PRD: CM_L3}, absent=[CM_PRD]))
+case("cm-prd-named-control-copy-overwritten", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == [{CM_PRD!r}]")(
+    lambda out: cm_fx(out, {CM_PRD: CM_L3}, moved={CM_PRD: "# PRD\n"}))
+case("cm-prd-copy-of-a-mission-slug-absent", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['PRD-foo.md'] and {CM}['survived'] == []")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report()}, absent=["PRD-foo.md"]))
+# P4: `verdict: discriminates` / `does not discriminate` in any case, after any words each followed by one space
+CM_RB = "r28-l3-readback.txt"
+for _n, _v in (("lowercase-does-not-discriminate", "fixture verdict: does not discriminate"),
+               ("uppercase-discriminates", "fixture verdict: DISCRIMINATES"),
+               ("two-words-no-label", "readback fixture verdict: discriminates"),
+               ("no-space-after-colon", "fixture verdict:discriminates"),
+               ("two-spaces-after-colon", "fixture verdict:  discriminates"),
+               ("capital-verdict", "fixture Verdict: discriminates"),
+               ("dotted-word", "r10.f1 verdict: discriminates"),
+               ("no-break-space-after-colon", "fixture verdict: discriminates"),
+               ("no-break-space-between-words", "fixture verdict: discriminates"),
+               ("no-word", "verdict: discriminates")):
+    case(f"cm-verdict-{_n}-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == [{CM_RB!r}]")(
+        (lambda v: lambda out: cm_fx(out, {CM_RB: f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\n{v}\n"}))(_v))
+case("cm-runner-log-padded-verdict-row-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"run-r28-controls.log": "r28-l3-pairs.txt                         controls verdict: discriminates exit=0\n"
+                                                    "r28-l3-readback.txt                      fixture verdict: discriminates\n"}))
+case("cm-verdict-quoted-mid-line-not-read", 0, [], f"{CM}['checked'] == []")(
+    lambda out: cm_fx(out, {"page-r28.txt": 'the readback prints "fixture verdict: discriminates"\n'}))
+# P5: an earlier entry's review is dated by its session's last launch row; another verdict word; a moved .md or other non-.txt member
+CM_S_R4 = "bbbbbbbb-0000-4000-8000-000000000018"       # a review session an earlier entry names, with two launch rows
+CM_R4_LINE = f"Review: notes/reviews/cm9.txt reviewer-session={CM_S_R4}"
+case("cm-earlier-entry-dated-by-its-reviews-last-launch-row", 1, [CM_AG, "control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, again=[(CM_BACK, ["m1"], [CM_R4_LINE])],
+                      xrows=[review_row("2026-11-15T01:00:00-08:00", CM_S_R4), review_row(CM_AFTER, CM_S_R4)]))
+case("cm-earlier-entry-with-an-old-last-launch-row-is-the-base", 1, [CM_AG],
+     f"{CM}['missing'] == [] and {CM}['checked'] == [] and {CM}['previous'] == 'notes/snapshots/m1/m.sha256'")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, again=[(CM_BACK, ["m1"], [CM_R4_LINE])],
+                      xrows=[review_row(CM_AFTER, CM_S_R4), review_row("2026-11-15T01:00:00-08:00", CM_S_R4)]))
+case("cm-verdict-word-other-than-fixture-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == [{CM_RB!r}]")(
+    lambda out: cm_fx(out, {CM_RB: f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\nreadback verdict: discriminates\n"}))
+case("cm-moved-md-member-refused", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['notes-r28.md']")(
+    lambda out: cm_fx(out, {"notes-r28.md": "a note\n"}, moved={"notes-r28.md": "another note\n"}))
+case("cm-absent-out-member-refused", 1, ["control-mutants-missing"], f"{CM}['unreadable'] == ['r28-l3-pairs.out']", detail="absent or unreadable")(
+    lambda out: cm_fx(out, {"r28-l3-pairs.out": "a read\n"}, absent=["r28-l3-pairs.out"]))
+
+# ---- review lint-e784d (FIX on b717303), from the public write-up only
+# Q1: the last listed manifest is dated by every review launch of the Task at its scope id, so leaving its Review: line out reads nothing less
+CM_M1_LATE = "2026-11-15T02:00:00-08:00"                # after m2's review launch (01:50)
+CM_S_X1 = "bbbbbbbb-0000-4000-8000-000000000019"       # a launch row at m1's scope id that no Review: line names
+case("cm-last-listed-review-left-off-the-entry-newest-unread-refused", 1, ["control-mutants-missing"],
+     f"{CM}['unread'] == ['notes/snapshots/m2/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m1/m.sha256'", detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m2", "m1"], rorder=[0, 2, 1], leave=[1]))
+case("cm-last-listed-unbound-review-after-the-newest-not-unread", 0, [], f"{CM}['unread'] == [] and {CM}['checked'] == []")(
+    lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m2", "m1"], rorder=[0, 2, 1],
+                      xat={1: [review_row(CM_M1_LATE, CM_S_X1)]}))
+for _n, _r in (("of-another-task", dict(review_row(CM_M1_LATE, CM_S_X1), task_id="A9")),
+               ("of-an-author", dict(review_row(CM_M1_LATE, CM_S_X1), role="author")),
+               ("that-is-no-launch", dict(review_row(CM_M1_LATE, CM_S_X1), decision="persist")),
+               ("of-another-skill", dict(review_row(CM_M1_LATE, CM_S_X1), skill="build"))):
+    case(f"cm-last-listed-row-{_n}-does-not-date-it", 1, ["control-mutants-missing"],
+         f"{CM}['unread'] == ['notes/snapshots/m2/m.sha256']", detail=CM_UNREAD)(
+        (lambda r: lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m2", "m1"], rorder=[0, 2, 1], leave=[1],
+                                                xat={1: [r]}))(_r))
+# Q4: a duplicate last listing is dated by its scope id (q01); an earlier entry that inherits scope= (q05) or is dated after the date by
+# its review launch alone (q07) is one this rule read (their Review: and scope= lines are not the entry's, so the fixture matrix gives CM_AG)
+case("cm-duplicate-last-listing-newest-unread-refused", 1, ["control-mutants-missing"],
+     f"{CM}['unread'] == ['notes/snapshots/m2/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m1/m.sha256'", detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, prev={}, mid=CM_N27, scope=["m0", "m1", "m2", "m1"]))
+case("cm-backdated-entry-after-an-entry-dated-by-its-review-is-read", 1, [CM_AG, "control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] is None")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, ts=CM_BACK, again=[("2026-11-21T17:30:00-08:00", ["m1"], [CM_AN, CM_R4_LINE])],
+                      xrows=[review_row(CM_AFTER, CM_S_R4)]))
+case("cm-backdated-entry-after-an-inherited-scope-entry-is-read", 1, [CM_AG, "control-mutants-missing"],
+     f"{CM}['missing'] == ['r28-controls.txt'] and {CM}['previous'] == 'notes/snapshots/m0/m.sha256'")(
+    lambda out: cm_fx(out, {"r28-controls.txt": CM_R28}, prev={}, ts=CM_BACK, before=["m0"], again=[(CM_AFTER, None, [CM_AN])]))
+# Q4 q03, q08: any whitespace inside `does not discriminate` and after a label's colon; Q3: a word only ending in a file extension is a
+# file name
+for _n, _v in (("two-spaces-in-does-not", "fixture verdict: does  not discriminate"),
+               ("label-then-two-spaces", "  entrypoint control:  controls verdict: discriminates"),
+               ("word-holding-an-extension-mid-word", "r10.md5 verdict: discriminates")):
+    case(f"cm-verdict-{_n}-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == [{CM_RB!r}]")(
+        (lambda v: lambda out: cm_fx(out, {CM_RB: f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\n{v}\n"}))(_v))
+# Q3: the real runner scripts write `printf '%-40s %s\n' <output> <verdict line>`; a name of 40 characters or more gets one space
+CM_RUNLOG = "".join("%-40s %s\n" % (n, v) for n, v in (
+    ("r29-matrix-verification-controlsxxxx.txt", "controls verdict: discriminates"),
+    ("r29-matrix-verification-controls-xxxx.log", "controls verdict: discriminates"),
+    ("r29-matrix-verification-controlsxxxx.out", "fixture verdict: discriminates"),
+    ("r29-matrix-verification-controls-xxxxx.md", "verdict: does not discriminate"),
+    ("r29-matrix-verification-controlsxxx.json", "readback fixture verdict: discriminates")))
+assert all(len(x.split(" ")[0]) >= 40 for x in CM_RUNLOG.splitlines()), CM_RUNLOG
+case("cm-runner-log-verdict-row-of-a-40-character-name-not-read", 0, [],
+     f"[c['control'] for c in {CM}['checked']] == ['r23-controls.txt'] and {CM}['missing'] == []")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(), "run-r29-controls.log": CM_RUNLOG}))
+
+# ---- review lint-e784e (FIX on a3390d9), from the public write-up only
+# R1: every listed manifest is dated by the same review launches as the last listed one, so leaving the newer freeze's Review: line out
+# reads nothing less (e1 = u2: m2's line left out; e2 = u3: only m0's line kept; e4: m2 reviewed again by a session no line binds; the
+# o3 control with every line kept is cm-newest-freeze-listed-before-the-last-refused); a bound review older than the last listed one's
+# does not hide a later unbound one (e4b)
+CM_S_X2 = "bbbbbbbb-0000-4000-8000-000000000017"       # a launch row at m2's scope id that no Review: line names
+CM_M2_LATE = "2026-11-15T02:30:00-08:00"                # after m1's review launch (01:40)
+CM_O3 = dict(prev={}, mid=CM_N27, scope=["m0", "m2", "m1"], rorder=[0, 2, 1])
+CM_M2_UNREAD = f"{CM}['unread'] == ['notes/snapshots/m2/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m1/m.sha256'"
+case("cm-newest-review-left-off-the-entry-unread-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], **CM_O3))
+case("cm-only-the-first-review-on-the-entry-newest-unread-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[1, 2], **CM_O3))
+case("cm-newest-reviewed-again-by-an-unbound-session-unread-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD,
+     detail=f"its review session {CM_S_X2} launched {CM_M2_LATE}")(
+    lambda out: cm_fx(out, CM_N28, leave=[2], xat={2: [review_row(CM_M2_LATE, CM_S_X2)]}, **CM_O3))
+case("cm-newest-bound-review-older-unbound-review-newer-unread-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD,
+     detail=f"its review session {CM_S_X2} launched {CM_M2_LATE}")(
+    lambda out: cm_fx(out, CM_N28, when={2: "2026-11-15T01:35:00-08:00"}, xat={2: [review_row(CM_M2_LATE, CM_S_X2)]}, **CM_O3))
+# R3: a review launch is a session's last launch row of the Task with role review, on either side (e5: a later author launch of the
+# session that reviewed the last listed manifest at 02:00 leaves m1's 01:40 review its date; the guard: m2's reviewer later launched
+# as an author dates nothing)
+case("cm-last-listed-review-of-a-session-last-launched-as-author-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD,
+     detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[1], xat={1: [review_row(CM_M1_LATE, CM_S_X1)]},
+                      xrows=[dict(review_row("2026-11-15T02:05:00-08:00", CM_S_X1), role="author")], **CM_O3))
+case("cm-newest-review-of-a-session-last-launched-as-author-not-unread", 0, [], f"{CM}['unread'] == [] and {CM}['checked'] == []")(
+    lambda out: cm_fx(out, CM_N28, leave=[2], xrows=[dict(review_row("2026-11-15T01:55:00-08:00", CM_S_R3), role="author")], **CM_O3))
+# the real shape: the last listed freeze has no review launch yet, an earlier one has, and nothing is compared (a mutant without the
+# last-listed test crashes); a launch row with no readable time dates nothing; e7, the residual: a newest freeze listed before the last
+# with no review launch at all is not shown newer by the log
+case("cm-last-listed-never-reviewed-compares-nothing", 0, [], f"{CM}['unread'] == [] and len({CM}['checked']) == 1")(
+    lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report()}, prev={}, leave=[1], unlaunched=[1]))
+case("cm-newest-review-with-no-launch-time-dates-nothing", 0, [], f"{CM}['unread'] == [] and {CM}['checked'] == []")(
+    lambda out: cm_fx(out, CM_N28, leave=[2], when={2: FS_NO_TIME}, **CM_O3))
+case("cm-newest-never-reviewed-listed-before-the-last-not-unread", 0, [], f"{CM}['unread'] == [] and {CM}['checked'] == []")(
+    lambda out: cm_fx(out, CM_N28, leave=[2], unlaunched=[2], **CM_O3))
+# R5 k03: rows are matched by scope id, not by the scope path, which the real routing rows write as an absolute RedBaron path (e6)
+case("cm-last-listed-review-left-off-absolute-row-scope-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[1], ascope=True, **CM_O3))
+case("cm-newest-review-left-off-absolute-row-scope-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], ascope=True, **CM_O3))
+# R4 (e3): a file-name word shorter than the runner's 40-character column is read (a runner pads it with two spaces or more); R5 k06:
+# a word of 40 characters or more with an extension that does not end it is read
+for _n, _v in (("json-file-word", "fixture.json verdict: discriminates"),
+               ("txt-file-word-after-a-word", "readback r10f1.txt verdict: discriminates"),
+               ("json-file-word-after-a-label", "  readback: pairs.json verdict: does not discriminate"),
+               ("39-character-file-word", "r29-matrix-verification-controls" + "x" * 3 + ".txt verdict: discriminates"),
+               ("40-character-word-holding-an-extension-mid-word",
+                "r29-matrix-verification-controls" + "x" * 4 + ".json.bak verdict: discriminates")):
+    case(f"cm-verdict-{_n}-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == [{CM_RB!r}]")(
+        (lambda v: lambda out: cm_fx(out, {CM_RB: f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\n{v}\n"}))(_v))
+
+# ---- review lint-e784f (APPROVE on f2f36e6, its LOW L1-L3), from the public write-up only
+# L1: each condition of the dating loop has a case: the newest freeze listed first of three, every line kept and its line left off (g8,
+# g8b; a mutant comparing only the manifest just before the last passes them); launch times compared as instants, m1's review row in Z
+# form (g9; a mutant comparing the ts strings); the session's last launch row with no readable time dates nothing, not an earlier
+# readable row of it (g10; a mutant filtering by time before taking the last row); a row with no task_id is no review launch of the
+# Task (g11; a mutant taking it as the Task's)
+CM_G8 = dict(prev={}, mid=CM_N27, scope=["m2", "m0", "m1"], rorder=[2, 0, 1])
+case("cm-newest-listed-first-of-three-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, **CM_G8))
+case("cm-newest-listed-first-of-three-review-left-off-unread-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], **CM_G8))
+case("cm-last-listed-review-in-z-form-compared-as-an-instant-refused", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], when={1: "2026-11-15T09:40:00Z"}, **CM_O3))
+case("cm-last-listed-reviewers-last-launch-row-with-no-time-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD,
+     detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [review_row(CM_M1_LATE, CM_S_X1), review_row(FS_NO_TIME, CM_S_X1)]}, **CM_O3))
+case("cm-last-listed-row-with-no-task-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [{k: v for k, v in review_row(CM_M1_LATE, CM_S_X1).items() if k != "task_id"}]},
+                      **CM_O3))
+# review lint-hygiene-g H1: a launch row with no role is an author's, as the lint reads role elsewhere, so it is no review launch and
+# dates nothing (a mutant taking a role-less row as a review passes every other case)
+case("cm-last-listed-row-with-no-role-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+    lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [{k: v for k, v in review_row(CM_M1_LATE, CM_S_X1).items() if k != "role"}]},
+                      **CM_O3))
+# review lint-hygiene-h N1: a launch row with no session, or an empty one, is no session's last launch row, so it dates nothing, as every
+# other review reader of the lint requires a session; N2: the rest of H1's class, each field the dating loop and its scope match read
+# with its value missing (decision, skill, scope_id, ts) or the scope id cut to a 12-hex prefix, dates nothing (each mutant defaulting
+# the field, or matching the scope id by prefix, passes every other case)
+for _n, _e in (("no-session", lambda r: {k: v for k, v in r.items() if k != "session"}), ("an-empty-session", lambda r: dict(r, session="")),
+               ("no-decision", lambda r: {k: v for k, v in r.items() if k != "decision"}),
+               ("no-skill", lambda r: {k: v for k, v in r.items() if k != "skill"}),
+               ("no-scope-id", lambda r: {k: v for k, v in r.items() if k != "scope_id"}),
+               ("a-12-hex-scope-id-prefix", lambda r: dict(r, scope_id=r["scope_id"][:12])),
+               ("no-ts", lambda r: {k: v for k, v in r.items() if k != "ts"})):
+    case(f"cm-last-listed-row-with-{_n}-does-not-date-it", 1, ["control-mutants-missing"], CM_M2_UNREAD, detail=CM_UNREAD)(
+        (lambda e: lambda out: cm_fx(out, CM_N28, leave=[2], xat={1: [review_row(CM_M1_LATE, CM_S_X1)]}, xedit=e, **CM_O3))(_e))
+# L2 (accepted, constructed): an older listed freeze reviewed again after the newest one's review launch is not told from a newer freeze
+# listed before the last, so an in-order entry whose newest round is answered is refused, the FAIL line naming that cause (g4); the
+# same entry without the re-review passes (g4b)
+CM_M1_AGAIN = "2026-11-15T02:30:00-08:00"               # after m2's review launch (01:50)
+CM_N28K = dict(CM_N28, **{"r28-control-mutants.txt": cm_report()})
+case("cm-older-freeze-reviewed-again-after-the-newest-refused", 1, ["control-mutants-missing"],
+     f"{CM}['unread'] == ['notes/snapshots/m1/m.sha256'] and {CM}['manifest'] == 'notes/snapshots/m2/m.sha256' and {CM}['missing'] == []",
+     detail=f"its review session {CM_S_X1} launched {CM_M1_AGAIN}, after every review of the last listed manifest notes/snapshots/m2/m.sha256"
+            ", whose round is the one read, so this newer freeze's round is not read; list the newest freeze last (when it is last, this "
+            "older freeze was reviewed after it")(
+    lambda out: cm_fx(out, CM_N28K, prev={}, mid=CM_N27, xat={1: [review_row(CM_M1_AGAIN, CM_S_X1)]}))
+case("cm-older-freeze-reviewed-once-in-order-not-unread", 0, [], f"{CM}['unread'] == [] and len({CM}['checked']) == 1")(
+    lambda out: cm_fx(out, CM_N28K, prev={}, mid=CM_N27))
+# L3 (accounted, constructed, over-refusal only): a verdict-line word is followed by one whitespace character, so a runner row of a name
+# shorter than the 40-character column written with one tab or one space (no `%-40s ` runner writes it) is read, and refused while
+# unanswered (r3, r4); a file word then a tab in a control output is read (h8)
+for _n, _sep in (("a-tab", "\t"), ("one-space", " ")):
+    case(f"cm-runner-log-short-name-and-{_n}-verdict-row-read-refused", 1, ["control-mutants-missing"],
+         f"{CM}['missing'] == ['run-r29-controls.log']")(
+        (lambda sep: lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(),
+                                              "run-r29-controls.log": f"r29-l3.txt{sep}controls verdict: discriminates\n"}))(_sep))
+case("cm-verdict-json-file-word-and-a-tab-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == [{CM_RB!r}]")(
+    lambda out: cm_fx(out, {CM_RB: f"# script mac-readback.py sha256 {CM_SCRIPT}\npositive: RESOLVED\nfixture.json\tverdict: discriminates\n"}))
+# review lint-hygiene-h N3: the verdict line's indentation and its label's separator are any whitespace, as between words, so a runner
+# log line indented by two ideographic spaces (U+3000), or with a tab after its label's colon, is read, and refused while unanswered
+for _n, _v in (("indented-by-ideographic-spaces", "\u3000\u3000controls verdict: discriminates"),
+               ("label-and-a-tab", "entrypoint control:\tcontrols verdict: discriminates")):
+    case(f"cm-runner-log-verdict-line-{_n}-read-refused", 1, ["control-mutants-missing"], f"{CM}['missing'] == ['run-r29-controls.log']")(
+        (lambda v: lambda out: cm_fx(out, {"r23-controls.txt": CM_R23, "r23-control-mutants.txt": cm_report(),
+                                            "run-r29-controls.log": v + "\n"}))(_v))
+
 # ---------------------------------------------------------------- driver
 def build(name, out):
     os.makedirs(out, exist_ok=True)
