@@ -342,7 +342,9 @@ names the edges file in `changed`; the lint keeps the original failure in `findi
 with `declared_by` (that manifest and repairs row). The final
 message ends with one `findings=<sha256 of the sidecar, or none>` line, the per-PRD verdict
 lines and one `mission=<APPROVE|FIX|REJECT> <session>` line verbatim, and the `result=`
-capture carries those same lines. The run note's `Mission:` line gains `scope=` (the
+capture carries those same lines. Before the `Review:` line is written, the verdict file and the
+capture each pass `scripts/dream-run-note-lint.sh --verdicts <file> --scope <manifest>` against
+the review's manifest (see **Review:**). The run note's `Mission:` line gains `scope=` (the
 manifests, in freeze order). A mission split over several run entries keeps one `Mission:`
 name and one multi-PRD edge map, and a repair appends the re-frozen manifest to `scope=`
 rather than replacing it. Until the `Mission:` line carries `scope=` and a chain review of
@@ -407,7 +409,24 @@ approved PRDs persist, rejected ones go back to drafting. A creative PRD, or one
 touches more than one repo or surface, is reviewed alone and persists in a batch of
 one. Write each verdict as `<slug> APPROVE|FIX|REJECT <reviewer>`, one line per PRD, to a
 review file; a line counts as a verdict only when its first token is a PRD slug
-(`[a-z0-9][a-z0-9-]*`), so a table row or other prose beside the verdicts is ignored. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
+(`[a-z0-9][a-z0-9-]*`), so a table row or other prose beside the verdicts is ignored. The slug is the
+PRD's file name without `PRD-` and `.md`, exactly as the snapshot manifest lists it, never a shortened form. The write-time check
+is `scripts/dream-run-note-lint.sh --verdicts <verdict file> --scope <manifest>`: the reviewer's prompt asks it to run the check
+on its own verdict file before it ends its turn, and the chain-review step runs it on the verdict file and its `result=` capture
+before the `Review:` line is written. Exit 1 (`verdict-slug-unscoped`, naming the line and the slug, or `verdict-lines-missing`)
+refuses the review as written. A review file is never rewritten. A verdict line whose slug the manifest does not list is
+corrected only by a fresh review session: one launched through the launcher with role review on the original review's
+`scope_id` (its manifest), never the original reviewer resumed, the author or another reviewer. It writes
+`<verdict file>.verdicts.corrected-<n>.jsonl`. Its first row is `{"corrects": <the Review: line's file>, "sha256": <that
+file's sha256>, "session": <its reviewer session>, "corrected_by": <the fresh session>}`. Then comes one row
+`{"line": <the original verdict line>, "slug": <the full slug>, "verdict": <the original word>}` per original verdict line, in
+order. The full slug is the token itself when the manifest lists it, else the only listed slug ending `-<token>`. The
+correction adds no verdict, changes no verdict word and drops no line. The lint reads it for that `Review:` line's slugs, keeps
+the original text in its JSON and in the `result=` comparison, and dates no freeze by the fresh session's launch. It refuses any
+other correction, one id per failed condition: `review-correction-self`, `review-correction-unlaunched`,
+`review-correction-verdict-changed`, `review-correction-lines-mismatch`, `review-correction-slug-unscoped`,
+`review-correction-slug-undenoted`, `review-correction-original-changed`, `review-correction-foreign` and
+`review-correction-grammar`. The note's `State:` tokens then carry the corrected verdicts in `Review:` line order. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
 slug's current PRD file with the digest in its reviewer's `review.snapshot` manifest, so a
 later edit to that PRD needs a new review (FIX and REJECT are not pinned). On a note whose
 `Mission:` line carries `scope=`, only the latest chain review (in `Review:` line order)
