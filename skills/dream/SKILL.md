@@ -63,8 +63,9 @@ clone a build daemon owns (the persist hook refuses it).
 
 **Lineage freshness.** For every `build_into` repo about to be cited, run
 `scripts/lineage-freshness.sh <path>` and print `lineage: <path> <verdict>`. On
-`behind <n>`, cite from `git show origin/main:<file>` and add
-`Cited-tree: <repo>@<remote-sha>` to the PRD. `dirty`: cite local, note the count.
+`behind <n>`, cite from `git show origin/main:<file>`; the PRD frontmatter carries one line per behind repo:
+- Cited-tree: <repo>@<sha>
+where `<sha>` is the `remote-sha=` value the script printed. `dirty`: cite local, note the count.
 `no-remote`/`missing`: cite local, say freshness is unknown.
 
 **Evidence sources** (detect, never assume): tracker MCP, `gh` / GitHub MCP, web
