@@ -54,13 +54,13 @@ J=$(tr '\n' ' ' < "$S" | tr -s ' ')
 for s in 'dream-run-note-lint.sh --verdicts' 'verdict-slug-unscoped' '.verdicts.corrected-<n>.jsonl' 'fresh review session' \
          'review-correction-self' 'review-correction-unlaunched' 'review-correction-verdict-changed' 'review-correction-lines-mismatch' \
          'review-correction-slug-unscoped' 'review-correction-slug-undenoted' 'review-correction-original-changed' \
-         'review-correction-foreign' 'review-correction-grammar'; do
+         'review-correction-foreign' 'review-correction-grammar' 'review-correction-noop'; do
   printf '%s' "$J" | grep >/dev/null -F -- "$s" || fail "SKILL.md does not name $s"
 done
 # the lint's header lists every new finding id
 for id in verdict-slug-unscoped verdict-lines-missing review-correction-self review-correction-unlaunched review-correction-verdict-changed \
           review-correction-lines-mismatch review-correction-slug-unscoped review-correction-slug-undenoted \
-          review-correction-original-changed review-correction-foreign review-correction-grammar; do
+          review-correction-original-changed review-correction-foreign review-correction-grammar review-correction-noop; do
   sed -n '/^# Finding ids:/,/^#$/p' "$LINT" | grep >/dev/null -w -- "$id" || fail "the lint header's Finding ids do not list $id"
 done
 pass "the write-time check refuses shortened slugs (line and slug named, text and JSON, verdict file and result.json), a file with no verdict line and a malformed manifest, accepts the scope's slugs beside prose; SKILL.md and the lint header name the check and the correction ids"
