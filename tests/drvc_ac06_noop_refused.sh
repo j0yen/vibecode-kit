@@ -36,6 +36,7 @@ want_ids '[]' partial
 [ "$(read_vc)" = true ] || fail "partial: the correction was not read: $JS"
 # known-bad control: the 9325ded lint reads R23
 git -C "$REPO" show 9325ded:skills/dream/scripts/dream-run-note-lint.sh > "$T/d5.sh" 2>/dev/null || fail "git show 9325ded failed"
+chmod +x "$T/d5.sh"
 r23; keep=$LINT; LINT="$T/d5.sh"; run; LINT=$keep
 [ "$RC" = 0 ] && [ "$(read_vc)" = true ] || fail "known-bad control: the 9325ded lint does not read R23 (rc=$RC): the test does not discriminate"
 pass "a correction whose every slug equals its line's token is review-correction-noop and never read (R23 and the identity map of shortened slugs); a partial correction is read; the 9325ded lint read R23"
