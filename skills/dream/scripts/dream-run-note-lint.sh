@@ -11,6 +11,7 @@
 #   dream-run-note-lint.sh --edges <edges.jsonl> [--prds <PRD basename ...>] [--json]
 #   dream-run-note-lint.sh --consumption <record> --task <T> [--page <page>] [--prd-home <dir>] [--reviews <dir>]
 #                          [--decisions <path>] [--require-closed] [--json]      (PRD-dream-finding-consumption R8)
+#   dream-run-note-lint.sh --verdicts <verdict file | result.json> --scope <manifest> [--json]   (verdict correction, item 2)
 #   dream-run-note-lint.sh --selftest
 #
 # The entry is the last `## <ts>  /dream  vision-...` block (--last, the default) or
@@ -64,6 +65,29 @@
 #   affected-consumer-unreviewed repair-declined-unaccepted repair-consolidation-mismatch
 #   sidecar-correction-unbound
 #   control-mutants-missing control-mutant-survived
+#   review-correction-grammar review-correction-foreign review-correction-self review-correction-unlaunched
+#   review-correction-original-changed review-correction-lines-mismatch review-correction-verdict-changed
+#   review-correction-slug-unscoped review-correction-slug-undenoted review-correction-noop
+#   verdict-slug-unscoped verdict-lines-missing   (--verdicts only)
+#
+# Verdict correction (A1296 Increment-2 request 01, e9d18227; owner the A1723 lint lineage 03415): a review file is never
+# rewritten. Beside it, <verdict file>.verdicts.corrected-<n>.jsonl maps each of its verdict lines, in order, to the full slug the
+# line's first token denotes, its verdict word unchanged: row 1 exactly {"corrects": <the Review: line's file>, "sha256": <the
+# original's sha256>, "session": <its reviewer session>, "corrected_by": <the correcting session>}, then exactly one {"line": <the
+# original verdict line, normalized>, "slug": <full slug>, "verdict": <the original word>} per original verdict line. It is read
+# only when written by a fresh review session: not the reviewer, the Route session or another Review: line's session; each of its
+# launch rows for the Task a launch with skill dream, role review and the original review row's scope_id, no resume, stamped after
+# the original review's launch; the original byte-unchanged; each slug's PRD-<slug>.md in the original manifest (read at the row's
+# scope, canonicalizing to its scope_id) and the one its token denotes (the token itself when scoped, else the only scoped slug
+# ending -<token>), at least one slug differing from its line's first token (else review-correction-noop). Each failed condition is
+# its own review-correction-* id; a refused file is not read and the original's findings stand. A read correction gives the Review:
+# line its slugs for the scope, snapshot, verdict-sequence, superseded-pin and per-PRD verdict checks; result= is still compared
+# with the original text, the JSON's review keeps the original text and adds verdict_correction, and the highest valid n is read.
+# The correcting session's launch is a review launch: the control-mutant newest-freeze rule dates the corrected review's freeze by
+# it like any other (a correction launch and a re-review launch have one decisions-row shape, review 4323f3ad F1), so a correction
+# of an earlier freeze's review is control-mutants-missing until a later review launch of the last listed manifest, listed on a
+# Review: line, dates that manifest newest again. The failure floor (R4) still reads the verdict files as written. --verdicts is the write-time check
+# the chain-review step runs on a verdict file or its result.json capture against the review's manifest.
 #
 # Mission (PRD-dream-mission-edge-map): opt-in. A Mission: line names the mission's edge map
 # (notes/missions/<name>.edges.jsonl: a header {mission, outcome, invariants, prds, external,
@@ -294,7 +318,7 @@ def usage(msg):
                 "[--json] [--prd-dir <dir>] [--decisions <path>] [--scope-root <recorded root>=<PRD home> ...] | --matrix <path> --states "
                 "<slug=value ...> [--json] | --scope-id <manifest> | --edges <path> [--prds <PRD basename ...>] [--json] "
                 "| --consumption <record> --task <T> [--page <page>] [--prd-home <dir>] [--reviews <dir>] [--decisions <path>] "
-                "[--require-closed] [--json] | --selftest)")
+                "[--require-closed] [--json] | --verdicts <verdict file> --scope <manifest> [--json] | --selftest)")
 
 
 class ScopeError(Exception):
@@ -548,6 +572,223 @@ def check_snapshot(L, who, full, digests, last, home):
                    "the APPROVE was given on other bytes")
             ok = False
     return ok
+
+
+# ---------------------------------------------------------------- verdict correction (A1296 Increment-2 request 01, e9d18227)
+VCORR_RE = re.compile(r"\.verdicts\.corrected-([1-9][0-9]*)\.jsonl$")
+VCORR_HEAD = ("corrects", "sha256", "session", "corrected_by")
+VCORR_ROW = ("line", "slug", "verdict")
+VCORR_IDS = ("review-correction-grammar", "review-correction-foreign", "review-correction-self", "review-correction-unlaunched",
+             "review-correction-original-changed", "review-correction-lines-mismatch", "review-correction-verdict-changed",
+             "review-correction-slug-unscoped", "review-correction-slug-undenoted", "review-correction-noop")
+
+
+def review_launch_row(rv, rows, task, governed, rsess):
+    """The reviewer row the review loop binds (its m4[-1] when its role is review), else None. Pure."""
+    if rv["session"] == "none" or (rsess is not None and rv["session"] == rsess) or not governed or task is None:
+        return None
+    m4 = [r for r in rows if r.get("session") == rv["session"] and r.get("decision") == "launch" and r.get("skill") == "dream"
+          and r.get("task_id") == task]
+    return m4[-1] if m4 and m4[-1].get("role") == "review" else None
+
+
+def vc_denotes(tok, slug, scoped):
+    """Whether the corrected slug is the one the original verdict line's first token denotes in the original manifest: the token
+    itself when PRD-<token>.md is scoped, else the only scoped slug ending `-<token>` (narrowest reading: a shortened slug drops a
+    hyphen-separated prefix; any other mapping is refused)."""
+    if tok in scoped:
+        return slug == tok
+    cands = [s for s in scoped if s.endswith("-" + tok)]
+    return len(cands) == 1 and slug == cands[0]
+
+
+def verdict_correction(rv, full, vlines, rrow, rows, task, rsess, others, resolve):
+    """Request 01 item 1: <verdict file>.verdicts.corrected-<n>.jsonl beside a Review: line's verdict file, an append-only record
+    that maps each original verdict line, in order, to the full slug its first token denotes, the verdict word unchanged. Row 1
+    is exactly {"corrects": <the Review: line's file>, "sha256": <the original file's sha256>, "session": <its reviewer session>,
+    "corrected_by": <the correcting session>}; every other row is exactly {"line": <the original verdict line, normalized>,
+    "slug": <full slug>, "verdict": <the original word>}, one per original verdict line, in order. Read only when the correcting
+    session is fresh: neither the reviewer, the note's Route session nor another Review: line's session; every launch row it has
+    for the Task is a launch with skill dream, role review, the original review row's scope_id, no resume, stamped after the
+    original review's launch; the original file still hashes to sha256; each slug's PRD-<slug>.md is in the original manifest
+    (read at the row's scope, canonicalizing to its scope_id) and is the one its token denotes (vc_denotes); at least one slug
+    differs from its line's first token (a no-op is review-correction-noop, review 4323f3ad F2). Each refused file is
+    one review-correction-* id per reason (VCORR_IDS). The correcting session's launch is a review launch like any other (the
+    control-mutant newest-freeze rule dates its freeze by it, read or not: review 4323f3ad F1). Pure. -> (corrected vlines of the highest valid n or None,
+    [(finding id, detail)], the JSON record or None). A corrected vline keeps the original normalized text as its third element,
+    so result= is still compared with the original text."""
+    d, base = os.path.dirname(full), os.path.basename(full)
+    try:
+        names = sorted((int(m.group(1)), nm) for nm in os.listdir(d or ".")
+                       for m in [VCORR_RE.search(nm)] if m and nm[:m.start()] == base)
+    except OSError:
+        names = []
+    if not names:
+        return None, [], None
+    try:
+        with open(full, "rb") as fh:
+            orig_sha = hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        orig_sha = None
+    sid = rrow.get("scope_id") if rrow is not None else None
+    scoped = None
+    if rrow is not None and isinstance(sid, str) and sid:
+        sfull, _ = scope_file(resolve, rrow.get("scope"), rrow) if isinstance(rrow.get("scope"), str) else (None, None)
+        try:
+            got, dg = scope_canon(sfull) if sfull is not None else (None, {})
+        except ScopeError:
+            got, dg = None, {}
+        scoped = {k.decode("utf-8", "backslashreplace")[len("PRD-"):-len(".md")] for k in dg
+                  if PRD_BASENAME_RE.fullmatch(k)} if got == sid else set()
+    probs, best = [], None
+    for _, nm in names:
+        shown = os.path.join(os.path.dirname(rv["file"]), nm) if os.path.dirname(rv["file"]) else nm
+        why = []
+
+        def bad(fid, detail):
+            why.append((fid, f"{shown}: {detail}"))
+        try:
+            with open(os.path.join(d, nm), "rb") as fh:
+                raw = fh.read()
+        except OSError as e:
+            probs.append(("review-correction-grammar", f"{shown}: unreadable ({e.strerror or type(e).__name__})"))
+            continue
+        # grammar: one JSON object per line, exact keys, string values; a grammar refusal is read no further
+        text = raw.decode("utf-8", "replace")
+        lines = text.split("\n")
+        if lines and lines[-1] == "":
+            lines = lines[:-1]
+        parsed = []
+        for n, ln in enumerate(lines, 1):
+            try:
+                v = json.loads(ln) if ln.strip() else None
+            except (ValueError, RecursionError):
+                v = None
+            if not isinstance(v, dict):
+                bad("review-correction-grammar", f"row {n} is not one JSON object")
+            parsed.append(v)
+        for n, k in dup_keys(raw):
+            bad("review-correction-grammar", f"row {n} repeats the key {k}")
+        if not parsed:
+            bad("review-correction-grammar", "no row")
+        if why:
+            probs += why
+            continue
+        head, body = parsed[0], parsed[1:]
+        if set(head) != set(VCORR_HEAD) or not all(isinstance(head[k], str) and head[k] for k in VCORR_HEAD):
+            bad("review-correction-grammar", "row 1 is not {\"corrects\", \"sha256\", \"session\", \"corrected_by\"}, each a non-empty string")
+        elif not re.fullmatch(r"[0-9a-f]{64}", head["sha256"]):
+            bad("review-correction-grammar", f"row 1: sha256 {head['sha256']!r} is not 64 lowercase hex digits")
+        for n, r in enumerate(body, 2):
+            if set(r) != set(VCORR_ROW) or not all(isinstance(r[k], str) for k in VCORR_ROW):
+                bad("review-correction-grammar", f"row {n} is not {{\"line\", \"slug\", \"verdict\"}}, each a string (no verdict is added)")
+            elif not VERDICT_SLUG.match(r["slug"]) or r["verdict"] not in VERDICTS:
+                bad("review-correction-grammar", f"row {n}: slug {r['slug']!r} is no PRD slug or verdict {r['verdict']!r} is not APPROVE, FIX or REJECT")
+        if why:
+            probs += why
+            continue
+        # review 4323f3ad F2: a correction changes at least one slug; one whose every slug is its line's first token corrects nothing
+        if body and all(r["slug"] == (r["line"].split() or [""])[0] for r in body):
+            bad("review-correction-noop", "every row's slug is its line's first token: the record corrects nothing")
+        # the review it corrects
+        same_file = head["corrects"] == rv["file"] or os.path.realpath(resolve(head["corrects"])) == os.path.realpath(full)
+        if not same_file:
+            bad("review-correction-foreign", f"corrects {head['corrects']}, not this Review: line's file {rv['file']}")
+        if head["session"] != rv["session"]:
+            bad("review-correction-foreign", f"session {head['session']} is not this Review: line's reviewer-session {rv['session']}")
+        # who corrects: a fresh review session
+        cb = head["corrected_by"]
+        if cb == rv["session"]:
+            bad("review-correction-self", f"corrected_by {cb} is the original reviewer session; a correction is a fresh session's")
+        elif rsess is not None and cb == rsess:
+            bad("review-correction-self", f"corrected_by {cb} is the Route session (the note's author)")
+        elif cb in others:
+            bad("review-correction-self", f"corrected_by {cb} is the reviewer session of another Review: line")
+        elif rrow is None:
+            bad("review-correction-unlaunched", f"the review it corrects (reviewer-session {rv['session']}) has no role-review launch row "
+                "of the Task, so no scope binds the correction")
+        else:
+            ots = launch_ts(rrow)
+            mine = [r for r in rows if r.get("session") == cb and r.get("decision") == "launch" and r.get("skill") == "dream"
+                    and r.get("task_id") == task]
+            if not mine:
+                bad("review-correction-unlaunched", f"corrected_by {cb}: no launch row with skill=dream task_id={task}")
+            for r in mine:
+                ts = launch_ts(r)
+                if r.get("role") != "review" or r.get("scope_id") != sid:
+                    bad("review-correction-unlaunched", f"corrected_by {cb}: launch row {r.get('ts')} has role={r.get('role')} "
+                        f"scope_id={r.get('scope_id')}, not role=review on the original scope_id {sid}")
+                elif r.get("resume") is True:
+                    bad("review-correction-unlaunched", f"corrected_by {cb}: launch row {r.get('ts')} is a resume; a correction is a fresh session's")
+                elif ts is None or ots is None or not ts > ots:
+                    bad("review-correction-unlaunched", f"corrected_by {cb}: launch row {r.get('ts')} is not after the original review's "
+                        f"launch {rrow.get('ts')}")
+        # the original, byte-unchanged
+        if orig_sha is None or head["sha256"] != orig_sha:
+            bad("review-correction-original-changed", f"sha256 {head['sha256']} is not the original file's current sha256 {orig_sha}")
+        # one row per original verdict line, in order, the verdict word unchanged, the slug the token denotes in the manifest
+        if len(body) != len(vlines):
+            bad("review-correction-lines-mismatch", f"{len(body)} line rows, the original has {len(vlines)} verdict lines")
+        for n, (r, (tok, verdict, text0)) in enumerate(zip(body, vlines), 2):
+            if " ".join(r["line"].split()) != text0:
+                bad("review-correction-lines-mismatch", f"row {n}: line {r['line']!r} is not original verdict line {n - 1} {text0!r}")
+                continue
+            if r["verdict"] != verdict:
+                bad("review-correction-verdict-changed", f"row {n}: verdict {r['verdict']} for {text0!r}, whose verdict is {verdict}")
+            if scoped is None:
+                continue
+            if r["slug"] not in scoped:
+                bad("review-correction-slug-unscoped", f"row {n}: slug {r['slug']}: PRD-{r['slug']}.md is not among the basenames of "
+                    f"the original scope {rrow.get('scope')} (scope_id {sid})")
+            elif not vc_denotes(tok, r["slug"], scoped):
+                bad("review-correction-slug-undenoted", f"row {n}: slug {r['slug']} is not the scoped slug token {tok} denotes "
+                    "(the token itself when scoped, else the only scoped slug ending -<token>)")
+        if why:
+            probs += why
+            continue
+        best = ([(r["slug"], r["verdict"], text0) for r, (_, _, text0) in zip(body, vlines)],
+                {"file": shown, "corrects": head["corrects"], "sha256": head["sha256"], "session": head["session"],
+                 "corrected_by": cb, "lines": [{"line": text0, "slug": r["slug"], "verdict": r["verdict"]}
+                                               for r, (_, _, text0) in zip(body, vlines)]})
+    return (best[0] if best else None), probs, (best[1] if best else None)
+
+
+def verdicts_mode(a):
+    """Request 01 item 2, the write-time (producer) check: --verdicts <verdict file or result.json> --scope <manifest>. Every
+    verdict line's PRD-<slug>.md must be a basename of the manifest. Exit 0 `OK <file> verdicts=<n> scope=<scope_id>`; exit 1
+    one FAIL line per refused line (verdict-slug-unscoped), for no verdict line (verdict-lines-missing) or for a malformed
+    manifest (review-scope-mismatch, as --scope-id); exit 2 for an unreadable verdict file."""
+    f, m = a["verdicts"], a["scope"]
+    try:
+        with open(f, "rb") as fh:
+            text = fh.read().decode("utf-8", "replace")
+    except OSError as e:
+        raise Exit2(f"verdict file {f} unreadable ({e.strerror or type(e).__name__})")
+    try:
+        d = json.loads(text)
+    except (ValueError, RecursionError):
+        d = None
+    if isinstance(d, dict) and isinstance(d.get("result"), str):
+        text = d["result"]
+    L = Lint()
+    obj = {"file": f, "scope": m, "scope_id": None, "verdicts": 0, "unscoped": [], "trust": "same-uid"}
+    try:
+        sid, digests = scope_canon(m)
+    except ScopeError as e:
+        L.fail("review-scope-mismatch", str(e))
+        sid, digests = None, None
+    obj["scope_id"] = sid
+    vl = [(n, v) for n, v in ((n, verdict_of(x)) for n, x in enumerate(text.split("\n"), 1)) if v]
+    obj["verdicts"] = len(vl)
+    if not vl:
+        L.fail("verdict-lines-missing", f"{f}: no verdict line (`<slug> APPROVE|FIX|REJECT <reviewer>`, the slug first)")
+    if digests is not None:
+        for n, (slug, _, line) in vl:
+            if b"PRD-" + slug.encode() + b".md" not in digests:
+                obj["unscoped"].append({"line": n, "slug": slug, "text": line})
+                L.fail("verdict-slug-unscoped", f"{f}: line {n}: slug {slug}: PRD-{slug}.md is not among the basenames of scope {m}")
+    obj["exit"], obj["findings"] = (1 if L.findings else 0), L.ids()
+    return L, obj, f"OK {f} verdicts={len(vl)} scope={sid}"
 
 
 # ---------------------------------------------------------------- mission (PRD-dream-mission-edge-map)
@@ -1641,6 +1882,8 @@ def bind_reviews(reviews, rows, task, governed, rsess, resolve):
         if os.path.isfile(full) and os.access(full, os.R_OK):
             text = read_text(full)
             vlines = [v for v in (verdict_of(x) for x in text.split("\n")) if v]
+            if (rv.get("_vc") or (None,))[0] is not None:     # request 01: a read verdict correction's slugs
+                vlines = rv["_vc"][0]
             for slug, verdict, _ in vlines:
                 last.pop(slug, None)
                 last[slug] = verdict
@@ -3048,7 +3291,7 @@ def parse_args(argv):
     a = {"log": None, "mode": "last", "entry": None, "json": False, "prd_dir": None,
          "decisions": None, "matrix": None, "states": None, "selftest": False, "scope_id": None,
          "edges": None, "prds": None, "consumption": None, "task": None, "page": None, "prd_home": None, "reviews": None,
-         "require_closed": False, "scope_roots": None}
+         "require_closed": False, "scope_roots": None, "verdicts": None, "scope": None}
     i = 0
     while i < len(argv):
         x = argv[i]
@@ -3060,7 +3303,7 @@ def parse_args(argv):
             a["selftest"] = True
         elif x == "--require-closed":
             a["require_closed"] = True
-        elif x in ("--consumption", "--task", "--page", "--prd-home", "--reviews"):
+        elif x in ("--consumption", "--task", "--page", "--prd-home", "--reviews", "--verdicts", "--scope"):
             if i + 1 >= len(argv):
                 usage(f"{x} needs a value")
             a[x[2:].replace("-", "_")] = argv[i + 1]
@@ -4277,6 +4520,12 @@ def lint_log(a):
             L.fail("review-self", f"Review: none beside reviewed: state for {', '.join(reviewed_slugs)}")
     elif review_grammar_ok and reviews:
         rsess = route["session"] if route else None
+        for rv in reviews:          # request 01: each Review: file's verdict correction, read once (bind_reviews and the loop use it)
+            vfull = resolve(rv["file"])
+            if os.path.isfile(vfull) and os.access(vfull, os.R_OK):
+                vl0 = [v for v in (verdict_of(x) for x in read_text(vfull).split("\n")) if v]
+                rv["_vc"] = verdict_correction(rv, vfull, vl0, review_launch_row(rv, rows, task, governed, rsess), rows, task, rsess,
+                                               {x["session"] for x in reviews if x is not rv}, resolve)
         if chain_on:                # R1 manifests, R2 chain reviews, R5 superseded pins (replaces the gate fix)
             mans = mission_scopes(L, mrec, resolve)
             bound = bind_reviews(reviews, rows, task, governed, rsess, resolve)
@@ -4321,6 +4570,12 @@ def lint_log(a):
                 labels.append("self")
                 continue
             vlines = [v for v in (verdict_of(x) for x in read_text(full).split("\n")) if v]
+            vc = rv.get("_vc")
+            if vc is not None:
+                for fid, detail in vc[1]:
+                    L.fail(fid, detail)
+                if vc[0] is not None:   # request 01: the corrected slugs, the original text kept (result= compares it)
+                    vlines, rv["verdict_correction"] = vc[0], vc[2]
             last = {}
             for slug, verdict, _ in vlines:
                 last.pop(slug, None)
@@ -4444,6 +4699,7 @@ def lint_log(a):
         "reviews": [dict({"file": r["file"], "session": r["session"], "result": r["result"],
                           "role": r.get("role"), "scope_id": r.get("scope_id")},
                          **({"superseded": r["superseded"]} if r.get("superseded") else {}),
+                         **({"verdict_correction": r["verdict_correction"]} if r.get("verdict_correction") else {}),
                          **({"scope_read": r["scope_read"]} if r.get("scope_read") else {})) for r in reviews],
         "states": states,
         "provenance": prov,
@@ -5199,6 +5455,19 @@ def checked_main(argv):
         a = parse_args(argv)
         if a["selftest"]:
             return selftest()
+        if a["verdicts"] is not None or a["scope"] is not None:     # request 01 item 2: the write-time verdict slug check
+            if a["verdicts"] is None or a["scope"] is None or any(a[k] not in (None, False) for k in (
+                    "log", "entry", "prd_dir", "decisions", "matrix", "states", "scope_id", "edges", "prds", "consumption", "task",
+                    "page", "prd_home", "reviews", "require_closed", "scope_roots")):
+                usage("--verdicts <verdict file> and --scope <manifest> go together, with --json only")
+            L, obj, ok = verdicts_mode(a)
+            text = [f"FAIL {fid}: {d}" for fid, d in L.findings] or [ok]
+            out = sys.stderr if a["json"] else sys.stdout
+            for t in text:
+                print(t, file=out)
+            if a["json"]:
+                print(json.dumps(obj, separators=(",", ":")))
+            return 1 if L.findings else 0
         if a["consumption"] is not None or any(a[k] not in (None, False) for k in ("task", "page", "prd_home", "reviews", "require_closed")):
             if a["consumption"] is None or any(a[k] not in (None, False) for k in ("log", "entry", "prd_dir", "matrix", "states", "scope_id", "edges", "prds",
                                                                                    "scope_roots")):
