@@ -132,7 +132,12 @@ for s in backlog-coverage-view binding-adoption dependency-milestones grade-corr
   grep -F "FAIL review-verdict-mismatch: slug=swarm-decide-wintermute-$s files=FIX " <<<"$ERRT" >/dev/null || fail "C: $s: $ERRT"
 done
 echo "C head, correction, State as delivered: rc=$RC; the 8 historical FAILs gone; r1's FIX now in the four full slugs' files sequence, which the draft's State omits (4 review-verdict-mismatch); E4 unchanged"
-variant D; standin_row D; correction D; state_with_r1 D; lintns D "$T/head.sh"
+variant D; standin_row D; correction D; state_with_r1 D
+mkdir -p "$OUTD/D.inputs"            # what D adds to the delivered inputs, kept for an independent verifier
+cp "$T/D/work/dream-PRDs/$R1.verdicts.corrected-1.jsonl" "$OUTD/D.inputs/"
+tail -1 "$T/D/decisions.jsonl" > "$OUTD/D.inputs/standin-launch-row.jsonl"
+diff "$FX/dream-run-4/dream-log-with-draft.md" "$T/D/dream-run-4/dream-log-with-draft.md" > "$OUTD/D.inputs/dream-log-with-draft.state.diff"
+lintns D "$T/head.sh"
 [ "$RC" = 1 ] && [ "$ERRT" = "$E4" ] || fail "D: rc=$RC, not exactly the E4 FAIL: $ERRT"
 python3 -I - "$T/D/work/dream-PRDs/notes/missions/wintermute-increment2-backlog-bindings.edges.jsonl" <<'PY' || fail "D: E4 is not unknown"
 import sys, json
