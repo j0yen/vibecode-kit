@@ -67,7 +67,7 @@
 #   control-mutants-missing control-mutant-survived
 #   review-correction-grammar review-correction-foreign review-correction-self review-correction-unlaunched
 #   review-correction-original-changed review-correction-lines-mismatch review-correction-verdict-changed
-#   review-correction-slug-unscoped review-correction-slug-undenoted
+#   review-correction-slug-unscoped review-correction-slug-undenoted review-correction-noop
 #   verdict-slug-unscoped verdict-lines-missing   (--verdicts only)
 #
 # Verdict correction (A1296 Increment-2 request 01, e9d18227; owner the A1723 lint lineage 03415): a review file is never
@@ -79,11 +79,14 @@
 # launch rows for the Task a launch with skill dream, role review and the original review row's scope_id, no resume, stamped after
 # the original review's launch; the original byte-unchanged; each slug's PRD-<slug>.md in the original manifest (read at the row's
 # scope, canonicalizing to its scope_id) and the one its token denotes (the token itself when scoped, else the only scoped slug
-# ending -<token>). Each failed condition is its own review-correction-* id; a refused file is not read and the original's
-# findings stand. A read correction gives the Review: line its slugs for the scope, snapshot, verdict-sequence, superseded-pin and
-# per-PRD verdict checks; result= is still compared with the original text, the JSON's review keeps the original text and adds
-# verdict_correction, the highest valid n is read, and its session dates no freeze in the control-mutant newest-freeze rule (its
-# launch reviews no round). The failure floor (R4) still reads the verdict files as written. --verdicts is the write-time check
+# ending -<token>), at least one slug differing from its line's first token (else review-correction-noop). Each failed condition is
+# its own review-correction-* id; a refused file is not read and the original's findings stand. A read correction gives the Review:
+# line its slugs for the scope, snapshot, verdict-sequence, superseded-pin and per-PRD verdict checks; result= is still compared
+# with the original text, the JSON's review keeps the original text and adds verdict_correction, and the highest valid n is read.
+# The correcting session's launch is a review launch: the control-mutant newest-freeze rule dates the corrected review's freeze by
+# it like any other (a correction launch and a re-review launch have one decisions-row shape, review 4323f3ad F1), so a correction
+# of an earlier freeze's review is control-mutants-missing until a later review launch of the last listed manifest, listed on a
+# Review: line, dates that manifest newest again. The failure floor (R4) still reads the verdict files as written. --verdicts is the write-time check
 # the chain-review step runs on a verdict file or its result.json capture against the review's manifest.
 #
 # Mission (PRD-dream-mission-edge-map): opt-in. A Mission: line names the mission's edge map
@@ -577,7 +580,7 @@ VCORR_HEAD = ("corrects", "sha256", "session", "corrected_by")
 VCORR_ROW = ("line", "slug", "verdict")
 VCORR_IDS = ("review-correction-grammar", "review-correction-foreign", "review-correction-self", "review-correction-unlaunched",
              "review-correction-original-changed", "review-correction-lines-mismatch", "review-correction-verdict-changed",
-             "review-correction-slug-unscoped", "review-correction-slug-undenoted")
+             "review-correction-slug-unscoped", "review-correction-slug-undenoted", "review-correction-noop")
 
 
 def review_launch_row(rv, rows, task, governed, rsess):
@@ -608,8 +611,10 @@ def verdict_correction(rv, full, vlines, rrow, rows, task, rsess, others, resolv
     session is fresh: neither the reviewer, the note's Route session nor another Review: line's session; every launch row it has
     for the Task is a launch with skill dream, role review, the original review row's scope_id, no resume, stamped after the
     original review's launch; the original file still hashes to sha256; each slug's PRD-<slug>.md is in the original manifest
-    (read at the row's scope, canonicalizing to its scope_id) and is the one its token denotes (vc_denotes). Each refused file is
-    one review-correction-* id per reason (VCORR_IDS). Pure. -> (corrected vlines of the highest valid n or None,
+    (read at the row's scope, canonicalizing to its scope_id) and is the one its token denotes (vc_denotes); at least one slug
+    differs from its line's first token (a no-op is review-correction-noop, review 4323f3ad F2). Each refused file is
+    one review-correction-* id per reason (VCORR_IDS). The correcting session's launch is a review launch like any other (the
+    control-mutant newest-freeze rule dates its freeze by it, read or not: review 4323f3ad F1). Pure. -> (corrected vlines of the highest valid n or None,
     [(finding id, detail)], the JSON record or None). A corrected vline keeps the original normalized text as its third element,
     so result= is still compared with the original text."""
     d, base = os.path.dirname(full), os.path.basename(full)
@@ -682,6 +687,9 @@ def verdict_correction(rv, full, vlines, rrow, rows, task, rsess, others, resolv
         if why:
             probs += why
             continue
+        # review 4323f3ad F2: a correction changes at least one slug; one whose every slug is its line's first token corrects nothing
+        if body and all(r["slug"] == (r["line"].split() or [""])[0] for r in body):
+            bad("review-correction-noop", "every row's slug is its line's first token: the record corrects nothing")
         # the review it corrects
         same_file = head["corrects"] == rv["file"] or os.path.realpath(resolve(head["corrects"])) == os.path.realpath(full)
         if not same_file:
@@ -1734,7 +1742,7 @@ def cm_after_read(mrec, rows=None, task=None):
     return any(d is None or d >= since for d in (cm_date(x, rows, task) for x in (mrec or {}).get("earlier") or []))
 
 
-def control_mutant_check(L, mans, ts, later, previous, drows=None, task=None, skip=()):
+def control_mutant_check(L, mans, ts, later, previous, drows=None, task=None):
     """Five-whys page e784471d mechanism 2 (owner 03415, consumption row E784-M2), for an entry whose date is at or after
     CONTROL_MUTANTS_SINCE: the latest of its header ts (an unreadable one counts as after) and `later`, its Route decision= instant and its
     bound review launches (review lint-e784 F5: a backdated header alone does not take an entry out), and CONTROL_MUTANTS_SINCE itself when
@@ -1749,8 +1757,7 @@ def control_mutant_check(L, mans, ts, later, previous, drows=None, task=None, sk
     refused and listed in `unread` (review lint-e784c P2: its round is not the one read). Both sides are dated by the same rows of
     `drows`, the decision rows, bound to this entry or not, since its author chooses the Review: lines (review lint-e784d Q1, lint-e784e
     R1); a review launch is a session's last launch row of the Task when its role is review, as bind_reviews and cm_date take it (review
-    lint-e784e R3). `skip`: the sessions of the verdict corrections read for this entry's Review: lines (request 01): such a session's
-    launch reviews no round, so it dates no freeze; a correction that is not read leaves its session's launch rows in. -> {"manifest",
+    lint-e784e R3). -> {"manifest",
     "previous", "checked", "missing", "unreadable", "survived", "unread"}, or None when nothing here applies."""
     t, since = parse_iso(ts or ""), parse_iso(CONTROL_MUTANTS_SINCE)
     if not mans or mans[-1].get("id") is None:
@@ -1821,8 +1828,7 @@ def control_mutant_check(L, mans, ts, later, previous, drows=None, task=None, sk
                    f"{why} (five-whys page e784471d mechanism 2)")
     last = {}
     for r in drows or []:
-        if r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("task_id") == task and r.get("session") \
-                and r.get("session") not in skip:
+        if r.get("decision") == "launch" and r.get("skill") == "dream" and r.get("task_id") == task and r.get("session"):
             last[r.get("session")] = r
     rl = [r for r in last.values() if r.get("role") == "review" and launch_ts(r) is not None]   # lint-e784e R3: bind_reviews' reviews
 
@@ -4637,8 +4643,7 @@ def lint_log(a):
             mfields, deps, vr = chain_review(L, mrec, mans, chain, rows, governed, task, adv, states, reviews, home, resolve)
             cm = control_mutant_check(L, mans, entry["ts"], [route["decision"] if route else None] + [b["row"].get("ts") for b in bound]
                                       + ([CONTROL_MUTANTS_SINCE] if cm_after_read(mrec, rows, task) else []),
-                                      cm_previous(mrec, mans, resolve, rows, task), rows, task,     # five-whys page e784471d mechanism 2
-                                      {rv["verdict_correction"]["corrected_by"] for rv in reviews if rv.get("verdict_correction")})
+                                      cm_previous(mrec, mans, resolve, rows, task), rows, task)     # five-whys page e784471d mechanism 2
             if cm is not None and mfields is not None:
                 mfields["control_mutants"] = cm
             # PRD-dream-failure-class-sweep R1-R8: repairs between chain reviews, their holds

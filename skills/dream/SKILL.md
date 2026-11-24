@@ -421,12 +421,14 @@ corrected only by a fresh review session: one launched through the launcher with
 file's sha256>, "session": <its reviewer session>, "corrected_by": <the fresh session>}`. Then comes one row
 `{"line": <the original verdict line>, "slug": <the full slug>, "verdict": <the original word>}` per original verdict line, in
 order. The full slug is the token itself when the manifest lists it, else the only listed slug ending `-<token>`. The
-correction adds no verdict, changes no verdict word and drops no line. The lint reads it for that `Review:` line's slugs, keeps
-the original text in its JSON and in the `result=` comparison, and dates no freeze by the fresh session's launch. It refuses any
-other correction, one id per failed condition: `review-correction-self`, `review-correction-unlaunched`,
+correction adds no verdict, changes no verdict word and drops no line, and it changes at least one slug. The lint reads it for that
+`Review:` line's slugs and keeps the original text in its JSON and in the `result=` comparison. The fresh session's launch is a
+review launch like any other: a correction of an earlier freeze's review makes that freeze the newer one for the control-mutant
+rule (`control-mutants-missing`) until a later review of the last listed manifest is launched and listed on a `Review:` line. It
+refuses any other correction, one id per failed condition: `review-correction-self`, `review-correction-unlaunched`,
 `review-correction-verdict-changed`, `review-correction-lines-mismatch`, `review-correction-slug-unscoped`,
-`review-correction-slug-undenoted`, `review-correction-original-changed`, `review-correction-foreign` and
-`review-correction-grammar`. The note's `State:` tokens then carry the corrected verdicts in `Review:` line order. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
+`review-correction-slug-undenoted`, `review-correction-original-changed`, `review-correction-foreign`,
+`review-correction-grammar` and `review-correction-noop` (every slug already its line's token). The note's `State:` tokens then carry the corrected verdicts in `Review:` line order. An APPROVE binds to the snapshot's bytes: the lint compares each APPROVE
 slug's current PRD file with the digest in its reviewer's `review.snapshot` manifest, so a
 later edit to that PRD needs a new review (FIX and REJECT are not pinned). On a note whose
 `Mission:` line carries `scope=`, only the latest chain review (in `Review:` line order)
